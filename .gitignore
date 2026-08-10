@@ -1,0 +1,55 @@
+# ---------------------------------------------------------------------------
+# Secrets — nothing here ever reaches a commit.
+# CLAUDE.md section 3: verify this file before commit #1.
+# ---------------------------------------------------------------------------
+.env
+.env.*
+!.env.example
+
+# Google service-account keys. Named several ways in the wild; block all of
+# them, and keep the real key outside the repo tree entirely (ARCHITECTURE.md
+# section 7).
+*service-account*.json
+*service_account*.json
+*-key.json
+credentials.json
+client_secret*.json
+
+# canva_autofill_spike.py caches OAuth access/refresh tokens next to itself.
+.canva_tokens.json
+
+# ---------------------------------------------------------------------------
+# Python
+# ---------------------------------------------------------------------------
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.venv/
+venv/
+env/
+
+# ---------------------------------------------------------------------------
+# Tooling caches
+# ---------------------------------------------------------------------------
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# ---------------------------------------------------------------------------
+# Editors and OS
+# ---------------------------------------------------------------------------
+.idea/
+.vscode/
+.DS_Store
+
+# ---------------------------------------------------------------------------
+# Gable working output — generated xlsx batches and streamed photo temp files.
+# ---------------------------------------------------------------------------
+out/
+tmp/
+*.xlsx

@@ -1,0 +1,133 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "gable"
+version = "0.1.0"
+description = "Slack-native agent that turns listing form submissions into Canva Bulk Create files."
+readme = "README.md"
+# CLAUDE.md section 9 sets the floor. The droplet's distro Python decides the
+# real ceiling, so nothing here may use syntax newer than 3.11.
+requires-python = ">=3.11"
+license = { text = "Proprietary" }
+
+# Runtime dependencies. Each one is either named explicitly in CLAUDE.md
+# section 2.6 or required by a stage in ARCHITECTURE.md section 4.
+dependencies = [
+    "httpx>=0.27",                    # HTTP with first-class timeouts (5.4)
+    "tenacity>=8.2",                  # bounded retry + jittered backoff (5.4)
+    "pydantic>=2.7",                  # row validation into models.py
+    "slack-bolt>=1.18",               # Socket Mode app (ARCHITECTURE 2.2)
+    "openpyxl>=3.1",                  # Bulk Create xlsx (ARCHITECTURE 2.4)
+    "google-api-python-client>=2.130", # Sheets + Drive
+    "google-auth>=2.29",              # service-account credentials
+    "boto3>=1.34",                    # DigitalOcean Spaces is S3-compatible
+    "pillow>=10.3",                   # photo normalize: JPEG, resize, EXIF strip
+    "python-ulid>=2.5",               # Runs.run_id (ARCHITECTURE 3.3)
+    "python-dotenv>=1.0",             # load .env once in config.py
+    "requests>=2.32",                 # canva_autofill_spike.py only
+]
+
+[project.optional-dependencies]
+dev = [
+    "ruff>=0.5",
+    "mypy>=1.10",
+    "pytest>=8.2",
+    "types-requests",
+    "types-openpyxl",
+    "boto3-stubs[s3]",
+]
+
+[project.scripts]
+gable = "gable.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/gable"]
+
+# ---------------------------------------------------------------------------
+# ruff
+# ---------------------------------------------------------------------------
+
+[tool.ruff]
+# RECOMMENDATION: 100 rather than ruff's default 88. The prose in CLAUDE.md
+# wraps at 80, but annotated signatures and documentation URLs in comments
+# (required by section 5.3) do not fit in 88 without ugly breaks.
+line-length = 100
+target-version = "py311"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = [
+    "E", "W",   # pycodestyle
+    "F",        # pyflakes
+    "I",        # import order
+    "N",        # pep8-naming
+    "UP",       # pyupgrade
+    "B",        # bugbear
+    "A",        # shadowed builtins
+    "C4",       # comprehensions
+    "SIM",      # simplify
+    "RET",      # return consistency
+    "ARG",      # unused arguments
+    "PTH",      # prefer pathlib
+    "TID",      # tidy imports
+    "ANN",      # annotations everywhere (CLAUDE.md 5.2)
+    "D",        # docstrings everywhere (CLAUDE.md 5.3)
+    "RUF",
+]
+ignore = [
+    "D203",     # conflicts with D211; D211 is the modern choice
+    "D213",     # conflicts with D212; D212 is the modern choice
+]
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"
+
+[tool.ruff.lint.flake8-tidy-imports]
+ban-relative-imports = "all"
+
+[tool.ruff.lint.per-file-ignores]
+# The spike's entire design is "response shapes are unverified, so walk them
+# with Any and dig()" — see its module docstring. ANN401 would force a lie.
+# D405/D416 flag its ALL-CAPS prose headers as malformed numpydoc sections;
+# they are not sections, and renaming one of five headers to satisfy a linter
+# would make the file read worse.
+"canva_autofill_spike.py" = ["ANN401", "D405", "D416"]
+# Tests are self-describing; docstrings on every assertion helper are noise.
+"tests/*" = ["D103", "D100"]
+
+# ---------------------------------------------------------------------------
+# mypy
+# ---------------------------------------------------------------------------
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+files = ["src", "tests", "canva_autofill_spike.py"]
+warn_unreachable = true
+# A missing annotation must fail loudly rather than degrade to Any.
+disallow_any_unimported = true
+
+# Narrow per-module stub exemptions only. Never set this globally
+# (CLAUDE.md section 5.2).
+[[tool.mypy.overrides]]
+module = [
+    "googleapiclient.*",
+    "google.oauth2.*",
+    "slack_bolt.*",
+    "slack_sdk.*",
+    "ulid.*",
+]
+ignore_missing_imports = true
+
+# ---------------------------------------------------------------------------
+# pytest
+# ---------------------------------------------------------------------------
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q --strict-markers"
+markers = [
+    "integration: touches a real external service; skipped without credentials",
+]
