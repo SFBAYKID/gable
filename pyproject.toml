@@ -104,7 +104,7 @@ ban-relative-imports = "all"
 [tool.mypy]
 python_version = "3.11"
 strict = true
-files = ["src", "tests", "canva_autofill_spike.py"]
+files = ["src", "tests", "spikes", "canva_autofill_spike.py"]
 warn_unreachable = true
 # A missing annotation must fail loudly rather than degrade to Any.
 disallow_any_unimported = true
@@ -127,6 +127,9 @@ ignore_missing_imports = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# `spikes` is a repo-root package that is deliberately not installed into the
+# wheel, so tests need the repo root on sys.path to import it.
+pythonpath = ["."]
 addopts = "-q --strict-markers"
 markers = [
     "integration: touches a real external service; skipped without credentials",
