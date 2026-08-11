@@ -2,11 +2,13 @@
 
 Last updated 2026-08-10 by the building agent.
 
-**Phase 1 is blocked on one credential and two decisions.** The Canva dead end is
-resolved — Gable renders in Google Slides now (D1 below). Five of six credentials
-are live and verified; the **Google service account** is the one that is not, and
-nothing in the pipeline can read the Sheet without it. This file is the whole
-picture in one page.
+**Every credential is live and verified. Phase 1 is unblocked.** The Canva dead
+end is resolved — Gable renders in Google Slides now (D1 below) — and as of
+2026-08-10 the Google service account exists, holds access, and has driven the
+full render path end to end against the real shared drive.
+
+What remains is not a credential. It is **one template and one design decision**
+(§4). This file is the whole picture in one page.
 
 ---
 
@@ -52,9 +54,26 @@ split. The flyer template displays a price; nothing in the form supplies one.
 Under Contract, Client Review Post, New Listing with Open House), postcard
 category, video assets.
 
-**Also:** no `Agents` tab and no `Runs` tab exist — only `Form Responses 1` and
-`Sheet1`. Columns F–I appeared empty on every visible row, including
-`Upload photos`. Every visible row is struck through.
+**Corrected 2026-08-10, read through the service account.** The earlier note
+here said the workbook held only `Form Responses 1` and `Sheet1`, and listed 9
+columns. Both were wrong — that reading came from the browser, before API access
+existed.
+
+The form has **20 columns**, not 9. The full list is in `ARCHITECTURE.md` §3.1.
+Three things in it change the design:
+
+- **Photos are collected.** `Upload photos` and `Upload high-resolution property
+  photos (up to 5 images)`. The hero image may often already be attached, which
+  moves the photo cascade's common case from "hunt for it" to "read it".
+- **Two address columns.** One for postcards, one for social. The form branches
+  on `Select your request type`, serving postcards, video *and* social in a
+  single submission.
+- **Two price columns**, neither of them a list price: `New price (if price
+  improvement)` and `Closing price (for sold posts only)`.
+
+The second tab is **`Sales_People`**, not `Sheet1`, and it is not empty — header
+on row 2, one row: `lolo@cornerhouserealty.com | Lolo  | Simmons | 1`. `Runs`
+and `Templates` still do not exist.
 
 ---
 
@@ -115,23 +134,31 @@ value — run it after any `.env` change.
 |---|---|---|
 | Slack app from `slack/manifest.yml` → bot + app tokens | Any Slack output | **Done** — `auth.test` ok (team Monarch, bot `@gable`); Socket Mode ticket issued |
 | Firecrawl API key | Agent verification | **Done** — key valid, 2548 credits |
-| OpenAI image key | Reprocessing a real photo; policy-gated generation | **Done** — key valid, `gpt-image-1` visible |
+| OpenAI image key | Reprocessing a real photo; policy-gated generation | **Done** — key valid, **`gpt-image-2`** available (newest: `gpt-image-2-2026-04-21`) |
 | Anthropic key | Reading requests, drafting copy, Slack change requests | **Done** — key valid |
 | Droplet + SSH key | Running unattended | **Done** — `gable`, Ubuntu 24.04, 1 vCPU / 1 GB, swap active, Python 3.12.3 |
-| **Google service-account JSON + Sheet and shared-drive access** | **Reading the sheet — everything depends on it** | **BLOCKING. Not created.** `/opt/gable/secrets/` exists on the droplet and is empty; no key locally either |
+| **Google service-account JSON + Sheet and shared-drive access** | Reading the sheet — everything depends on it | **Done** — `gable-agent@gable-505204`, key at `~/.gable/` (mode 600). Sheet readable, shared drive writable, Slides round-trip verified. **Not yet on the droplet** |
 | Spaces bucket + keys | Photo hosting | **Not created** |
 | `channels:read` scope (optional) | Letting the checker verify the channel id | Not granted; posting does not need it |
 
-**The Google service account is now the only credential standing between the
-pipeline and a live run.** `.env.example` §"Google" lists the four setup steps in
-order — the two shares (Sheet *and* shared drive) are both required, because a
-service account inherits nothing.
+**Every credential is now live.** The Google account was created 2026-08-10 in
+its own `gable-505204` project with Sheets, Drive and Slides enabled, no project
+IAM roles, and access granted purely by the two Drive shares. It has been
+exercised against the real drive: create → `batchUpdate` → `replaceAllText`
+(`occurrencesChanged: 1`) → `getThumbnail` at 1600px, cleaning up after itself.
+
+Two things still outstanding on it, neither blocking local work:
+
+- The key exists **only on this Mac**. Copying it to `/opt/gable/secrets/` on the
+  droplet is a deploy step, not a build step.
+- Spaces is still unconfigured, so there is no public HTTPS host for a hero photo
+  yet. `replaceAllShapesWithImage` needs one. This is the next real gap.
 
 ---
 
 ## 5. What is built and green
 
-`ruff format --check`, `ruff check`, `mypy --strict`, `pytest` — **284 passing**.
+`ruff format --check`, `ruff check`, `mypy --strict`, `pytest` — **323 passing**.
 No file over 800 lines (largest: `config.py` at 463). `mypy` covers `src`,
 `tests` and `tools`.
 
@@ -160,15 +187,19 @@ Spike A resolved against the design, the build stopped rather than silently
 redesigning around it (CLAUDE.md §2.6), and D1 was then answered by leaving Canva
 entirely for Google Slides. That unblocked the renderer, which is built.
 
-What blocks the rest is no longer a decision — it is a credential:
+The credential blocker is gone. `sheets/client.py`, `sheets/repository.py`, the
+poller and the orchestrator can now all be written against a real Sheet. What is
+left is genuinely about the product:
 
-1. **Google service account** (§4). Without it Gable cannot read the Sheet, so
-   `sheets/client.py`, `sheets/repository.py`, the poller, and the orchestrator
-   have nothing to be written against. This is the critical path.
-2. **D2 and D3** still shape what those modules do — which request types are in
-   scope, and whether Gable may create the `Agents` and `Runs` tabs.
-3. **The Slides template** with its `{{...}}` placeholders has to exist in the
-   shared drive before `slides/client.py` has anything to copy.
+1. **The Slides template.** The `Templates` folder in the shared drive is
+   **empty**. Nothing can be copied until one template with `{{...}}` placeholders
+   is in it. Chase is providing the first one.
+2. **D2 — which request types are in scope.** The form serves postcards, video
+   *and* social in one submission and branches on `Select your request type`.
+   `normalize.py` currently assumes one shape. This is the decision that most
+   changes the code.
+3. **D3 — may Gable create the `Runs` and `Templates` tabs?** Both are absent.
+   Gable appends to `Runs` for idempotency, so something has to create it.
+4. **Photo hosting.** Spaces is unconfigured; Slides needs a public HTTPS URL.
 
-**Create the service account and (1) unblocks; answer D2 and D3 and the rest
-follows.**
+**(1) is arriving. (2) is the one worth deciding carefully.**

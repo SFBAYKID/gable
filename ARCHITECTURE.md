@@ -29,7 +29,7 @@ An agent — say **Lolo Simmons** — submits the form.
 
 1. **Poll.** Gable reads `Form Responses 1` on the §2.6 schedule and sees a new
    row: name, email, address, listing details.
-2. **Identify.** It joins to `Salespeople` on first name, last name and email,
+2. **Identify.** It joins to `Sales_People` on first name, last name and email,
    resolving *Lolo Simmons → Template 1*, plus her phone number and headshot.
 3. **Fetch the template.** Template 1 is copied from the shared drive.
 4. **Ask for the hero image.** Gable posts in Slack — *"New listing for Lolo
@@ -59,7 +59,7 @@ Google Form ─────────► Google Sheet
                  │    ↓                     │
                  │  normalize ──────────────┼─► ASK if a field is missing ─┐
                  │    ↓                     │                              │
-                 │  identify agent ─────────┼─► Salespeople → template     │
+                 │  identify agent ─────────┼─► Sales_People → template    │
                  │    ↓                     │                              │
                  │  ASK for hero image ─────┼──────────────────────────────┤
                  │    ↓                     │                              │
@@ -228,15 +228,38 @@ agent phone. Nothing in the form supplies a price the post displays. See §5.
 `listings/normalize.py` keeps this mapping as data (`ColumnMap`), so a renamed or
 reordered question is a configuration change rather than a code change.
 
-### 3.2 Tab `Salespeople` — identity and template map
+### 3.2 Tab `Sales_People` — identity and template map
 
 The join that turns "Lolo Simmons" into a template, a phone number and a
 headshot. Matched on **first name, last name and email** — email alone is the
 primary key, but the name columns are what a human reads when correcting a row.
 
+**What is actually in the live tab, read 2026-08-10 through the service
+account.** The tab exists and is named `Sales_People` (underscore), not
+`Salespeople`. It has four columns and one data row:
+
+| | A | B | C | D |
+|---|---|---|---|---|
+| row 1 | *(blank)* | | | |
+| row 2 | `Email` | `First Name` | `Last Name` | `Template` |
+| row 3 | `lolo@cornerhouserealty.com` | `Lolo ` | `Simmons` | `1` |
+
+Three things in that to build against, not around:
+
+- **The header is on row 2.** Row 1 is blank. Anything that assumes `A1` is the
+  header reads an empty row and matches nothing. Find the header row by content.
+- **`Lolo ` carries a trailing space.** Real data from a real form. Every join
+  key gets trimmed before comparison, or Lolo never matches herself.
+- **`Template` holds `1`, not a Drive file id.** It is a human's shorthand. The
+  mapping from `1` to a real template file does not exist yet — that is what the
+  `Templates` tab in §3.2b is for, and it is the next thing to build.
+
+The columns below are the target shape. Everything past `Template` is absent
+today and must be added before the feature that reads it ships.
+
 | Column | Type | Notes |
 |---|---|---|
-| `first_name` | str | Display name on the post |
+| `first_name` | str | Display name on the post. Trim on read |
 | `last_name` | str | |
 | `email` | str | Primary key, lowercased on read |
 | `phone` | str | **Not collected by the form.** Lives here so it is entered once per agent, not once per listing. Rendered as `(818) 259-7432` |
@@ -337,7 +360,7 @@ It never invents a value and never silently drops a field. Status is
 and re-enters on `/gable run`.
 
 Where the answer belongs to the agent rather than the listing — a phone number,
-a headshot — Gable offers to write it to `Salespeople` so it is asked once ever
+a headshot — Gable offers to write it to `Sales_People` so it is asked once ever
 rather than once per listing.
 
 ### 4.3 Verify (`listings/verify.py`)
@@ -442,7 +465,7 @@ address is not a stylistic choice.
 
 ### 4.6 Look up template (`sheets/repository.py`)
 
-`email` → `Salespeople` row → `slides_template_id`. Unknown agent, or `active`
+`email` → `Sales_People` row → `slides_template_id`. Unknown agent, or `active`
 false, pauses the listing as `needs_template` and asks in Slack.
 
 ### 4.7 Render (`slides/renderer.py` + `slides/client.py`)
@@ -550,7 +573,7 @@ Two rules keep this from being noise:
 
 The model is given tools — look up an agent, fetch a template, reprocess an
 image, render, re-render one field, ask a question, write a value back to
-`Salespeople` — and decides which to call.
+`Sales_People` — and decides which to call.
 
 That is what lets Carmen say *"make the price bigger and use the other photo"*
 and have it work, without anyone having anticipated that sentence. A branching
@@ -684,6 +707,12 @@ Named so nobody wastes time adding them:
 | 2026-08-10 | Image model pinned to **`gpt-image-2`** via `GABLE_IMAGE_MODEL` | Verified available to the key against `/v1/models` and the images endpoint. Fitting a phone photo to a 1080×1350 frame is the hardest task in the product and gets the newest model. An earlier report claiming only `gpt-image-1` was a display bug in the checker — it sorted ascending, so `gpt-image-1` appeared newest. |
 | 2026-08-10 | **Gable inspects its own render before delivering** (§4.7b) | The failure mode is silent: every API call can succeed while the roofline is cropped off. The API cannot see that; a vision pass over the rendered thumbnail can. This is why the Anthropic key matters as much as the image key — one model makes the picture fit, the other checks whether it did. |
 | 2026-08-10 | Asking for missing fields is a first-class stage (§4.3b) | The form collects no price, phone or beds/baths, and its address column is empty on every observed row. "A required field is absent" is the normal path, so it gets a named status (`needs_info`), a specific question, and a pause — not a failure. |
+| 2026-08-10 | **Corrects the row above:** the tab is `Sales_People`, not `Salespeople` | Read live through the service account once Google access existed. The earlier row named a tab that does not exist — the guess was close enough to look right and wrong enough to return nothing. Config now carries the literal live name. |
+| 2026-08-10 | `Sales_People` headers are on **row 2**; row 1 is blank | Observed, not assumed. Any reader that treats `A1` as the header row matches nothing and reports "no agents" on a tab that has agents. The header row is found by content. |
+| 2026-08-10 | Every `Sales_People` join key is **trimmed before comparison** | The one live row holds `"Lolo "` with a trailing space. Untrimmed, Lolo never matches herself and every one of her listings pauses as an unknown agent. |
+| 2026-08-10 | Google service account has **no project IAM roles** | All of its access comes from two Drive shares — the intake Sheet as Editor, the `Gable` shared drive as Contributor. Its blast radius is exactly those two things and nothing else in the `monarchconnected.com` org. |
+| 2026-08-10 | Contributor, not Content manager, on the shared drive | Verified capability: `canDelete: false, canTrash: true`. Gable never permanently deletes (CLAUDE.md §11), so the weaker grant is sufficient and is the one to keep. Cleanup uses `trashed: true`, never `files.delete`. |
+| 2026-08-10 | The whole Slides render path is **verified live**, not assumed | Create in the shared drive → `batchUpdate` → `replaceAllText` returning `occurrencesChanged: 1` → `getThumbnail` at 1600px. The 0-quota trap of §2.4 was specifically tested and does not fire inside the shared drive. |
 
 Append to this table. Do not rewrite history — if a decision reverses, add a new
 row explaining why. `CLAUDE.md` §2.7 makes this mandatory rather than polite.
