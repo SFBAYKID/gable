@@ -280,7 +280,7 @@ are visible to a person skimming a thumbnail.
 | | Was | Now |
 |---|---|---|
 | hero frame found | 33/45 | **39/45** |
-| headshot frame found | — | 9/45 |
+| headshot frame found | — | **37/45** |
 
 The hero rule required a photo well to span 60% of the slide width, on the
 belief that the hero is always a full-bleed top band. Twelve designs put it in a
@@ -289,9 +289,13 @@ Those are photos. The headshot frames on the same designs measure 21% to 34% and
 sit two thirds of the way down, so the two groups are well separated and the
 threshold now sits between them at 40%.
 
-**Headshot detection at 9/45 is the next thing to look at.** Most of these
-designs show an agent photo, so the rule is too strict somewhere — most likely
-the overlap rejection, which was added to stop a face landing on decorative
-artwork and may now be rejecting frames that are merely adjacent to it. It
-should be measured against the deck the same way the hero rule just was, not
-tuned by guessing.
+Headshot detection was 9/45 and the cause was measured rather than guessed:
+**29 of the 45 were rejected by the overlap check**, which is what the guess
+would have been, but measuring turned it into a specific fix rather than a
+threshold nudge.
+
+The check rejected a frame if *any* element intersected it. Only elements drawn
+**on top** can be covered by a photo placed into the frame, and `pageElements`
+is in z-order — so everything before the frame sits behind it and is irrelevant.
+A headshot well naturally sits over a background panel it is in no danger of
+hiding. Considering only what is above took it to **37/45**.
