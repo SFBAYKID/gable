@@ -41,10 +41,46 @@ SAMPLE_AGENT_NAMES: Final[tuple[str, ...]] = (
 
 #: Field name -> patterns that mean it, most specific first. Bracketed forms are
 #: matched before bare words so "[PRICE]" is not consumed by the "price" rule.
+#: Every sample contact detail found in Carmen's 69-page master design, read
+#: from a PDF export on 2026-08-11 rather than guessed. These are **real Corner
+#: House agents' real numbers and addresses**, left in the designs as sample
+#: content, and any of them will print on another agent's flyer if the slot is
+#: not filled. One already reached a delivered flyer.
+SAMPLE_CONTACTS: Final[tuple[str, ...]] = (
+    "443.326.7170",
+    "410-564-6618",
+    "410.952.6193",
+    "443-799-6881",
+    "443.605.5081",
+    "443-986-0789",
+    "410.456.6868",
+    "808.225.8640",
+    "410-999-9999",
+    "kelli@cornerhouserealty.com",
+    "louis@cornerhouserealty.com",
+    "kirby-jay@cornerhouserealty.com",
+    "name@cornerhouserealty.com",
+    "sabbotthomes@gmail.com",
+    "melissasellsmd@gmail.com",
+)
+
+#: Sample agent and client names in the master design, beyond the ones already
+#: known. Same risk: a real person's name on somebody else's listing.
+SAMPLE_PEOPLE: Final[tuple[str, ...]] = (
+    "Regina Smith",
+    "Louis Smith",
+    "Jason Vetter",
+    "Kelli Kulnich",
+    "Melissa Hargreaves",
+    "Olivia Wilson",
+    "Realtor Name",
+)
+
 PATTERNS: Final[dict[str, tuple[re.Pattern[str], ...]]] = {
     "address": (
         re.compile(r"^\[\s*PROPERTY ADDRESS\s*\]$", re.IGNORECASE),
         re.compile(r"^PROPERTY ADDRESS$", re.IGNORECASE),
+        re.compile(r"^Address$"),
         re.compile(r"^\d{1,6}\s+Your\s+Street.*$", re.IGNORECASE),
         re.compile(r"^\[\s*ADDRESS\s*\]$", re.IGNORECASE),
         # "123 ANYWHERE ST., ANY CITY" — a stock placeholder address that is
@@ -144,6 +180,7 @@ PATTERNS: Final[dict[str, tuple[re.Pattern[str], ...]]] = {
         # Chase went out carrying "Kelsey Mahon" — the name was never a token,
         # so nothing replaced it, and the result looked entirely deliberate.
         re.compile(r"^(?:" + "|".join(SAMPLE_AGENT_NAMES) + r")$", re.IGNORECASE),
+        re.compile(r"^(?:" + "|".join(re.escape(v) for v in SAMPLE_PEOPLE) + r")$", re.IGNORECASE),
     ),
     "agent_title": (
         # Designs label the role as well as the name, and the sample text is
@@ -161,13 +198,26 @@ PATTERNS: Final[dict[str, tuple[re.Pattern[str], ...]]] = {
     "neighborhood": (
         re.compile(r"^\[\s*NEIGHBORHOOD(?:\s*NAME)?\s*\]$", re.IGNORECASE),
         re.compile(r"^NEIGHBORHOOD NAME$", re.IGNORECASE),
+        re.compile(r"^\[\s*NEIGHBORHOOD\s*NAME\s*\]$", re.IGNORECASE),
+        re.compile(r"^\[\s*CITY\s*/\s*AREA NAME\s*\]$", re.IGNORECASE),
+        re.compile(r"^\[\s*AREA NAME\s*\]\s*EDITION$", re.IGNORECASE),
     ),
     "agent_phone": (
+        re.compile(
+            r"^(?:C:\s*)?(?:"
+            + "|".join(re.escape(v) for v in SAMPLE_CONTACTS if "@" not in v)
+            + r")$"
+        ),
         re.compile(r"^\[\s*PHONE(?:\s*NUMBER)?\s*\]$", re.IGNORECASE),
         re.compile(r"^Phone$", re.IGNORECASE),
         re.compile(r"^\(?\d{3}\)?[-.\s]\d{3}[-.\s]\d{4}$"),
     ),
     "agent_email": (
+        re.compile(
+            r"^(?:" + "|".join(re.escape(v) for v in SAMPLE_CONTACTS if "@" in v) + r")$",
+            re.IGNORECASE,
+        ),
+        re.compile(r"^\[?\s*EMAIL ADDRESS\s*\]?$", re.IGNORECASE),
         re.compile(r"^\[\s*EMAIL(?:\s*ADDRESS)?\s*\]$", re.IGNORECASE),
         re.compile(r"^Email(?:\s*address)?$", re.IGNORECASE),
         re.compile(r"^[\w.+-]+@[\w-]+\.[\w.]+$"),

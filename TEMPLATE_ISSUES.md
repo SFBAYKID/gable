@@ -77,6 +77,40 @@ renamed in Drive, `catalog.py` has to be updated in the same change.
 
 ---
 
+## 6. A malformed price in the source design — Open, and it reached a flyer
+
+The master design contains **`$525 , 0000`** — four zeros and a stray space.
+Found by extracting the text of all 69 pages on 2026-08-11.
+
+This matters more than a typo. A delivered flyer went out reading **`$460,0000`**
+and it was recorded here as text corruption by the fill logic. It was not. The
+broken number is in the design, and Gable reproduced it faithfully. The
+diagnosis has been corrected.
+
+Search the master design for prices with more than three digits after the comma.
+
+## 7. Real agents' contact details are sample content — Open, and this one is urgent
+
+The designs carry **real Corner House phone numbers and email addresses** as
+their placeholder content:
+
+    Kelli Kulnich        443.326.7170    kelli@cornerhouserealty.com
+    Louis Smith          410-564-6618    louis@cornerhouserealty.com
+    Jason Vetter         410.952.6193    sabbotthomes@gmail.com
+    Melissa Hargreaves                   melissasellsmd@gmail.com
+                         443-799-6881    kirby-jay@cornerhouserealty.com
+                         C: 410.456.6868, C: 808.225.8640, 443.605.5081, 443-986-0789
+
+Any of these prints on another agent's flyer whenever the slot is not filled,
+and one already reached a delivered flyer carrying Jason Vetter's number and a
+personal gmail address.
+
+Gable now recognises every one of them and replaces them, and refuses to deliver
+a flyer carrying a contact detail it did not put there. **Both are safety nets,
+not the fix.** The designs should use obviously fake sample content —
+`555-0100`, `name@example.com` — so that a slot nobody fills is visibly empty
+rather than quietly wrong.
+
 ## How to report a new one
 
 Add a numbered section with: what is wrong, which design and where on it, and
