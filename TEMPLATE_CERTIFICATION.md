@@ -383,3 +383,32 @@ The list, for whoever does that:
     Meet the Agent (3 designs)       AGENT / tagline
     Neighborhood (4 designs)         headings, plus SPOTLIGHT off the top edge
     Under Contract (1 design)        CONTRACT / After Multiple Offers
+
+## Attribution: Gable introduces no text collisions
+
+Every rendered flyer was compared against the blank template it came from, by
+object id, for text boxes overlapping more than 30% of the smaller one.
+
+| | |
+|---|---|
+| flyers with no text collisions at all | 26 |
+| collisions present in the template too | 19 |
+| **collisions Gable introduced** | **0** |
+
+Not one rendered flyer contains a text collision that its design did not already
+have. The overlap category — consistently the largest thing the vision pass
+reported, at 6 to 13 depending on the run — belongs to the designs.
+
+**Scope, stated precisely so this is not over-read.** This measures *text boxes
+overlapping each other*. It does not measure a headshot landing on artwork, a
+photo clipped at an edge, or anything about how the flyer looks. Those remain
+open and some of them are certainly Gable's. What is settled is the single
+largest reported category.
+
+It also matches the one case checked by eye: `Just Listed — Book a Tour` was
+flagged for a logo clipped by the photo, which the template does too, on a flyer
+that had *fixed* the template's own headline collision.
+
+**So a vision-pass overlap complaint should be treated as a template issue until
+shown otherwise**, and `TEMPLATE_ISSUES.md` is where it goes. Spending time
+hunting a placement bug behind one of these is spending it on Carmen's design.
