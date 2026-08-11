@@ -196,11 +196,17 @@ def connect(path: Path | str) -> sqlite3.Connection:
     """
     file = Path(path)
     file.parent.mkdir(parents=True, exist_ok=True)
-    connection = sqlite3.connect(file, timeout=30.0, isolation_level=None)
+    connection = sqlite3.connect(
+        file,
+        timeout=30.0,
+        isolation_level=None,
+        check_same_thread=False,
+    )
     connection.row_factory = sqlite3.Row
-    # WAL lets the poller write while a Slack handler reads, which is the only
-    # concurrency this system has and exactly what the default mode handles
-    # worst.
+    # WAL lets the poller write while a Slack handler uses its own connection.
+    # check_same_thread=False is a final guard against an accidental handoff,
+    # but production still creates one connection per owning thread rather than
+    # concurrently sharing a connection object.
     connection.execute("PRAGMA journal_mode=WAL")
     # Off by default in SQLite, which makes the REFERENCES clauses above
     # decorative rather than enforced.

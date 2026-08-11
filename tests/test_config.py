@@ -50,6 +50,8 @@ def test_defaults_match_dotenv_example() -> None:
     assert settings.photo_max_edge_px == 2400
     assert settings.photo_jpeg_quality == 85
     assert settings.tab_responses == "Form Responses 1"
+    assert settings.tab_agents == "Sales_People"
+    assert settings.db_path == Path("/opt/gable/var/gable.db")
 
 
 def test_slack_channel_defaults_to_the_only_permitted_channel() -> None:

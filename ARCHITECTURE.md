@@ -513,8 +513,10 @@ The client's sequence: copy the template file inside the shared drive, send one
 `batchUpdate`, and leave the result in `GABLE_DRIVE_OUTPUT_FOLDER_ID`. One Slides
 file per request, not per batch — Carmen opens a link, not a spreadsheet.
 
-`slides/client.py` is **not written yet.** It is blocked on the Google service
-account and on a real template existing in the drive.
+The concrete Slides operations now live in `pipeline/live.py`: template copy,
+text replacement, photo placement, text fitting, thumbnail fetch, and batch
+update. Pure request builders remain separate so edits can be tested without
+Google credentials.
 
 ### 4.7b Inspect the render before delivering
 
@@ -578,10 +580,16 @@ convenient reading of an ambiguous instruction.
 Anything slower than a moment gets a status message, updated in place, with some
 personality. Silence reads as broken, and image reprocessing is genuinely slow:
 
-> 🔄 Working on it…
-> 🔄 One sec — fitting the image to the template…
-> 🔄 Shake and bake. Almost there…
-> 🔄 Checking how it turned out…
+> Working on it.
+> One sec — fitting the image to the template.
+> Shake and bake. Almost there.
+> Checking how it turned out.
+
+No emoji, here or anywhere. AGENTS.md §2.0 forbids them and `voice.violations()`
+rejects them at the last gate, so a spinner written with one would never be
+sent. **Not yet implemented:** `runner.say` can only post, not update in place —
+it has no message timestamp to edit. Implementing this needs a second injected
+callable, not just a call site.
 
 Two rules keep this from being noise:
 
@@ -755,3 +763,11 @@ Named so nobody wastes time adding them:
 
 Append to this table. Do not rewrite history — if a decision reverses, add a new
 row explaining why. `CLAUDE.md` §2.7 makes this mandatory rather than polite.
+
+| 2026-08-11 | A design's field set is a **per-template manifest**, not one global column list | Two rendered flyers were reviewed and their field sets differed. Treating them as one shipped a flyer carrying the literal words "Phone" and "Website". `slides/manifest.py` gives each design its own required fields and measured character budgets; a missing required field is a hard stop, not a blank. |
+| 2026-08-11 | **Every image URL is proven before it is emitted**, not trusted because it ends in .jpg | One flyer put the template's own background illustration in the headshot frame because nothing looked at what was behind the link. `photos/verify.py` fetches, checks content type, dimensions and aspect band against the slot. Verified live: a 1080x1350 image is rejected for a landscape slot and accepted for a square one. |
+| 2026-08-11 | The hero slot is **portrait**, not landscape | The Corner House deck is Instagram 4:5 throughout. The slot was briefly typed as landscape, which would have rejected correctly-shaped photos. |
+| 2026-08-11 | Addresses are canonicalised to `street, city, ST ZIP`, and a **missing ZIP is never invented** | A flyer shipped reading "3 Nob Hill Park Dr, Reisterstown, MD" with no ZIP. `normalise_address()` reshapes what is there and refuses to guess what is not; `validate()` stops the run instead. |
+| 2026-08-11 | **Template defects are logged for Carmen, never worked around in code** | Chase's instruction on reviewing two flyers: the "approch" typo, mixed typefaces, the low-contrast logo and panel misalignments belong to the design, not the pipeline. `TEMPLATE_ISSUES.md` records them. A code workaround hides the defect from the person who can fix it and breaks on the next re-export. |
+| 2026-08-11 | Socket Mode connects in the background; the Sheet poller owns the main thread | `Poller.run_forever` installs signal handlers and must run on the main thread. `slackapp.runtime` opens Socket Mode with its non-blocking `connect`, then calls the generic lifecycle in `runtime.py`. Slack event handlers use separate database connections rather than sharing the poller's connection. |
+| 2026-08-11 | Paused and review states suppress polling, and a submission gets at most three fresh attempts | Re-polling `needs_photo` repeated paid research and Slack questions indefinitely. Those states now resume their existing run only after a human response; `start_run` is the hard attempt ceiling. |

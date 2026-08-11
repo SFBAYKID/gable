@@ -2,9 +2,22 @@
 
 Last updated 2026-08-11 by the building agent.
 
-**The pipeline runs end to end.** A sheet row now becomes a finished Google
-Slides flyer with a link posted to Slack, with no human step in between. Proven
-live on two real submissions:
+**Handing off?** The full context — architecture, completed work, the ranked
+bug list, the guardrails and the order of work — is in `GABLE_HANDOFF.md` on
+the Desktop. Read it before touching code.
+
+**The automatic runtime is wired in the working tree and is not deployed yet.**
+`slackapp.runtime` constructs the real Google clients, database, `Poller`, and
+`Runner`; Socket Mode connects in the background while the poller runs on the
+main thread. `cli.py` also runs one guarded pass locally without Slack.
+
+The largest remaining Phase 1 gap is the Slack photo handoff. A new submission
+can automatically enter the runner and pause at `needs_photo`, but a
+`file_share` reply is not yet downloaded, fitted, hosted, and used to resume
+that same run. The production database's backfill flag must also be verified
+before the first deploy of the poller.
+
+Proven live on two real submissions, invoked manually:
 
 - **Row 100** (Lolo Simmons, Under Contract, no closing price) stopped and asked
   *"This one is marked under contract but there is no closing price on it. Do
@@ -17,17 +30,14 @@ live on two real submissions:
 Gable also answers in Slack from the droplet under systemd, and the backfill is
 adopted: 96 historical rows recorded as history, none built.
 
-## The one thing that is not right yet
+## The customer-facing gaps that remain
 
-**A delivered flyer is guaranteed to be complete, not well laid out.** On the
-row 11 flyer the price read `$510,000` in the document and rendered clipped to
-`$510,00`, the address overflowed its box, and the email ran off the bottom of
-the slide. Every value was present, so the quality check passed it.
-
-The text check cannot see layout. Catching this needs the vision pass over the
-rendered thumbnail (ARCHITECTURE.md §4.7b) plus automatic text fitting — the
-same fix applied by hand to Lolo's flyer earlier. That is the next work, and it
-is the difference between a flyer that is correct and one Carmen would post.
+The vision pass, automatic text fitting, field manifest, and image URL verifier
+are built. They are not yet enough to certify all 45 templates visually. Photo
+placement still relies on a frame heuristic, headshot replacement is missing,
+and conversational edits are currently refused honestly rather than executed.
+No flyer should be called demo-ready until the real Slack upload path works and
+the rendered output has been inspected.
 
 ---
 
@@ -116,29 +126,26 @@ record of what was rejected:
 - ~~(b) Phase 2 data-connector app~~ — gated on §4.3 item 4, and it is TypeScript.
 - ~~(c) Canva Enterprise + autofill~~ — real money, quote-only.
 
-**Still open from this:** `slides/client.py` (the I/O half — copy the template,
-send the batch, export) is not written, and the flyer template with its
-`{{...}}` placeholders does not exist in the shared drive yet.
+**Resolved from this:** concrete Slides I/O is implemented in
+`pipeline/live.py`, and the shared drive contains the 45 imported templates.
 
-**D2 — What is in scope, given request types?** Recommendation: Phase 1 handles
-only `New Listing` and `Sold`; everything else is skipped with a Slack notice.
-Serving postcards and video edits too is a different, larger product.
+**D2 — RESOLVED.** The catalogue covers the supported social categories. Form
+notes and request context decide the correct design within a category; building
+that richer selector is current work.
 
-**D3 — May Gable create the `Agents` and `Runs` tabs?** Additive only.
-`Form Responses 1` is never touched. Recommendation: yes — without `Runs` there
-is no idempotency guard and every poll rebuilds every flyer.
+**D3 — RESOLVED.** Derived state lives in SQLite. Gable reads form responses,
+mirrors the salesperson roster, and never modifies the response tab.
 
 ## 3. Questions that shape the build
 
-**Q1** — Why are the address and photo columns empty? Broken required-ness, or do
-agents send these another way? This decides whether photo resolution is the
-product's core or a fallback.
+**Q1 — RESOLVED.** The form branches across request types and the eleven
+relevant columns are explicitly mapped in `listings/intake.py`.
 
-**Q2** — Where do Price and Description come from? Recommendation: add two
-questions to the form. Cheapest fix by a wide margin.
+**Q2 — RESOLVED.** Public property facts are researched and cached. Closing
+price and other genuinely unknowable or contradictory values are asked about.
 
-**Q3** — Does strikethrough mean "already handled"? If so it is a completion
-signal worth reading rather than guessing at.
+**Q3 — RESOLVED.** SQLite run state, not Sheet formatting, is the idempotency
+authority. Historical rows must be adopted before polling can start.
 
 ## 4. Credentials — Chase only
 
@@ -156,8 +163,8 @@ value — run it after any `.env` change.
 | OpenAI image key | Reprocessing a real photo; policy-gated generation | **Done** — key valid, **`gpt-image-2`** available (newest: `gpt-image-2-2026-04-21`) |
 | Anthropic key | Reading requests, drafting copy, Slack change requests | **Done** — key valid |
 | Droplet + SSH key | Running unattended | **Done** — `gable`, Ubuntu 24.04, 1 vCPU / 1 GB, swap active, Python 3.12.3 |
-| **Google service-account JSON + Sheet and shared-drive access** | Reading the sheet — everything depends on it | **Done** — `gable-agent@gable-505204`, key at `~/.gable/` (mode 600). Sheet readable, shared drive writable, Slides round-trip verified. **Not yet on the droplet** |
-| Spaces bucket + keys | Photo hosting | **Not created** |
+| **Google service-account JSON + Sheet and shared-drive access** | Reading the sheet — everything depends on it | **Done** — Sheet readable, shared drive writable, Slides round-trip verified; the key is present on the droplet at mode 600. |
+| nginx photo host | Public image URL Slides can fetch | **Done** — the droplet serves photos over HTTP; the Slack upload path still needs to publish locally into that directory. |
 | `channels:read` scope (optional) | Letting the checker verify the channel id | Not granted; posting does not need it |
 
 **Every credential is now live.** The Google account was created 2026-08-10 in
@@ -166,20 +173,16 @@ IAM roles, and access granted purely by the two Drive shares. It has been
 exercised against the real drive: create → `batchUpdate` → `replaceAllText`
 (`occurrencesChanged: 1`) → `getThumbnail` at 1600px, cleaning up after itself.
 
-Two things still outstanding on it, neither blocking local work:
-
-- The key exists **only on this Mac**. Copying it to `/opt/gable/secrets/` on the
-  droplet is a deploy step, not a build step.
-- Spaces is still unconfigured, so there is no public HTTPS host for a hero photo
-  yet. `replaceAllShapesWithImage` needs one. This is the next real gap.
+The remaining credential-related Slack change is `files:read`. The manifest can
+declare it in code, but Chase must approve the reinstall; the building agent
+will never click OAuth or copy a token.
 
 ---
 
 ## 5. What is built and green
 
-`ruff format --check`, `ruff check`, `mypy --strict`, `pytest` — **323 passing**.
-No file over 800 lines (largest: `config.py` at 463). `mypy` covers `src`,
-`tests` and `tools`.
+`ruff format --check`, `ruff check`, `mypy --strict`, and `pytest` are the gate.
+No source file is over 800 lines. `mypy` covers `src`, `tests` and `tools`.
 
 | Module | State |
 |---|---|
@@ -188,11 +191,14 @@ No file over 800 lines (largest: `config.py` at 463). `mypy` covers `src`,
 | `models.py` | Done. Domain types; a synthetic photo cannot be built unflagged. |
 | `listings/normalize.py` | Done. Pure parsing; `ColumnMap` makes headers data. |
 | `slackapp/blocks.py` | Done. Every AGENTS.md §2 message shape. |
-| `slides/renderer.py` | Done. Pure `batchUpdate` builder; 36 tests. No I/O — `slides/client.py` is not written yet. |
+| `slides/renderer.py` and `pipeline/live.py` | Done for the current run path: pure request building plus concrete Drive and Slides I/O. |
 | `tools/check_connections.py` | Done. Proves every `.env` credential live, printing identity only. |
 | `deploy/gable.service` + `PROVISION.md` | **Run.** Droplet provisioned and verified; swap active. |
 | `spikes/` | Findings only — `SPIKE_A.md` and `SPIKE_A_RESULT.md`. The generator and its tests were deleted once Spike A was answered. |
-| Everything else in `src/gable/` | Docstring-only placeholders, blocked on D1/D2. |
+| Most of `src/gable/` | Built and unit-tested: the runner, orchestrator, poller, schedule, database, sheet client, enrichment, photo fitting and hosting, the edit tools, the field manifest, the image verifier, the vision check and the house style. |
+| **The wiring between them** | **Built in the working tree, not deployed.** The production runtime constructs `Poller` and `Runner`; the Slack-free CLI performs one guarded pass. |
+| The Slack photo handoff | **Not written.** Nothing receives a `file_share` event, downloads `url_private`, fits, publishes, and sets `hero_photo_url`. |
+| `photos/enhance.py`, `photos/resolver.py`, `photos/sources.py`, `listings/verify.py`, `slackapp/handlers.py` | Still docstring-only placeholders. |
 
 `normalize.py`'s `ColumnMap` can be re-pointed at the real headers above without
 touching logic — that was built before the sheet was seen, and it happens to
@@ -202,23 +208,15 @@ absorb this exact change.
 
 ## 6. Where the build actually stands
 
-Spike A resolved against the design, the build stopped rather than silently
-redesigning around it (CLAUDE.md §2.6), and D1 was then answered by leaving Canva
-entirely for Google Slides. That unblocked the renderer, which is built.
+The module graph and automatic trigger are built. The current priority order is:
 
-The credential blocker is gone. `sheets/client.py`, `sheets/repository.py`, the
-poller and the orchestrator can now all be written against a real Sheet. What is
-left is genuinely about the product:
-
-1. **The Slides template.** The `Templates` folder in the shared drive is
-   **empty**. Nothing can be copied until one template with `{{...}}` placeholders
-   is in it. Chase is providing the first one.
-2. **D2 — which request types are in scope.** The form serves postcards, video
-   *and* social in one submission and branches on `Select your request type`.
-   `normalize.py` currently assumes one shape. This is the decision that most
-   changes the code.
-3. **D3 — may Gable create the `Runs` and `Templates` tabs?** Both are absent.
-   Gable appends to `Runs` for idempotency, so something has to create it.
-4. **Photo hosting.** Spaces is unconfigured; Slides needs a public HTTPS URL.
-
-**(1) is arriving. (2) is the one worth deciding carefully.**
+1. Receive a Slack `file_share`, download it with bot authorization, fit it to
+   1080 by 1350, publish it on the droplet, verify it, and resume the same run.
+2. Make conversational edit tools operate on the thread's actual Slides file,
+   reporting success only after Google confirms the change.
+3. Replace the agent headshot and make hero-frame discovery safe across grouped
+   PPTX imports.
+4. Use the full notes context — including one-agent versus two-agent language —
+   to select a template by purpose, and ask when intent remains ambiguous.
+5. Wire the $50 spend guard at every paid call and certify all 45 templates with
+   real rendered visual inspection.

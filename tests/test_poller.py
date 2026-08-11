@@ -13,6 +13,7 @@ from pathlib import Path
 
 import pytest
 
+from gable.db import store
 from gable.db.schema import apply_migrations, connect
 from gable.pipeline.poller import Poller
 from gable.pipeline.schedule import PollSchedule
@@ -138,6 +139,62 @@ def test_the_same_row_is_not_handed_off_twice(db: sqlite3.Connection) -> None:
     poller.one_pass()
     rows = db.execute("SELECT COUNT(*) AS n FROM submissions").fetchone()["n"]
     assert rows == 1
+
+
+@pytest.mark.parametrize(
+    "paused_status",
+    ["needs_photo", "needs_info", "needs_template", "needs_review"],
+)
+def test_a_paused_submission_is_not_asked_or_built_again(
+    db: sqlite3.Connection, paused_status: str
+) -> None:
+    """A human pause suppresses normal polling until that run is resumed."""
+    sheet = FakeSheet([HEADER])
+    repo.adopt_backfill(db, [])
+    handed_off: list[str] = []
+
+    def pause(submission: repo.Submission) -> None:
+        handed_off.append(submission.response_row_id)
+        run = store.start_run(db, submission.response_row_id)
+        store.set_status(db, run.run_id, paused_status, "waiting on a person")
+
+    poller = Poller(
+        client=sheet,
+        connection=db,
+        responses_tab="Form Responses 1",
+        salespeople_tab="Sales_People",
+        on_submission=pause,
+    )
+    sheet.rows.append(_row("8/2/2026", "2 B Rd, Baltimore, MD 21202"))
+
+    assert poller.one_pass() == 1
+    assert poller.one_pass() == 0
+    assert len(handed_off) == 1
+
+
+def test_a_crashing_submission_stops_reentering_after_three_attempts(
+    db: sqlite3.Connection,
+) -> None:
+    """The poll loop cannot spend money on the same crashing row forever."""
+    sheet = FakeSheet([HEADER])
+    repo.adopt_backfill(db, [])
+    attempts: list[str] = []
+
+    def leave_pending(submission: repo.Submission) -> None:
+        attempts.append(submission.response_row_id)
+        store.start_run(db, submission.response_row_id)
+
+    poller = Poller(
+        client=sheet,
+        connection=db,
+        responses_tab="Form Responses 1",
+        salespeople_tab="Sales_People",
+        on_submission=leave_pending,
+    )
+    sheet.rows.append(_row("8/2/2026", "2 B Rd, Baltimore, MD 21202"))
+
+    assert [poller.one_pass() for _ in range(4)] == [1, 1, 1, 0]
+    assert len(attempts) == store.MAX_RUN_ATTEMPTS
 
 
 def test_a_pass_is_capped_so_a_backlog_does_not_arrive_at_once(db: sqlite3.Connection) -> None:

@@ -10,6 +10,7 @@ from __future__ import annotations
 import sqlite3
 import tempfile
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -64,6 +65,7 @@ class Recorder:
         self.said: list[str] = []
         self.filled: dict[str, str] = {}
         self.copied = False
+        self.photo_placed = False
         self.slide_text = slide_text or [
             "[PROPERTY ADDRESS]",
             "[PRICE]",
@@ -80,7 +82,7 @@ class Recorder:
         self.said.append(text)
         return "1786.0"
 
-    def pick(self, category: str) -> tuple[str, str]:
+    def pick(self, category: str, intake: object = None) -> tuple[str, str]:  # noqa: ARG002
         """Always find a template."""
         return ("tmpl-1", f"{category} — Bracket Placeholders (cleanest)")
 
@@ -92,6 +94,11 @@ class Recorder:
         """Pretend to copy, and remember that it happened."""
         self.copied = True
         return ("out-1", "https://docs.google.com/presentation/d/out-1/edit")
+
+    def place_photo(self, file_id: str, url: str) -> bool:  # noqa: ARG002
+        """Pretend the hero photo went on, and remember that it did."""
+        self.photo_placed = True
+        return True
 
     def fill(self, file_id: str, pairs: dict[str, str]) -> int:  # noqa: ARG002
         """Record the replacements and simulate their effect."""
@@ -109,6 +116,8 @@ def _runner(db: sqlite3.Connection, rec: Recorder, facts: Facts | None = None) -
     )
     return Runner(
         connection=db,
+        hero_photo_url="http://198.51.100.7/abcdef0123456789.jpg",
+        place_photo=rec.place_photo,
         say=rec.say,
         pick_template=rec.pick,
         read_slide_text=rec.read,
@@ -254,8 +263,10 @@ def test_a_flyer_that_still_shows_a_placeholder_is_not_delivered(
     _record(db, submission)
 
     class StubbornFill(Recorder):
-        def fill(self, file_id: str, pairs: dict[str, str]) -> int:  # noqa: ARG002  # noqa: ARG002
-            """Simulate a fill that silently changed nothing."""
+        """A client whose fill silently changes nothing."""
+
+        def fill(self, file_id: str, pairs: dict[str, str]) -> int:  # noqa: ARG002
+            """Record the pairs but leave the slide as it was."""
             self.filled = pairs
             self.output_text = list(self.slide_text)
             return 0
@@ -263,7 +274,8 @@ def test_a_flyer_that_still_shows_a_placeholder_is_not_delivered(
     rec = StubbornFill()
     result = _runner(db, rec).run(submission)
     assert result.status == "needs_review"
-    assert "I rendered it, but" in rec.said[-1]
+    # The last message is the "have a look" follow-up; the verdict is before it.
+    assert any("I rendered it" in said for said in rec.said)
 
 
 # --- every exit records a status --------------------------------------------
@@ -316,6 +328,25 @@ def test_an_unexpected_failure_is_recorded_not_raised(db: sqlite3.Connection) ->
     )
 
 
+def test_a_fourth_attempt_is_refused_before_external_work(db: sqlite3.Connection) -> None:
+    """The three-attempt ceiling stops retry storms before another paid call."""
+    from gable.db import store
+
+    submission = _submission(rid="rid-retry-limit")
+    _record(db, submission)
+    for attempt in range(store.MAX_RUN_ATTEMPTS):
+        run = store.start_run(db, submission.response_row_id)
+        store.set_status(db, run.run_id, "failed", f"attempt {attempt + 1} failed")
+
+    rec = Recorder()
+    result = _runner(db, rec).run(submission)
+
+    assert result.status == "failed"
+    assert rec.copied is False
+    assert store.run_attempt_count(db, submission.response_row_id) == store.MAX_RUN_ATTEMPTS
+    assert any("three times" in said for said in rec.said)
+
+
 def test_nothing_gable_says_breaks_the_house_style(db: sqlite3.Connection) -> None:
     from gable.slackapp.style import violations
 
@@ -339,3 +370,171 @@ def test_a_template_without_a_field_does_not_fail_the_check(db: sqlite3.Connecti
     rec = Recorder(slide_text=["[PROPERTY ADDRESS]", "AGENT NAME"])
     result = _runner(db, rec).run(submission)
     assert result.status == "delivered"
+
+
+# --- text fitting and the vision pass ---------------------------------------
+
+
+def test_text_that_overflows_is_shrunk_before_delivery(db: sqlite3.Connection) -> None:
+    """Slides cannot autofit over the API, so a long value clips silently.
+
+    This is what shipped a price reading $510,000 as $510,00.
+    """
+    from gable.slides import fitting
+
+    submission = _submission(rid="rid-fit")
+    _record(db, submission)
+
+    applied: list[dict[str, Any]] = []
+    rec = Recorder()
+    runner = _runner(db, rec)
+    runner.read_text_boxes = lambda _fid: [
+        # A price box far too narrow for its text, in real units.
+        fitting.TextBox("p1_price", "$510,000", 52.9, 187.5 * fitting.EMU_PER_POINT)
+    ]
+    runner.apply = lambda _fid, reqs: applied.extend(reqs)
+    runner.run(submission)
+
+    assert applied, "an overflowing box must be refitted"
+    sizes = [
+        float(r["updateTextStyle"]["style"]["fontSize"]["magnitude"])
+        for r in applied
+        if "updateTextStyle" in r
+    ]
+    assert sizes and sizes[0] < 52.9
+
+
+def test_a_box_that_already_fits_costs_no_calls(db: sqlite3.Connection) -> None:
+    from gable.slides import fitting
+
+    submission = _submission(rid="rid-nofit")
+    _record(db, submission)
+    applied: list[dict[str, Any]] = []
+    runner = _runner(db, Recorder())
+    runner.read_text_boxes = lambda _fid: [
+        fitting.TextBox("p1_ok", "4", 20.0, 200 * fitting.EMU_PER_POINT)
+    ]
+    runner.apply = lambda _fid, reqs: applied.extend(reqs)
+    runner.run(submission)
+    assert applied == []
+
+
+def test_a_flyer_the_vision_pass_rejects_is_not_delivered(db: sqlite3.Connection) -> None:
+    """Only the vision pass can see a value that is present but clipped."""
+    from gable.pipeline.vision import Inspection
+
+    submission = _submission(rid="rid-vision")
+    _record(db, submission)
+    rec = Recorder()
+    runner = _runner(db, rec)
+    runner.look_at = lambda _image: Inspection(
+        looks_right=False, confident=True, problems=["the price is cut off at the box edge"]
+    )
+    result = runner.run(submission)
+
+    assert result.status == "needs_review"
+    assert any("cut off" in said for said in rec.said)
+
+
+def test_a_vision_check_that_could_not_run_does_not_block_delivery(
+    db: sqlite3.Connection,
+) -> None:
+    """A check that fails is "not checked", and must not stop a good flyer.
+
+    The default thumbnail callable returns no bytes, which is exactly that case.
+    """
+    submission = _submission(rid="rid-novision")
+    _record(db, submission)
+    assert _runner(db, Recorder()).run(submission).status == "delivered"
+
+
+# --- the photo is not optional ----------------------------------------------
+
+
+def test_no_flyer_is_delivered_without_a_hero_photo(db: sqlite3.Connection) -> None:
+    """A listing flyer showing the template's own placeholder is not a draft.
+
+    One was delivered like that and announced as ready. It should have stopped
+    and asked, which is what Chase specified in the first place.
+    """
+    submission = _submission(rid="rid-nophoto")
+    _record(db, submission)
+    rec = Recorder()
+    runner = _runner(db, rec)
+    runner.hero_photo_url = ""
+    result = runner.run(submission)
+
+    assert result.status == "needs_photo"
+    assert rec.copied is False, "nothing should be built before there is a photo"
+    assert "which image" in rec.said[0].lower()
+    assert submission.intake.address in rec.said[0]
+
+
+def test_an_unusable_photo_url_stops_before_a_flyer_is_copied(
+    db: sqlite3.Connection,
+) -> None:
+    """The live URL check is injected and a rejection pauses the run safely."""
+    submission = _submission(rid="rid-bad-photo-url")
+    _record(db, submission)
+    rec = Recorder()
+    runner = _runner(db, rec)
+    runner.check_photo = lambda _url, _slot: (False, "that image link did not load")
+
+    result = runner.run(submission)
+
+    assert result.status == "needs_photo"
+    assert rec.copied is False
+    assert any("did not load" in said for said in rec.said)
+
+
+def test_a_photo_resumes_the_existing_run_without_opening_another(
+    db: sqlite3.Connection,
+) -> None:
+    """A Slack upload continues the paused audit trail instead of forking it."""
+    from gable.db import store
+
+    submission = _submission(rid="rid-resume-photo")
+    _record(db, submission)
+    rec = Recorder()
+    waiting = _runner(db, rec)
+    waiting.hero_photo_url = ""
+    paused = waiting.run(submission)
+    assert paused.status == "needs_photo"
+
+    resumed = _runner(db, rec).resume(submission, paused.run_id)
+
+    assert resumed.status == "delivered"
+    assert store.run_attempt_count(db, submission.response_row_id) == 1
+    statuses = [
+        row["status"]
+        for row in db.execute(
+            "SELECT status FROM run_events WHERE run_id = ? ORDER BY id", (paused.run_id,)
+        ).fetchall()
+    ]
+    assert "needs_photo" in statuses
+    assert statuses[-1] == "delivered"
+
+
+def test_a_photo_that_will_not_go_on_stops_delivery(db: sqlite3.Connection) -> None:
+    """Given a photo and unable to place it, stopping beats shipping without."""
+    submission = _submission(rid="rid-photofail")
+    _record(db, submission)
+
+    class NoPlace(Recorder):
+        def place_photo(self, file_id: str, url: str) -> bool:  # noqa: ARG002
+            """Fail the way a rejected image URL would."""
+            return False
+
+    rec = NoPlace()
+    result = _runner(db, rec).run(submission)
+    assert result.status == "needs_review"
+    assert "could not get the photo onto it" in rec.said[-1]
+
+
+def test_the_photo_is_placed_on_a_delivered_flyer(db: sqlite3.Connection) -> None:
+    submission = _submission(rid="rid-photook")
+    _record(db, submission)
+    rec = Recorder()
+    result = _runner(db, rec).run(submission)
+    assert result.status == "delivered"
+    assert rec.photo_placed is True

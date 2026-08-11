@@ -94,22 +94,40 @@ def safe_reply(text: str) -> str:
 
 
 def describe_action(decision: Decision) -> str:
-    """What Gable says it is about to do, when it chose a tool.
+    """Return no progress claim until an action executor reports success.
 
     Args:
         decision: What the brain concluded.
 
     Returns:
-        A sentence, or an empty string when no tool was chosen or when the
-        decision was to ask a question rather than act.
+        An empty string. The old implementation announced every selected tool
+        even though no handler executed it, violating Gable's core honesty
+        rule. A real executor owns any future completion message.
 
     Raises:
         Nothing.
     """
-    if not decision.wants_action or decision.tool in {"ask_clarifying", "report_status"}:
-        return ""
-    readable = decision.tool.replace("_", " ")
-    return f"On it — {readable} now."
+    del decision
+    return ""
+
+
+def reply_for_decision(decision: Decision) -> str:
+    """Choose an honest reply while action execution is being connected.
+
+    Args:
+        decision: What the conversational model selected.
+
+    Returns:
+        The model's reply for conversation and clarification. For an action no
+        handler executes yet, a precise refusal that cannot be mistaken for a
+        completed edit.
+
+    Raises:
+        Nothing.
+    """
+    if not decision.wants_action or decision.tool == "ask_clarifying":
+        return decision.reply
+    return "I understood the change, but I could not apply it. I have not changed the flyer."
 
 
 def build_app() -> Any:  # noqa: ANN401 - slack_bolt.App, imported lazily
@@ -157,7 +175,7 @@ def build_app() -> Any:  # noqa: ANN401 - slack_bolt.App, imported lazily
                 return
             decision = think(asked)
             logger.info("replying (tool=%s)", decision.tool or "none")
-            say(text=safe_reply(decision.reply), thread_ts=thread)
+            say(text=safe_reply(reply_for_decision(decision)), thread_ts=thread)
             follow_up = describe_action(decision)
             if follow_up:
                 say(text=safe_reply(follow_up), thread_ts=thread)
@@ -183,7 +201,7 @@ def build_app() -> Any:  # noqa: ANN401 - slack_bolt.App, imported lazily
             if not event.get("thread_ts"):
                 return  # a top-level message that did not mention us
             decision = think(clean_mention_text(event.get("text", "")))
-            say(text=safe_reply(decision.reply), thread_ts=event["thread_ts"])
+            say(text=safe_reply(reply_for_decision(decision)), thread_ts=event["thread_ts"])
         except Exception:
             logger.exception("message handler failed")
 

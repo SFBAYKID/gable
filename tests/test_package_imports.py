@@ -25,6 +25,7 @@ def test_package_tree_is_complete() -> None:
     expected = {
         "gable.config",
         "gable.logging_setup",
+        "gable.runtime",
         "gable.models",
         "gable.cli",
         "gable.sheets.client",
@@ -39,6 +40,7 @@ def test_package_tree_is_complete() -> None:
         "gable.slackapp.app",
         "gable.slackapp.blocks",
         "gable.slackapp.handlers",
+        "gable.slackapp.runtime",
         "gable.pipeline.orchestrator",
     }
     assert expected <= set(MODULE_NAMES), f"missing: {sorted(expected - set(MODULE_NAMES))}"

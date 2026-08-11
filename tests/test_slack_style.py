@@ -441,3 +441,32 @@ def test_a_reply_that_breaks_the_rules_never_reaches_slack() -> None:
     assert safe_reply("All set.") == "All set."
     assert "sparkles" not in safe_reply(":sparkles: All set.")
     assert safe_reply("<HttpError 400 unrecoverable>") == FALLBACK
+
+
+def test_an_unexecuted_edit_is_never_announced_as_done() -> None:
+    from gable.slackapp.app import describe_action, reply_for_decision
+    from gable.slackapp.brain import Decision
+
+    decision = Decision(
+        reply="Making the price bigger.",
+        tool="set_font_size",
+        arguments={"target": "price", "points": 32},
+    )
+
+    assert describe_action(decision) == ""
+    assert reply_for_decision(decision) == (
+        "I understood the change, but I could not apply it. I have not changed the flyer."
+    )
+
+
+def test_a_clarifying_question_still_reaches_the_person() -> None:
+    from gable.slackapp.app import reply_for_decision
+    from gable.slackapp.brain import Decision
+
+    decision = Decision(
+        reply="Did you mean the large photo or the headshot?",
+        tool="ask_clarifying",
+        arguments={"question": "Did you mean the large photo or the headshot?"},
+    )
+
+    assert reply_for_decision(decision) == decision.reply

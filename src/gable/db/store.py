@@ -19,10 +19,20 @@ from typing import Final
 from gable.listings.intake import Intake
 
 #: Statuses that mean a submission is finished and must never be rebuilt.
-TERMINAL: Final[frozenset[str]] = frozenset({"delivered", "failed", "skipped"})
+TERMINAL: Final[frozenset[str]] = frozenset(("delivered", "failed", "skipped"))
 
 #: Statuses that mean a run is waiting on a human. Not terminal — these resume.
-PAUSED: Final[frozenset[str]] = frozenset({"needs_photo", "needs_info", "needs_template"})
+PAUSED: Final[frozenset[str]] = frozenset(
+    {"needs_photo", "needs_info", "needs_template", "needs_review"}
+)
+
+#: An unattended failure may be retried, but never indefinitely. This is a hard
+#: ceiling in the run-opening path, not a convention callers have to remember.
+MAX_RUN_ATTEMPTS: Final[int] = 3
+
+
+class RunLimitReachedError(RuntimeError):
+    """Raised when opening another run would exceed the hard attempt ceiling."""
 
 
 def _now() -> str:
@@ -50,6 +60,17 @@ class RunRow:
     def is_paused(self) -> bool:
         """True when this run is waiting on a human rather than on Gable."""
         return self.status in PAUSED
+
+
+@dataclass(frozen=True, slots=True)
+class StoredSubmission:
+    """One intake row reconstructed from Gable's local database."""
+
+    response_row_id: str
+    sheet_row: int
+    submitted_at: str
+    intake: Intake
+    content_hash: str
 
 
 def record_submission(
@@ -112,8 +133,56 @@ def record_submission(
     return True
 
 
+def load_submission(
+    connection: sqlite3.Connection, response_row_id: str
+) -> StoredSubmission | None:
+    """Reconstruct a submission so a paused Slack thread can resume it.
+
+    Args:
+        connection: An open connection.
+        response_row_id: The submission's identity.
+
+    Returns:
+        The stored submission, or None when the id is unknown.
+
+    Raises:
+        sqlite3.Error: on a query failure.
+    """
+    row = connection.execute(
+        """
+        SELECT response_row_id, sheet_row, submitted_at, agent_email, agent_name,
+               request_type, address, post_details, open_house, new_price,
+               closing_price, extra_notes, side, notes, content_hash
+          FROM submissions
+         WHERE response_row_id = ?
+        """,
+        (response_row_id,),
+    ).fetchone()
+    if not row:
+        return None
+    return StoredSubmission(
+        response_row_id=row["response_row_id"],
+        sheet_row=int(row["sheet_row"]),
+        submitted_at=row["submitted_at"],
+        intake=Intake(
+            agent_email=row["agent_email"],
+            agent_name=row["agent_name"],
+            request_type=row["request_type"],
+            address=row["address"],
+            post_details=row["post_details"],
+            open_house=row["open_house"],
+            new_price=row["new_price"],
+            closing_price=row["closing_price"],
+            extra_notes=row["extra_notes"],
+            side=row["side"],
+            notes=row["notes"],
+        ),
+        content_hash=row["content_hash"],
+    )
+
+
 def has_been_handled(connection: sqlite3.Connection, response_row_id: str) -> bool:
-    """Whether this submission already reached a terminal state.
+    """Whether polling this submission again would be unsafe or redundant.
 
     This is the idempotency test the poller runs on every row.
 
@@ -122,17 +191,39 @@ def has_been_handled(connection: sqlite3.Connection, response_row_id: str) -> bo
         response_row_id: The submission's identity.
 
     Returns:
-        True when a run for it finished, so it must not be rebuilt.
+        True when a run finished, is paused for a person, or has already used
+        the bounded attempt budget.
 
     Raises:
         sqlite3.Error: on a query failure.
     """
-    placeholders = ",".join("?" * len(TERMINAL))
+    suppresses_polling = TERMINAL | PAUSED
+    placeholders = ",".join("?" * len(suppresses_polling))
     row = connection.execute(
         f"SELECT 1 FROM runs WHERE response_row_id = ? AND status IN ({placeholders}) LIMIT 1",
-        (response_row_id, *sorted(TERMINAL)),
+        (response_row_id, *sorted(suppresses_polling)),
     ).fetchone()
-    return row is not None
+    return row is not None or run_attempt_count(connection, response_row_id) >= MAX_RUN_ATTEMPTS
+
+
+def run_attempt_count(connection: sqlite3.Connection, response_row_id: str) -> int:
+    """Count runs already opened for one submission.
+
+    Args:
+        connection: An open connection.
+        response_row_id: The submission's identity.
+
+    Returns:
+        The number of attempts already recorded.
+
+    Raises:
+        sqlite3.Error: on a query failure.
+    """
+    row = connection.execute(
+        "SELECT COUNT(*) AS attempts FROM runs WHERE response_row_id = ?",
+        (response_row_id,),
+    ).fetchone()
+    return int(row["attempts"])
 
 
 def start_run(connection: sqlite3.Connection, response_row_id: str) -> RunRow:
@@ -146,9 +237,13 @@ def start_run(connection: sqlite3.Connection, response_row_id: str) -> RunRow:
         The new run, status `pending`.
 
     Raises:
+        RunLimitReachedError: when three attempts already exist.
         sqlite3.Error: on a write failure, including a foreign-key violation if
             the submission was never recorded.
     """
+    if run_attempt_count(connection, response_row_id) >= MAX_RUN_ATTEMPTS:
+        msg = f"run attempt limit reached for {response_row_id}"
+        raise RunLimitReachedError(msg)
     run_id = f"run-{uuid.uuid4().hex[:12]}"
     now = _now()
     connection.execute(

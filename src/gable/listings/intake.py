@@ -63,9 +63,9 @@ REQUEST_TYPE_TO_CATEGORY: Final[dict[str, str]] = {
 #: Facts that are a matter of public record for any address, and so must be
 #: looked up rather than asked about.
 #: Keys match `enrich.Facts.as_dict()` exactly. They disagreed once — this said
-#: "square footage" while Facts said "square_feet" — so a fact that had already
-#: been looked up was never recognised and got researched again every time.
-PUBLIC_FACTS: Final[tuple[str, ...]] = ("beds", "baths", "square_feet", "price")
+#: "price" while Facts said "list_price" — so a fact that had already been
+#: looked up was never recognised and got researched again every time.
+PUBLIC_FACTS: Final[tuple[str, ...]] = ("beds", "baths", "square_feet", "list_price")
 
 
 @dataclass(frozen=True, slots=True)
@@ -188,7 +188,7 @@ def missing_public_facts(intake: Intake, known: dict[str, str] | None = None) ->
     """
     have = {k for k, v in (known or {}).items() if v.strip()}
     if intake.price:
-        have.add("price")
+        have.add("list_price")
     if not intake.address:
         # Without an address nothing can be looked up; that is a separate problem
         # and `incoherences` raises it.

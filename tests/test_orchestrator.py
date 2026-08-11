@@ -62,8 +62,25 @@ def test_a_clean_row_goes_to_research_first() -> None:
 
 
 def test_nothing_left_to_find_goes_straight_to_build() -> None:
-    known = {"beds": "4", "baths": "3", "square_feet": "1,804", "price": "$515,000"}
+    known = {
+        "beds": "4",
+        "baths": "3",
+        "square_feet": "1,804",
+        "list_price": "$515,000",
+    }
     step = plan(_intake(closing_price="$515,000"), known)
+    assert step.outcome is Outcome.BUILD
+
+
+def test_cached_researched_price_prevents_another_lookup() -> None:
+    """Facts.as_dict uses list_price, so the intake contract must use it too."""
+    known = {
+        "beds": "4",
+        "baths": "3",
+        "square_feet": "1,804",
+        "list_price": "$515,000",
+    }
+    step = plan(_intake(), known)
     assert step.outcome is Outcome.BUILD
 
 

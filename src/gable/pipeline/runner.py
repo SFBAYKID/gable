@@ -33,8 +33,11 @@ from gable.db import store
 from gable.listings.enrich import Facts, look_up
 from gable.listings.intake import Intake
 from gable.pipeline.orchestrator import Outcome, after_research, agent_slots, judge, plan
+from gable.pipeline.vision import Inspection, inspect
 from gable.sheets import repository as repo
 from gable.slides import fields as template_fields
+from gable.slides import fitting
+from gable.slides import manifest as template_manifest
 from gable.slides.catalog import for_category
 from gable.voice import safe
 
@@ -58,7 +61,7 @@ class RunResult:
     @property
     def needs_a_human(self) -> bool:
         """True when the run stopped to ask something."""
-        return self.status in {"needs_info", "needs_photo", "needs_template"}
+        return self.status in {"needs_info", "needs_photo", "needs_template", "needs_review"}
 
 
 @dataclass
@@ -68,14 +71,33 @@ class Runner:
     connection: Connection
     #: Posts a message and returns the thread timestamp it landed in.
     say: Callable[[str, str | None], str]
-    #: Finds a template file id for a category. Returns "" when none fits.
-    pick_template: Callable[[str], tuple[str, str]]
+    #: Finds a template file for a category and this listing. Returns "" when
+    #: none fits, which becomes a question rather than a guess.
+    pick_template: Callable[[str, Intake], tuple[str, str]]
     #: Reads every text string from a presentation.
     read_slide_text: Callable[[str], list[str]]
     #: Copies a template and returns (file_id, url).
     copy_template: Callable[[str, str], tuple[str, str]]
     #: Applies find/replace pairs to a presentation.
     fill: Callable[[str, dict[str, str]], int]
+    #: Reads every text box with its size and geometry, for fitting.
+    read_text_boxes: Callable[[str], list[fitting.TextBox]] = lambda _fid: []
+    #: Applies Slides requests to a presentation.
+    apply: Callable[[str, list[dict[str, Any]]], None] = lambda _fid, _reqs: None
+    #: Renders a slide to PNG bytes, for the vision check.
+    thumbnail: Callable[[str], bytes] = lambda _fid: b""
+    #: Looks at a rendered flyer. Injected like every other outside call, so a
+    #: test can supply a verdict without spending a vision call.
+    look_at: Callable[[bytes], Inspection] = inspect
+    #: The hero photo for this listing, already fitted and published, or "" if
+    #: none has been supplied yet.
+    hero_photo_url: str = ""
+    #: Places the hero photo into a rendered flyer.
+    place_photo: Callable[[str, str], bool] = lambda _fid, _url: False
+    #: Proves that the photo URL is usable for the target slot. The live
+    #: builder supplies the network checker; the runner itself performs no
+    #: hidden I/O.
+    check_photo: Callable[[str, str], tuple[bool, str]] = lambda _url, _slot: (True, "")
     #: Looks up public facts for an address.
     research: Callable[[str], Facts] = lambda _address: Facts()
 
@@ -92,17 +114,48 @@ class Runner:
             Nothing. A run that cannot finish records why and stops; raising
             here would leave the database disagreeing with reality.
         """
-        run = store.start_run(self.connection, submission.response_row_id)
-        result = RunResult(run_id=run.run_id, status="pending")
-        intake = submission.intake
-
         try:
-            return self._sequence(run.run_id, intake, result)
-        except Exception:
-            logger.exception("run %s failed", run.run_id)
-            store.set_status(
-                self.connection, run.run_id, "failed", "unhandled error during the run"
+            run = store.start_run(self.connection, submission.response_row_id)
+        except store.RunLimitReachedError:
+            latest = store.latest_run(self.connection, submission.response_row_id)
+            result = RunResult(
+                run_id=latest.run_id if latest else "",
+                status="failed",
             )
+            spoken = safe(
+                "I have already tried this listing three times, so I stopped before "
+                "starting it again. It needs a person to check what keeps failing."
+            )
+            result.said.append(spoken)
+            self.say(spoken, latest.slack_thread_ts if latest else None)
+            return result
+        result = RunResult(run_id=run.run_id, status="pending")
+        return self._perform(run.run_id, submission.intake, result)
+
+    def resume(self, submission: repo.Submission, run_id: str) -> RunResult:
+        """Continue an existing paused run after Carmen supplies its photo.
+
+        Args:
+            submission: The locally stored intake row for the paused run.
+            run_id: The existing run to continue; no new attempt is opened.
+
+        Returns:
+            What the resumed run did.
+
+        Raises:
+            Nothing. The same failure boundary as a new run records problems.
+        """
+        store.set_status(self.connection, run_id, "pending", "resumed from its Slack thread")
+        result = RunResult(run_id=run_id, status="pending")
+        return self._perform(run_id, submission.intake, result)
+
+    def _perform(self, run_id: str, intake: Intake, result: RunResult) -> RunResult:
+        """Run the sequence behind one shared, state-recording failure boundary."""
+        try:
+            return self._sequence(run_id, intake, result)
+        except Exception:
+            logger.exception("run %s failed", run_id)
+            store.set_status(self.connection, run_id, "failed", "unhandled error during the run")
             result.status = "failed"
             result.said.append(
                 safe(
@@ -148,8 +201,25 @@ class Runner:
         if slots.outcome is Outcome.ASK:
             return self._ask(run_id, slots.say, slots.questions, result)
 
+        # 5b. Ask for the hero photo BEFORE building anything.
+        #
+        # This is Chase's step 4, and skipping it was a real failure: a flyer
+        # was delivered showing the template's own sky-and-grass placeholder
+        # where the house should be, and announced as ready. A listing flyer
+        # without a photograph of the listing is not a draft, it is wrong, so
+        # the run stops here rather than producing one.
+        if not self.hero_photo_url:
+            return self._ask(
+                run_id,
+                f"I have everything for {intake.address} except the photo. "
+                "Which image do you want as the hero?",
+                [],
+                result,
+                status="needs_photo",
+            )
+
         # 6. Build.
-        template_id, template_label = self.pick_template(step.category)
+        template_id, template_label = self.pick_template(step.category, intake)
         if not template_id:
             return self._ask(
                 run_id,
@@ -171,38 +241,110 @@ class Runner:
 
         resolution = template_fields.resolve(self.read_slide_text(template_id))
         values = self._values(intake, known)
+
+        # What THIS design needs, not one global column set. Two flyers were
+        # reviewed and their field sets differed; treating them as one is what
+        # shipped a flyer carrying the literal words "Phone" and "Website".
+        manifest = template_manifest.manifest_for(template_label)
+        values["address"] = template_manifest.normalise_address(values.get("address", ""))
+        values["hero_photo"] = self.hero_photo_url
+        field_problems = template_manifest.validate(manifest, values)
+        blocking = [item for item in field_problems if item.blocking]
+        if blocking:
+            return self._ask(run_id, blocking[0].say, [], result)
+        for advisory in field_problems:
+            result.said.append(safe(advisory.say))
+            self.say(result.said[-1], None)
+
+        # An image URL is not checked by ending in .jpg. One flyer put the
+        # template's own background illustration in the headshot frame because
+        # nothing looked at what was behind the link.
+        hero_slot = manifest.find("hero_photo")
+        if hero_slot:
+            usable, why_not = self.check_photo(self.hero_photo_url, hero_slot.aspect or "any")
+            if not usable:
+                return self._ask(
+                    run_id,
+                    f"I could not use that photo — {why_not}. Could you send another?",
+                    [],
+                    result,
+                    status="needs_photo",
+                )
+
         pairs = template_fields.replacements(resolution, values)
 
         output_id, output_url = self.copy_template(template_id, self._name(intake))
         changed = self.fill(output_id, pairs)
         logger.info("run %s filled %d field(s)", run_id, changed)
 
-        # 7. Check it twice — but only against what this template actually has
-        # a slot for. Judging against every value would fail any design without
-        # an email field because the email is not on it, which is not a defect.
-        placed = {
+        placed = self.place_photo(output_id, self.hero_photo_url)
+        if not placed:
+            # The photo is the point of the flyer. Delivering without it, after
+            # being given one, is worse than stopping.
+            store.set_status(
+                self.connection,
+                run_id,
+                "needs_review",
+                "the hero photo could not be placed",
+                output_file_id=output_id,
+                output_url=output_url,
+            )
+            result.status = "needs_review"
+            result.output_url = output_url
+            spoken = safe(
+                "I built the flyer but could not get the photo onto it. "
+                "I have not sent it as finished."
+            )
+            result.said.append(spoken)
+            self.say(spoken, None)
+            return result
+
+        # 7a. Fit the text to its boxes. Slides cannot autofit over the API —
+        # verified: "Autofit types other than NONE are not supported" — so a
+        # value longer than its placeholder clips silently. This is what shipped
+        # a price reading $510,000 as $510,00.
+        fits = fitting.plan_fits(self.read_text_boxes(output_id))
+        shrunk = [fit for fit in fits if fit.overflows]
+        if shrunk:
+            self.apply(output_id, fitting.requests_for(fits))
+            logger.info("run %s refitted %d text box(es)", run_id, len(shrunk))
+        unreadable = [fit for fit in shrunk if fit.too_small_to_read]
+
+        # 7b. Check it twice: once on the text, once by looking at it. The text
+        # pass verifies every value is PRESENT; only the vision pass can see
+        # whether it FITS, and that gap delivered a clipped flyer once already.
+        expected = {
             name: values[name]
             for name, literal in resolution.fields.items()
             if literal in pairs and values.get(name, "").strip()
         }
-        for attempt in range(1, QUALITY_PASSES + 1):
-            verdict = judge("\n".join(self.read_slide_text(output_id)), placed, attempt)
-            if verdict.passed:
-                continue
-            if attempt == QUALITY_PASSES:
-                store.set_status(
-                    self.connection,
-                    run_id,
-                    "needs_review",
-                    "; ".join(verdict.problems),
-                    output_file_id=output_id,
-                    output_url=output_url,
-                )
-                result.status = "needs_review"
-                result.output_url = output_url
-                result.said.append(safe(verdict.say))
-                self.say(result.said[-1], None)
-                return result
+        verdict = judge("\n".join(self.read_slide_text(output_id)), expected, 1)
+        seen: Inspection = self.look_at(self.thumbnail(output_id))
+
+        problems = list(verdict.problems)
+        if seen.checked and not seen.looks_right:
+            problems.extend(seen.problems)
+        if unreadable:
+            problems.append(
+                f"the {unreadable[0].text[:24]} had to be shrunk so far it is hard to read"
+            )
+
+        if problems:
+            store.set_status(
+                self.connection,
+                run_id,
+                "needs_review",
+                "; ".join(problems)[:400],
+                output_file_id=output_id,
+                output_url=output_url,
+            )
+            result.status = "needs_review"
+            result.output_url = output_url
+            spoken = seen.say or verdict.say or safe(f"I rendered it, but {problems[0]}")
+            result.said.append(spoken)
+            self.say(spoken, None)
+            self.say(safe(f"Have a look and tell me what to change. <{output_url}|Open it>"), None)
+            return result
 
         # 8. Deliver.
         store.set_status(
@@ -290,28 +432,55 @@ def default_research(api_key: str) -> Callable[[str], Facts]:
 
 def template_picker(
     list_templates: Callable[[], list[dict[str, str]]],
-) -> Callable[[str], tuple[str, str]]:
-    """Choose a template file for a category.
+) -> Callable[[str, Intake], tuple[str, str]]:
+    """Choose a template for a category AND this particular listing.
+
+    Picking the first match in Drive order put a plain new listing onto a
+    "Just Listed plus Open House" design: the open-house tag stayed, its date
+    fields had nothing to fill them, and the headline overlapped the empty
+    date. Correct category, wrong design.
+
+    So the choice is scored. A design that needs a fact this listing does not
+    have is penalised, and one whose name says it is the clean variant is
+    preferred.
 
     Args:
-        list_templates: Returns Drive files with `id`, `name` and a
-            `gable_category`.
+        list_templates: Returns Drive files with `id` and `name`.
 
     Returns:
-        A callable mapping a category to `(file_id, label)`, empty when none
-        fits — which becomes a question rather than a guess.
+        A callable taking `(category, intake)` and returning `(file_id, label)`,
+        empty when nothing fits.
 
     Raises:
         Nothing.
     """
 
-    def pick(category: str) -> tuple[str, str]:
+    def score(name: str, intake: Intake) -> int:
+        lowered = name.lower()
+        points = 0
+        wants_open_house = intake.mentions_open_house
+        mentions_open_house = "open house" in lowered
+        if mentions_open_house and not wants_open_house:
+            # The single worst mismatch: an empty open-house tag on a flyer.
+            points -= 10
+        if wants_open_house and mentions_open_house:
+            points += 5
+        if "dual" in lowered or "two agents" in lowered:
+            points += (
+                5 if intake.post_details and "hosted by" in intake.post_details.lower() else -8
+            )
+        if "bracket placeholders" in lowered or "cleanest" in lowered:
+            points += 4  # written in tokens throughout, so it fills completely
+        return points
+
+    def pick(category: str, intake: Intake) -> tuple[str, str]:
         if not category or not for_category(category):
             return "", ""
         wanted = {entry.filename for entry in for_category(category)}
-        for candidate in list_templates():
-            if candidate.get("name") in wanted:
-                return candidate["id"], candidate["name"]
-        return "", ""
+        candidates = [c for c in list_templates() if c.get("name") in wanted]
+        if not candidates:
+            return "", ""
+        best = max(candidates, key=lambda c: score(str(c["name"]), intake))
+        return str(best["id"]), str(best["name"])
 
     return pick

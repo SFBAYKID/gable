@@ -54,7 +54,7 @@ def test_execstart_launches_the_installed_package(unit: configparser.ConfigParse
     """
     exec_start = unit.get("Service", "ExecStart")
     assert "/opt/gable/.venv/bin/python" in exec_start
-    assert "gable." in exec_start
+    assert "-m gable.slackapp.runtime" in exec_start
 
 
 def test_restart_is_bounded(unit: configparser.ConfigParser) -> None:

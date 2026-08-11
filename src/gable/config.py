@@ -155,6 +155,7 @@ class Settings:
     max_description_chars: int
     max_retries: int
     dry_run: bool
+    db_path: Path
 
     # --- AI providers ---
     openai_image_api_key: str
@@ -258,7 +259,7 @@ class Settings:
             ),
             sheet_id=reader.required("GABLE_SHEET_ID"),
             tab_responses=reader.str_value("GABLE_TAB_RESPONSES", "Form Responses 1"),
-            tab_agents=reader.str_value("GABLE_TAB_AGENTS", "Agents"),
+            tab_agents=reader.str_value("GABLE_TAB_AGENTS", "Sales_People"),
             tab_runs=reader.str_value("GABLE_TAB_RUNS", "Runs"),
             tab_templates=reader.str_value("GABLE_TAB_TEMPLATES", "Templates"),
             drive_id=reader.str_value("GABLE_DRIVE_ID", ""),
@@ -306,6 +307,7 @@ class Settings:
             ),
             max_retries=reader.int_value("GABLE_MAX_RETRIES", 3, minimum=0, maximum=10),
             dry_run=reader.bool_value("GABLE_DRY_RUN", False),
+            db_path=reader.path_value("GABLE_DB_PATH", Path("/opt/gable/var/gable.db")),
             openai_image_api_key=reader.secret("OPENAI_IMAGE_API_KEY", False),
             image_model=reader.str_value("GABLE_IMAGE_MODEL", "gpt-image-2"),
             anthropic_api_key=reader.secret("ANTHROPIC_API_KEY", False),
@@ -412,6 +414,11 @@ class _Reader:
         if must_exist and not candidate.is_file():
             self._problems.append(f"{name}: no file at {candidate}")
         return candidate
+
+    def path_value(self, name: str, default: Path) -> Path:
+        """Read a path that may not exist yet, falling back to `default`."""
+        raw = self._raw(name)
+        return Path(raw).expanduser() if raw else default
 
     def int_value(
         self, name: str, default: int, *, minimum: int | None = None, maximum: int | None = None

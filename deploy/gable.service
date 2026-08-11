@@ -29,11 +29,10 @@ User=gable
 Group=gable
 WorkingDirectory=/opt/gable
 
-# VERIFIED: `python -m gable.slackapp.app` is the entry point. app.py has a
-# __main__ and main() returns a non-zero exit code on a configuration problem,
-# so a missing token stops the unit rather than leaving a healthy-looking
-# process that answers nobody.
-ExecStart=/opt/gable/.venv/bin/python -m gable.slackapp.app
+# The runtime opens Socket Mode without blocking, then keeps the poller on the
+# main thread so its signal handlers are valid. A configuration problem returns
+# non-zero instead of leaving a healthy-looking process that answers nobody.
+ExecStart=/opt/gable/.venv/bin/python -m gable.slackapp.runtime
 
 # .env is chmod 600, owned by gable, and never in git (CLAUDE.md section 3).
 # systemd reads it as root before dropping privileges, so gable itself does not
@@ -74,9 +73,10 @@ RestrictSUIDSGID=true
 RestrictRealtime=true
 LockPersonality=true
 
-# ProtectSystem=strict makes the whole filesystem read-only. Gable writes
-# exactly two places: the xlsx it builds, and the temp files it streams photos
-# through before upload. Nothing else needs to be writable.
+# ProtectSystem=strict makes the whole filesystem read-only. Gable writes its
+# SQLite database and temporary photo artifacts under var. SQLite's WAL and
+# shared-memory files are created beside the database, so its path must stay
+# under this directory.
 ReadWritePaths=/opt/gable/var
 
 # Outbound TCP only. Socket Mode, Google, Firecrawl, and Spaces are all

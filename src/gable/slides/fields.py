@@ -22,6 +22,23 @@ import re
 from dataclasses import dataclass, field
 from typing import Final
 
+#: Names typed into the designs as examples. They are not tokens and look like
+#: real data, which is exactly why they must be recognised: an unreplaced sample
+#: name reads as a correct flyer for the wrong agent.
+SAMPLE_AGENT_NAMES: Final[tuple[str, ...]] = (
+    "Kelsey Mahon",
+    "Kelli Kulnich",
+    "Louis Smith",
+    "Kim Hixson",
+    "Lolo Simmons",
+    "Jason Vetter",
+    "Stacey Abbott",
+    "Tracey Edwards",
+    "Olivia Wilson",
+    "Piet de Dreu",
+    "Melissa Hargreaves",
+)
+
 #: Field name -> patterns that mean it, most specific first. Bracketed forms are
 #: matched before bare words so "[PRICE]" is not consumed by the "price" rule.
 PATTERNS: Final[dict[str, tuple[re.Pattern[str], ...]]] = {
@@ -119,6 +136,10 @@ PATTERNS: Final[dict[str, tuple[re.Pattern[str], ...]]] = {
         re.compile(r"^\[\s*AGENT NAME\s*\]$", re.IGNORECASE),
         re.compile(r"^AGENT NAME$", re.IGNORECASE),
         re.compile(r"^Realtor Name$", re.IGNORECASE),
+        # Live sample names left in the designs. Without these a flyer for
+        # Chase went out carrying "Kelsey Mahon" — the name was never a token,
+        # so nothing replaced it, and the result looked entirely deliberate.
+        re.compile(r"^(?:" + "|".join(SAMPLE_AGENT_NAMES) + r")$", re.IGNORECASE),
     ),
     "agent_phone": (
         re.compile(r"^\[\s*PHONE(?:\s*NUMBER)?\s*\]$", re.IGNORECASE),

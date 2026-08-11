@@ -190,6 +190,15 @@ indefinitely and re-enters on `/gable run`.
 Anything slower than a moment gets a status message, edited in place rather than
 posted repeatedly. Image work is genuinely slow, and silence reads as broken.
 
+> **Not implemented as of 2026-08-11.** `runner.say` can only post; it has no
+> message timestamp and no update path, so nothing can be edited in place.
+> Implementing this needs a second injected callable — `edit(ts, text)` —
+> threaded through `Runner`, not just a call site. The real gap is larger than
+> it looks: a run makes ten-plus sequential network round trips (Firecrawl, a
+> Drive copy, several Slides batch updates, a thumbnail fetch, a vision call)
+> with a worst case past three minutes, and today Gable says nothing for all of
+> it.
+
 ```
 Working on it…
 One sec — fitting the image to the template…
@@ -336,12 +345,24 @@ be explained from that log is a bug.
 - Max `GABLE_MAX_BATCH` (default 25) listings per cycle.
 - Max 1 Firecrawl call per unique `brokerage_url` per 24 hours.
 - Max 1 image-generation call per listing, ever. Never in a retry loop.
+- Never retry a failing listing more than 3 times. Enforced by
+  `db.store.start_run`; paused states resume the same run and do not consume a
+  new attempt.
 - Bounded exponential backoff with jitter on every external call.
 - Log the cost-bearing calls (Firecrawl, image generation) with enough detail to
   reconstruct a bill.
 
 An agent that can spend money in a loop must have a hard ceiling. Put the
 ceiling in code, not in a comment.
+
+> **Not implemented as of 2026-08-11.** `src/gable/spend.py` exists and holds
+> the $50 ceiling Chase set, and **nothing imports it**; `db/store.record_spend`
+> and the `spend` table have zero writers. The per-listing and per-URL caps
+> above are also unenforced. So the ceiling is, functionally, a comment — which
+> is the exact thing this section prohibits. The live risk is not the per-run
+> cost (about two to six cents) but the re-poll loop described in
+> `GABLE_HANDOFF.md` §6.1, which re-runs an unfinished listing every two
+> minutes indefinitely.
 
 ---
 
