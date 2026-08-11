@@ -23,10 +23,12 @@
     "scopes": {
       "bot": [
         "app_mentions:read",
+        "channels:history",
         "chat:write",
         "chat:write.public",
         "commands",
         "files:write",
+        "groups:history",
         "im:history",
         "im:write",
         "reactions:write",
@@ -36,13 +38,18 @@
   },
   "settings": {
     "event_subscriptions": {
-      "bot_events": ["app_mention", "message.im"]
+      "bot_events": [
+        "app_mention",
+        "message.channels",
+        "message.groups",
+        "message.im"
+      ]
     },
     "interactivity": {
       "is_enabled": true
     },
-    "socket_mode_enabled": true,
     "org_deploy_enabled": false,
+    "socket_mode_enabled": true,
     "token_rotation_enabled": false
   }
 }
