@@ -417,20 +417,41 @@ max **25 megapixels**, and **PNG / JPEG / GIF only**.
 
 Two consequences worth stating plainly, because both have bitten this design:
 
-- **A Drive link will not work.** It requires auth, and Slides fetches
-  anonymously. The photo must be hosted somewhere genuinely public even though
-  Drive is right there.
+- **A Drive link will not work — and not for the reason we assumed.** The old
+  text here said Drive fails because it requires auth. That is only half true,
+  and the real answer was established by experiment on 2026-08-10:
+
+  | URL form | Anonymous `GET` | Slides `replaceAllShapesWithImage` |
+  |---|---|---|
+  | `picsum.photos/….jpg` (control) | 200, valid JPEG | **accepted**, `occurrencesChanged: 1` |
+  | `drive.google.com/uc?export=view&id=` | **200, `image/png`, valid bytes** | rejected — *"problem retrieving the image"* |
+  | `drive.google.com/uc?export=download&id=` | **200, `image/png`, valid bytes** | rejected — same |
+  | `drive.google.com/thumbnail?id=…&sz=w1600` | 404 | rejected — *"image was not found"* |
+
+  The service account **can** publish a Drive file (`role: reader, type: anyone`)
+  and the result **is** genuinely fetchable by an anonymous client. Slides still
+  refuses it. So this is not a permissions problem that more sharing would fix —
+  Slides declines to fetch from Drive, full stop. A separate public host is
+  mandatory, not merely tidier. The control in the same batch rules out a broken
+  test harness.
+
 - **The URL only has to survive one moment.** Slides fetches the image once at
   insertion and stores a copy inside the presentation, so a post does not break
-  later when the source URL expires. That makes short-lived hosting fine.
+  later when the source URL expires. That makes short-lived hosting fine, and it
+  means the host needs no durability guarantees at all.
 
 Options, in preference order:
 
-1. **DigitalOcean Spaces** — S3-compatible, public-read, cheap, stable URLs.
-   Recommended.
-2. Static files served by the droplet — free, but ties image availability to
-   droplet uptime and puts bandwidth on a small box.
-3. Google Drive public links — do not. See above.
+1. **DigitalOcean Spaces** — S3-compatible, public-read, cheap, stable URLs, and
+   the droplet is already on DigitalOcean. Recommended. **Not yet configured;
+   `SPACES_KEY`, `SPACES_SECRET` and `SPACES_PUBLIC_BASE` are blank, and until
+   they are set `replaceAllShapesWithImage` cannot be called with a real photo
+   even once.** This is the critical path.
+2. Cloudflare R2 — S3-compatible with a free tier. A reasonable alternative if
+   the Spaces cost is unwelcome; costs a second vendor.
+3. Static files served by the droplet — free, but ties image availability to
+   droplet uptime and puts bandwidth on a 1 GB box.
+4. Google Drive public links — **do not, and now we know why.** See the table.
 
 Normalize before upload: convert to JPEG, cap the long edge at
 `GABLE_PHOTO_MAX_EDGE_PX` (2400), strip EXIF (it can carry the photographer's GPS
@@ -713,6 +734,10 @@ Named so nobody wastes time adding them:
 | 2026-08-10 | Google service account has **no project IAM roles** | All of its access comes from two Drive shares — the intake Sheet as Editor, the `Gable` shared drive as Contributor. Its blast radius is exactly those two things and nothing else in the `monarchconnected.com` org. |
 | 2026-08-10 | Contributor, not Content manager, on the shared drive | Verified capability: `canDelete: false, canTrash: true`. Gable never permanently deletes (CLAUDE.md §11), so the weaker grant is sufficient and is the one to keep. Cleanup uses `trashed: true`, never `files.delete`. |
 | 2026-08-10 | The whole Slides render path is **verified live**, not assumed | Create in the shared drive → `batchUpdate` → `replaceAllText` returning `occurrencesChanged: 1` → `getThumbnail` at 1600px. The 0-quota trap of §2.4 was specifically tested and does not fire inside the shared drive. |
+
+| 2026-08-10 | **Hero photos come from Carmen in Slack, not from the form.** | Chase's call. The form's photo columns hold Drive links in `aj@cornerhouserealty.com`'s Drive that neither Gable nor Chase can read (404), and 34 of 40 filled cells hold 3-5 URLs rather than one. Sourcing from Slack removes an access dependency on a third party and an ambiguity about which photo is the hero. It also collapses the CLAUDE.md §8 cascade to its step 5. |
+| 2026-08-10 | **Slides will not fetch an image from Google Drive. Verified.** | Tested three URL forms — `uc?export=view`, `uc?export=download`, `thumbnail?id=` — against a file the service account had made world-readable and which returned valid PNG bytes to an anonymous request. All three rejected: *"There was a problem retrieving the image."* A public `picsum.photos` JPEG in the same batch was accepted with `occurrencesChanged: 1`, so the harness was sound. This was previously an assumption in §4.5; it is now a fact, and it means a separate public host is not optional. |
+| 2026-08-10 | The service account **can** publish a Drive file (`role: reader, type: anyone`) | Worth recording even though it does not help here: the permission call succeeds and the file becomes anonymously fetchable. Drive is a usable public host for anything *other* than a Slides image fetch. |
 
 Append to this table. Do not rewrite history — if a decision reverses, add a new
 row explaining why. `CLAUDE.md` §2.7 makes this mandatory rather than polite.
