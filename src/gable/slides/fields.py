@@ -47,6 +47,10 @@ PATTERNS: Final[dict[str, tuple[re.Pattern[str], ...]]] = {
         re.compile(r"^PROPERTY ADDRESS$", re.IGNORECASE),
         re.compile(r"^\d{1,6}\s+Your\s+Street.*$", re.IGNORECASE),
         re.compile(r"^\[\s*ADDRESS\s*\]$", re.IGNORECASE),
+        # "123 ANYWHERE ST., ANY CITY" — a stock placeholder address that is
+        # neither a token nor a real address, so neither existing rule caught it
+        # and it printed on a finished flyer.
+        re.compile(r"^\d+\s+ANYWHERE\s+ST\.?,?\s*ANY\s*CITY.*$", re.IGNORECASE),
         # A LIVE SAMPLE address, which is the third convention in the deck:
         # "5066 Winesap Way, Ellicott City, MD 21043" is not a token at all, it
         # is someone's real listing left in the design. Matched the same way
@@ -140,6 +144,23 @@ PATTERNS: Final[dict[str, tuple[re.Pattern[str], ...]]] = {
         # Chase went out carrying "Kelsey Mahon" — the name was never a token,
         # so nothing replaced it, and the result looked entirely deliberate.
         re.compile(r"^(?:" + "|".join(SAMPLE_AGENT_NAMES) + r")$", re.IGNORECASE),
+    ),
+    "agent_title": (
+        # Designs label the role as well as the name, and the sample text is
+        # not a token: "REALTOR / TITLE" survived onto two finished flyers.
+        re.compile(r"^\[?\s*REALTOR\s*/\s*TITLE\s*\]?$", re.IGNORECASE),
+        re.compile(r"^\[\s*TITLE\s*\]$", re.IGNORECASE),
+    ),
+    "social_handle": (
+        # A stock handle from the design's own sample content. Pointing a real
+        # flyer at somebody else's account is the same class of problem as
+        # printing their phone number.
+        re.compile(r"^@reallygreatsite$", re.IGNORECASE),
+        re.compile(r"^\[\s*(?:SOCIAL|HANDLE|INSTAGRAM)\s*\]$", re.IGNORECASE),
+    ),
+    "neighborhood": (
+        re.compile(r"^\[\s*NEIGHBORHOOD(?:\s*NAME)?\s*\]$", re.IGNORECASE),
+        re.compile(r"^NEIGHBORHOOD NAME$", re.IGNORECASE),
     ),
     "agent_phone": (
         re.compile(r"^\[\s*PHONE(?:\s*NUMBER)?\s*\]$", re.IGNORECASE),

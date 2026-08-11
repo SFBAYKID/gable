@@ -62,7 +62,32 @@ DEFAULT_BROKERAGE_URL: Final[str] = "cornerhouserealty.com"
 #: appears on the templates themselves as the office line.
 OFFICE_PHONE: Final[str] = "443.499.3839"
 
+#: The brokerage's own handle, so a design's stock "@reallygreatsite" does not
+#: point a client-facing flyer at somebody else's account.
+# ASSUMPTION: this is the brokerage handle. Confirm against the real account
+# before the first flyer using a social slot goes out.
+DEFAULT_SOCIAL_HANDLE: Final[str] = "@cornerhouserealty"
+
 logger = logging.getLogger("gable.runner")
+
+
+def _city_of(address: str) -> str:
+    """The city an address sits in, for designs with a neighbourhood slot.
+
+    Args:
+        address: A property address, ideally "street, city, ST ZIP".
+
+    Returns:
+        The city, or an empty string when the address has no comma to read it
+        from. Empty leaves the design's placeholder in place, which becomes a
+        question rather than a wrong neighbourhood.
+
+    Raises:
+        Nothing.
+    """
+    parts = [part.strip() for part in address.split(",") if part.strip()]
+    return parts[1] if len(parts) >= 2 else ""
+
 
 #: Chase asked for two inspections: one to catch the obvious, a second to catch
 #: what fixing the first moved.
@@ -532,6 +557,11 @@ class Runner:
             # agent's photo lives on cornerhouserealty.com and the roster
             # mirrors it; an empty value leaves the design's own face alone.
             "headshot": person.get("headshot_url", ""),
+            # Fields the designs carry that nothing was supplying, so their
+            # sample text printed on finished flyers.
+            "agent_title": "REALTOR",
+            "social_handle": DEFAULT_SOCIAL_HANDLE,
+            "neighborhood": _city_of(intake.address),
         }
 
     def _values_not_readable_back(
