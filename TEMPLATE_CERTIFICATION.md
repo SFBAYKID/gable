@@ -36,10 +36,20 @@ future change makes them deliver, that is a regression.
 ### What the four reviews found, and what each means
 
 * **Sold — the headshot overlaps a speech-tail shape.** A defect introduced by
-  headshot replacement itself: `find_headshot_frame` chose a frame on this design
-  that sits under decorative artwork, so the face covers it. The frame finder
-  needs to prefer a candidate that nothing overlaps, or skip when the design's
-  own artwork sits on top.
+  headshot replacement itself: `find_headshot_frame` chose a frame that sits
+  under decorative artwork, so the face covers it.
+
+  `_is_overlaid` was added to reject such frames and **it does not fix this
+  case.** Three attempts, and the reason is now understood: the speech-tail is
+  inside an `elementGroup`. Group children do not appear in `pageElements`, and
+  the API reports the group's own bounds as zero, so the overlap check cannot
+  see the artwork at all. Fixing it means composing group-relative transforms to
+  get absolute child bounds — real work, not another threshold, and the same
+  blind spot that hides text inside groups from field resolution.
+
+  Until then the vision pass is the backstop, and it caught this on all three
+  runs, which is the system behaving correctly: a defect it cannot prevent, it
+  still refuses to deliver.
 * **Open House — the top logo is cut off at the top edge.** Not yet diagnosed.
   Either the hero frame extends above the slide and the logo is being covered, or
   the template itself crops.
@@ -60,3 +70,26 @@ future change makes them deliver, that is a regression.
   jpg. No portrait, square, panorama, PNG, EXIF-rotated, or multi-megabyte
   source has gone through the real path. See `GABLE_TEST_PROMPT.md`.
 * No conversational edit has been applied to any of these flyers.
+
+## Photo shapes — proved 2026-08-11
+
+Every reasonable source shape and size through the real `fit_locally` path. All
+land at exactly 1080x1350, filling the frame, none seamed.
+
+| Source | Result |
+|---|---|
+| Landscape phone 4032x3024 | fits |
+| Landscape web 1920x1080 | fits |
+| Portrait 4:5 1080x1350 | fits |
+| Portrait tall 3024x4032 | fits |
+| Square 1080x1080 | fits |
+| Panorama 4000x1200 | fits |
+| Tiny 275x183 | fits, and is enlarged by the model first |
+| PNG 1600x1200 | fits |
+| Huge 6000x4000 | fits |
+
+This is the fitting half of "a photo of any reasonable size or shape". What it
+does **not** prove is the Slack leg: these went through `fit_locally` directly,
+not through a real upload, download and publish. An EXIF-rotated phone original
+has also not been through the real path — `fit.py` calls `exif_transpose`, but
+that has not been exercised end to end.

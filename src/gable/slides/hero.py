@@ -266,6 +266,55 @@ def find_headshot_frame(
             continue
 
         candidate = HeroFrame(element["objectId"], x, y, width, height)
+        # A frame with artwork sitting on top of it is not the headshot well.
+        # Replacing one covered the decorative speech-tail on the Just Sold
+        # design, because the face was drawn over the thing that was drawn over
+        # the frame. Verified on a rendered flyer 2026-08-11.
+        if _is_overlaid(page, candidate):
+            continue
         if best is None or candidate.area > best.area:
             best = candidate
     return best
+
+
+#: How much of a frame another element may cover before the frame is treated as
+#: sitting underneath artwork rather than being a free photo well.
+_MAX_OVERLAP_FRACTION: Final[float] = 0.25
+
+
+def _is_overlaid(page: dict[str, Any], frame: HeroFrame) -> bool:
+    """Whether another element covers a meaningful part of this frame.
+
+    Args:
+        page: The slide the frame lives on.
+        frame: The candidate frame.
+
+    Returns:
+        True when some other element overlaps more than a quarter of it. Such a
+        frame is behind the design rather than a slot in it, and pasting a face
+        into it hides whatever was on top.
+
+    Raises:
+        Nothing.
+    """
+    if frame.area <= 0:
+        return False
+    for element in page.get("pageElements", []):
+        if element.get("objectId") == frame.object_id:
+            continue
+        x, y, width, height = _element_bounds(element)
+        if width <= 0 or height <= 0:
+            continue
+        overlap_w = min(frame.x + frame.width, x + width) - max(frame.x, x)
+        overlap_h = min(frame.y + frame.height, y + height) - max(frame.y, y)
+        if overlap_w <= 0 or overlap_h <= 0:
+            continue
+        # Measured against whichever element is smaller. A first attempt used
+        # the frame's own area and missed the case that motivated this: a small
+        # decorative speech-tail sitting on a large headshot well never covers a
+        # quarter of the well, but the well covers nearly all of it — and the
+        # face still lands on top of the tail.
+        smaller = min(frame.area, width * height)
+        if smaller > 0 and (overlap_w * overlap_h) / smaller > _MAX_OVERLAP_FRACTION:
+            return True
+    return False
