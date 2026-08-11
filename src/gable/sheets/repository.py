@@ -21,7 +21,7 @@ from typing import Final
 
 from gable.db import store
 from gable.listings.intake import Intake, from_row
-from gable.sheets.client import SheetClient
+from gable.sheets.client import ReadsRanges
 
 #: The full width of the intake form. Reading the whole row keeps the content
 #: hash meaningful even for columns Gable ignores today.
@@ -62,7 +62,7 @@ def _content_hash(row: list[str]) -> str:
     return hashlib.sha256("\x1f".join(row).encode()).hexdigest()[:16]
 
 
-def read_submissions(client: SheetClient, tab: str) -> list[Submission]:
+def read_submissions(client: ReadsRanges, tab: str) -> list[Submission]:
     """Every row on the responses tab, parsed.
 
     Args:
@@ -201,7 +201,7 @@ def new_submissions(connection: Connection, submissions: list[Submission]) -> li
     return pending
 
 
-def sync_salespeople(client: SheetClient, connection: Connection, tab: str) -> int:
+def sync_salespeople(client: ReadsRanges, connection: Connection, tab: str) -> int:
     """Mirror the roster tab into the database.
 
     Args:

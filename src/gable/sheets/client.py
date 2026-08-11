@@ -14,7 +14,7 @@ import random
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Final
+from typing import Any, Final, Protocol
 
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
@@ -32,6 +32,20 @@ MAX_ATTEMPTS: Final[int] = 5
 
 class SheetError(Exception):
     """Raised when the Sheet cannot be read."""
+
+
+class ReadsRanges(Protocol):
+    """The only thing the pipeline needs from a sheet client.
+
+    Narrower than `SheetClient` on purpose: the poller and the repository read
+    ranges and nothing else, so they depend on that rather than on a concrete
+    class holding credentials. It also means a test can supply canned rows
+    without a Google account.
+    """
+
+    def read(self, a1_range: str) -> list[list[str]]:
+        """Read an A1 range."""
+        ...
 
 
 @dataclass(frozen=True, slots=True)

@@ -1,52 +1,42 @@
-# ---------------------------------------------------------------------------
-# Secrets — nothing here ever reaches a commit.
-# CLAUDE.md section 3: verify this file before commit #1.
-# ---------------------------------------------------------------------------
-.env
-.env.*
-!.env.example
 
+!.env.example
+# ---------------------------------------------------------------------------
+# CLAUDE.md section 3: verify this file before commit #1.
+# Editors and OS
+# Gable working output — generated xlsx batches and streamed photo temp files.
 # Google service-account keys. Named several ways in the wild; block all of
-# them, and keep the real key outside the repo tree entirely (ARCHITECTURE.md
+# Python
+# Secrets — nothing here ever reaches a commit.
+# Tooling caches
 # section 7).
+# them, and keep the real key outside the repo tree entirely (ARCHITECTURE.md
+*-key.json
+*.egg-info/
+*.py[cod]
+*.xlsx
 *service-account*.json
 *service_account*.json
-*-key.json
-credentials.json
-client_secret*.json
-
-# ---------------------------------------------------------------------------
-# Python
-# ---------------------------------------------------------------------------
-__pycache__/
-*.py[cod]
-*.egg-info/
-.eggs/
-build/
-dist/
-.venv/
-venv/
-env/
-
-# ---------------------------------------------------------------------------
-# Tooling caches
-# ---------------------------------------------------------------------------
-.mypy_cache/
-.ruff_cache/
-.pytest_cache/
-.coverage
-htmlcov/
-
-# ---------------------------------------------------------------------------
-# Editors and OS
-# ---------------------------------------------------------------------------
-.idea/
-.vscode/
 .DS_Store
-
-# ---------------------------------------------------------------------------
-# Gable working output — generated xlsx batches and streamed photo temp files.
-# ---------------------------------------------------------------------------
+.coverage
+.eggs/
+.env
+.env.*
+.idea/
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+.venv/
+.vscode/
+__pycache__/
+build/
+client_secret*.json
+credentials.json
+dist/
+env/
+gable.db
+gable.db-shm
+gable.db-wal
+htmlcov/
 out/
 tmp/
-*.xlsx
+venv/
