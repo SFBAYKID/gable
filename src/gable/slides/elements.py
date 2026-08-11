@@ -65,3 +65,28 @@ def font_size_pt(element: dict[str, Any]) -> float:
         if magnitude:
             return float(magnitude)
     return 0.0
+
+
+def font_weight(element: dict[str, Any]) -> int:
+    """Return the first explicit text-run font weight, or 400 if unstated.
+
+    Args:
+        element: A `pageElements` entry.
+
+    Returns:
+        400 for regular, 700 for bold. Bold renders materially wider than the
+        regular weight the fitting factors were derived from, and a rendered
+        flyer overflowed on exactly the two bold strings it contained.
+
+    Raises:
+        Nothing.
+    """
+    runs = element.get("shape", {}).get("text", {}).get("textElements", [])
+    for run in runs:
+        style = run.get("textRun", {}).get("style", {})
+        weight = style.get("weightedFontFamily", {}).get("weight")
+        if weight:
+            return int(weight)
+        if style.get("bold"):
+            return 700
+    return 400

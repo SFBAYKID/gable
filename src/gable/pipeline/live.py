@@ -22,7 +22,7 @@ from gable.pipeline.vision import Inspection
 from gable.pipeline.vision import inspect as inspect_flyer
 from gable.slides import fitting
 from gable.slides.edits import replace_text
-from gable.slides.elements import descendants, font_size_pt, text_content
+from gable.slides.elements import descendants, font_size_pt, font_weight, text_content
 from gable.slides.hero import find_headshot_frame, find_hero_frame
 from gable.voice import is_clean
 
@@ -423,6 +423,7 @@ def build_runner(
                         font_size_pt=size_pt,
                         width_emu=float(width),
                         lines=lines,
+                        weight=font_weight(element),
                     )
                 )
         return boxes

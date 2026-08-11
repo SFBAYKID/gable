@@ -69,12 +69,27 @@ def _class_of(character: str) -> str:
     return "lower"
 
 
-def estimate_width_pt(text: str, font_size_pt: float) -> float:
+#: Bold type is wider than the regular weight these factors were derived from.
+#: Slides reports the weight, so this is read rather than guessed. Both strings
+#: that overflowed a rendered flyer — the price and the agent name — were
+#: weight 700 Open Sans, while the label beside them that fitted correctly was
+#: weight 400.
+#: # ASSUMPTION: 1.07 for Open Sans Bold against Regular. Measured against the
+#: rendered flyer rather than from font tables; a design using a heavier display
+#: cut would want its own figure.
+BOLD_MULTIPLIER: Final[float] = 1.07
+
+#: At or above this weight, treat the text as bold.
+BOLD_WEIGHT: Final[int] = 600
+
+
+def estimate_width_pt(text: str, font_size_pt: float, weight: int = 400) -> float:
     """Estimate how wide a line of text renders.
 
     Args:
         text: The text. Only the longest line matters for overflow.
         font_size_pt: The font size in points.
+        weight: Font weight, 400 regular and 700 bold. Bold renders wider.
 
     Returns:
         Estimated width in points.
@@ -83,7 +98,8 @@ def estimate_width_pt(text: str, font_size_pt: float) -> float:
         Nothing.
     """
     longest = max(text.splitlines() or [""], key=len, default="")
-    return sum(WIDTH_FACTORS[_class_of(c)] for c in longest) * font_size_pt
+    bold = BOLD_MULTIPLIER if weight >= BOLD_WEIGHT else 1.0
+    return sum(WIDTH_FACTORS[_class_of(c)] for c in longest) * font_size_pt * bold
 
 
 @dataclass(frozen=True, slots=True)
@@ -96,6 +112,8 @@ class TextBox:
     width_emu: float
     #: How many lines the box can hold at its current height.
     lines: int = 1
+    #: Font weight, 400 regular and 700 bold. Bold renders wider.
+    weight: int = 400
 
 
 @dataclass(frozen=True, slots=True)
@@ -125,7 +143,12 @@ class Fit:
 
 
 def fit_for(
-    object_id: str, text: str, current_pt: float, box_width_emu: float, lines: int = 1
+    object_id: str,
+    text: str,
+    current_pt: float,
+    box_width_emu: float,
+    lines: int = 1,
+    weight: int = 400,
 ) -> Fit:
     """Work out the largest font size at which text fits its box.
 
@@ -136,6 +159,7 @@ def fit_for(
         box_width_emu: The shape's rendered width in EMU, scale already applied.
         lines: How many lines the box can hold. A two-line box fits roughly
             twice the text at the same size.
+        weight: Font weight, 400 regular and 700 bold.
 
     Returns:
         A `Fit`. `fitted_pt` equals `current_pt` when nothing needs to change.
@@ -149,7 +173,7 @@ def fit_for(
         raise ValueError(msg)
 
     box_width_pt = (box_width_emu / EMU_PER_POINT) * max(1, lines) * SAFETY
-    needed = estimate_width_pt(text, current_pt)
+    needed = estimate_width_pt(text, current_pt, weight)
     if needed <= box_width_pt:
         return Fit(object_id, text, current_pt, box_width_pt, current_pt)
 
@@ -198,5 +222,14 @@ def plan_fits(elements: list[TextBox]) -> list[Fit]:
     for box in elements:
         if not box.text or box.font_size_pt <= 0 or box.width_emu <= 0:
             continue
-        fits.append(fit_for(box.object_id, box.text, box.font_size_pt, box.width_emu, box.lines))
+        fits.append(
+            fit_for(
+                box.object_id,
+                box.text,
+                box.font_size_pt,
+                box.width_emu,
+                box.lines,
+                box.weight,
+            )
+        )
     return fits
