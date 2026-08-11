@@ -34,7 +34,6 @@ SAMPLE_AGENT_NAMES: Final[tuple[str, ...]] = (
     "Jason Vetter",
     "Stacey Abbott",
     "Tracey Edwards",
-    "Olivia Wilson",
     "Piet de Dreu",
     "Melissa Hargreaves",
 )
@@ -72,7 +71,6 @@ SAMPLE_PEOPLE: Final[tuple[str, ...]] = (
     "Jason Vetter",
     "Kelli Kulnich",
     "Melissa Hargreaves",
-    "Olivia Wilson",
     "Realtor Name",
 )
 
@@ -181,6 +179,19 @@ PATTERNS: Final[dict[str, tuple[re.Pattern[str], ...]]] = {
         # so nothing replaced it, and the result looked entirely deliberate.
         re.compile(r"^(?:" + "|".join(SAMPLE_AGENT_NAMES) + r")$", re.IGNORECASE),
         re.compile(r"^(?:" + "|".join(re.escape(v) for v in SAMPLE_PEOPLE) + r")$", re.IGNORECASE),
+    ),
+    "client_name": (
+        # The reviewer's name, not the agent's. These designs set it in caps
+        # under the quote. Treating it as an agent slot puts the agent's name
+        # where the client's belongs.
+        re.compile(r"^OLIVIA WILSON$", re.IGNORECASE),
+        re.compile(r"^\[\s*CLIENT\s*NAME\s*\]$", re.IGNORECASE),
+    ),
+    "review_quote": (
+        # The sample testimonial, carried by every Client Review design with and
+        # without its opening quotation mark.
+        re.compile(r'^"?Working with Corner House Realty was such a smooth.*', re.DOTALL),
+        re.compile(r"^\[\s*(?:REVIEW|TESTIMONIAL|QUOTE)\s*\]$", re.IGNORECASE),
     ),
     "agent_title": (
         # Designs label the role as well as the name, and the sample text is

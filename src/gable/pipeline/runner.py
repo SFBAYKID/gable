@@ -33,6 +33,7 @@ from gable import spend
 from gable.db import store
 from gable.listings.enrich import Facts, look_up
 from gable.listings.intake import Intake
+from gable.listings.review import review_values
 from gable.pipeline import audit, people
 from gable.pipeline.orchestrator import Outcome, after_research, agent_slots, judge, plan
 from gable.pipeline.vision import Inspection, inspect
@@ -588,6 +589,8 @@ class Runner:
             # The co-agent on a two-agent design. Empty on every other design,
             # which leaves those slots to the single-agent values above.
             **people.co_agent_values(self.connection, intake),
+            # A review post carries a client's words instead of a property.
+            **review_values(intake.request_type, intake.post_details or intake.extra_notes),
         }
 
     def _values_not_readable_back(
