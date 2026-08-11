@@ -362,7 +362,7 @@ def find_headshot_frame(
         # Replacing one covered the decorative speech-tail on the Just Sold
         # design, because the face was drawn over the thing that was drawn over
         # the frame. Verified on a rendered flyer 2026-08-11.
-        if _is_overlaid(page, candidate):
+        if _is_overlaid(page, candidate, _MAX_HEADSHOT_OVERLAP_FRACTION):
             continue
         if best is None or candidate.area > best.area:
             best = candidate
@@ -374,12 +374,24 @@ def find_headshot_frame(
 _MAX_OVERLAP_FRACTION: Final[float] = 0.25
 
 
-def _is_overlaid(page: dict[str, Any], frame: HeroFrame) -> bool:
+#: A replacement image is appended to the page, which puts it at the top of the
+#: z-order — above artwork that was originally drawn over its frame. So a face
+#: covering *any* of that artwork is wrong, and the headshot tolerance is much
+#: tighter than the hero's. Measured: at 25% the deck produced 11 overlap
+#: complaints once headshot replacement reached most designs.
+_MAX_HEADSHOT_OVERLAP_FRACTION: Final[float] = 0.02
+
+
+def _is_overlaid(
+    page: dict[str, Any], frame: HeroFrame, tolerance: float = _MAX_OVERLAP_FRACTION
+) -> bool:
     """Whether another element covers a meaningful part of this frame.
 
     Args:
         page: The slide the frame lives on.
         frame: The candidate frame.
+        tolerance: How much of the frame another element may cover before it
+            counts as overlaid.
 
     Returns:
         True when some other element overlaps more than a quarter of it. Such a
@@ -420,6 +432,6 @@ def _is_overlaid(page: dict[str, Any], frame: HeroFrame) -> bool:
         # quarter of the well, but the well covers nearly all of it — and the
         # face still lands on top of the tail.
         smaller = min(frame.area, width * height)
-        if smaller > 0 and (overlap_w * overlap_h) / smaller > _MAX_OVERLAP_FRACTION:
+        if smaller > 0 and (overlap_w * overlap_h) / smaller > tolerance:
             return True
     return False
