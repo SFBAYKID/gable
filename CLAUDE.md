@@ -98,6 +98,10 @@ about *work*. The line is whether the decision is yours to make.
   contradicts — then update the doc in the same commit.
 - Write the `Makefile`, `.gitignore`, `pyproject.toml`, and systemd unit.
 - Delete dead code you wrote.
+- **Commit and push to `main`, once the §10 gates actually pass.** Review moved
+  to GitHub, where Chase can read a diff properly. The gates are the price of
+  this: pushing red is worse than not pushing, because it puts work nobody
+  verified in front of the next agent as though it were finished.
 
 **Always ask. These are Chase's calls, not yours:**
 
@@ -485,8 +489,13 @@ A task is complete only when all of these are true:
 - Send a Slack message to any channel other than `C0BP597644B` without asking.
 - Send email, or message a real-estate agent directly. Gable talks to Carmen and
   to Chase. It does not talk to clients.
-- Publish, share, or export a Canva design. Gable prepares; Carmen decides.
-- Push to `main` without Chase's review.
+- Publish, share, or export a finished design. Gable renders a Slides file into
+  the Gable drive and links Carmen to it. She decides what leaves the building.
+- **Force-push, rewrite history, or push anything that fails the §10 gates.**
+  Pushing to `main` is yours to do — Chase reviews on GitHub rather than
+  blocking the commit. Rewriting published history is not, ever: it is the one
+  git operation that destroys someone else's work silently. `git push` yes,
+  `git push --force` no.
 - Report a phase complete while any Section 4.3 unknown it depends on is still
   unknown.
 
