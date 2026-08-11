@@ -222,11 +222,12 @@ def validate(manifest: Manifest, values: dict[str, str]) -> list[Problem]:
 
         if slot.required and not value:
             readable = slot.name.replace("_", " ")
+            question = "What number should it use?" if slot.kind == PHONE else "What should it say?"
             problems.append(
                 Problem(
                     slot.name,
                     f"This design needs the {readable} and I do not have it. "
-                    "I have not built it rather than leaving a label on the flyer.",
+                    f"I have not built it rather than leaving a label on the flyer. {question}",
                 )
             )
             continue

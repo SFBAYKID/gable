@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from gable.slides.manifest import ADDRESS_SHAPE, normalise_address
+from gable.slides.manifest import ADDRESS_SHAPE, PHONE, Field, Manifest, normalise_address, validate
 
 
 def test_a_form_address_missing_only_the_city_comma_is_canonicalized() -> None:
@@ -30,3 +30,12 @@ def test_an_address_without_a_city_stays_invalid_instead_of_being_guessed() -> N
 
     assert address == "7631 Old Columbia Road, MD 20723"
     assert ADDRESS_SHAPE.fullmatch(address) is None
+
+
+def test_a_missing_required_phone_asks_for_the_number() -> None:
+    manifest = Manifest("test", (Field("agent_phone", PHONE, required=True),))
+
+    problems = validate(manifest, {})
+
+    assert len(problems) == 1
+    assert problems[0].say.endswith("What number should it use?")

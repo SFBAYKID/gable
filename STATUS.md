@@ -24,6 +24,13 @@ owned by `gable:gable`, verified writable as the service user, and repaired on
 every future deploy. The exact production database at `/opt/gable/var/gable.db`
 has the historical backfill marker.
 
+At 11:00 Pacific, the same Slack file was replayed without another image-model
+call. It was resized, published, and attached to the original run. That replay
+exposed and fixed two more live defects: an address missing only its city comma
+was rejected, and a follow-up reply replaced the stored root thread timestamp.
+The run now correctly remains in its original thread at `needs_info`, waiting
+for Chase's agent phone number rather than guessing one.
+
 Proven live on two real submissions, invoked manually:
 
 - **Row 100** (Lolo Simmons, Under Contract, no closing price) stopped and asked
@@ -221,8 +228,8 @@ The module graph, automatic trigger, Slack photo resume, core conversational
 edits, and notes-aware template selector are built. The current priority order
 is:
 
-1. Re-upload the same undersized photo after the repaired photo-directory
-   permission, then inspect the resumed flyer and its `ai_enhanced` record.
+1. Provide Chase's test phone number in the existing listing thread, then resume
+   and inspect the rendered flyer. The photo is already fitted and published.
 2. Calibrate the seam gate against real enlargements; the first live derivative
    was rejected and the original-photo fallback was used.
 3. Replace the agent headshot and measure the exact hero layer for the remaining
