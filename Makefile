@@ -9,10 +9,13 @@ RUFF    := .venv/bin/ruff
 MYPY    := .venv/bin/mypy
 PYTEST  := .venv/bin/pytest
 
-# Droplet coordinates. Override on the command line, never commit real values:
-#   make deploy GABLE_HOST=gable@203.0.113.10
-GABLE_HOST ?= gable@CHANGE-ME
+# Droplet coordinates. Created 2026-08-10: "gable", Ubuntu 24.04 LTS, SFO3,
+# 1 vCPU / 1 GB, $6/mo. Root-only for now; a deploy user comes with the first
+# real deploy. The IP is not a secret — it is in DigitalOcean's console and on
+# every packet — so it lives here rather than in .env.
+GABLE_HOST ?= root@143.110.146.87
 GABLE_DIR  ?= /opt/gable
+GABLE_SSH_KEY ?= ~/.ssh/gable_droplet
 
 .DEFAULT_GOAL := check
 .PHONY: help setup fmt lint typecheck test check run clean deploy logs
@@ -59,9 +62,12 @@ clean:
 # Deploy is a pull, never a push of local files. No hand-editing on the server
 # (CLAUDE.md section 9).
 deploy:
-	ssh $(GABLE_HOST) "cd $(GABLE_DIR) && git pull --ff-only && \
+	ssh -i $(GABLE_SSH_KEY) $(GABLE_HOST) "cd $(GABLE_DIR) && git pull --ff-only && \
 		$(GABLE_DIR)/.venv/bin/pip install -e . && \
-		sudo systemctl restart gable"
+		systemctl restart gable"
 
 logs:
-	ssh $(GABLE_HOST) "journalctl -u gable -f -o cat"
+	ssh -i $(GABLE_SSH_KEY) $(GABLE_HOST) "journalctl -u gable -f -o cat"
+
+ssh:
+	ssh -i $(GABLE_SSH_KEY) $(GABLE_HOST)

@@ -7,10 +7,19 @@
 # nothing. No ports are opened, so there is no listener to harden.
 
 [Unit]
-Description=Gable — listing form submissions to Canva Bulk Create files
+Description=Gable — listing form submissions to finished social posts
 Documentation=file:///opt/gable/ARCHITECTURE.md
 After=network-online.target
 Wants=network-online.target
+
+# Rate limiting lives in [Unit], NOT [Service]. Verified on the droplet with
+# `systemd-analyze verify`, which reported "Unknown key name
+# 'StartLimitIntervalSec' in section 'Service', ignoring" — the limit was
+# silently doing nothing. Five failures inside five minutes stops the unit and
+# leaves it stopped for a human, rather than hammering Slack and Google while
+# nobody is watching (ARCHITECTURE.md 6).
+StartLimitIntervalSec=300
+StartLimitBurst=5
 
 [Service]
 Type=simple
@@ -40,13 +49,10 @@ StandardOutput=journal
 StandardError=journal
 SyslogIdentifier=gable
 
-# Restart, but do not crash-loop (ARCHITECTURE.md section 6). Five failures
-# inside five minutes stops the unit and leaves it stopped for a human, rather
-# than hammering Slack and Google while nobody is watching.
+# Restart, but do not crash-loop (ARCHITECTURE.md section 6). The burst limit
+# that makes this bounded is in [Unit] above — systemd rejects it here.
 Restart=on-failure
 RestartSec=15s
-StartLimitIntervalSec=300
-StartLimitBurst=5
 
 # A slow Sheet read must not look like a hang. 30s is well over the poll cycle's
 # own timeouts; if the process cannot stop in 30s something is genuinely wedged.

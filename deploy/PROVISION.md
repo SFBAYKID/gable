@@ -1,13 +1,66 @@
-# Droplet provisioning — run by Chase
+# Droplet provisioning
 
-Every step here needs either a DigitalOcean console session or `sudo`. I do not
-handle account passwords and I do not enter credentials anywhere (CLAUDE.md §3),
-so this is yours to run. Once it is done, `make deploy` is mine.
+> **STATUS: DONE.** Provisioned 2026-08-10. Everything below has been **run and
+> verified on the live droplet** — this is a record, not a plan. The one thing
+> still outstanding is at the bottom.
 
-**Verification status:** these commands follow Ubuntu and systemd documentation
-and the constraints in CLAUDE.md §9 / ARCHITECTURE.md §7. **I have not run them
-against a droplet** — none exists yet. Anything that behaves differently on the
-real box is a bug I fix, not a surprise you work around. Tell me what it printed.
+## The droplet
+
+| | |
+|---|---|
+| Name | `gable` |
+| IP | `143.110.146.87` |
+| Region | SFO3 |
+| Size | 1 vCPU / 1 GB / 25 GB — **$6.00/month** |
+| OS | Ubuntu 24.04.4 LTS, Python 3.12.3 |
+| SSH key | `~/.ssh/gable_droplet` (ed25519, generated locally, no passphrase) |
+| Access | `make ssh` |
+
+**On the $6 vs the $4 in CLAUDE.md §9:** §9 says the $4 tier is 512MB-class and
+that 512MB is tight for Python plus image handling. Since the renderer moved to
+Google Slides most compositing happens on Google's servers, but Pillow still
+normalizes every photo locally. 1 GB removes that risk for $2/month. Called
+deliberately, flagged here rather than buried.
+
+## Verified on the box
+
+```
+passwordauthentication no          # sshd -T
+permitrootlogin without-password
+kbdinteractiveauthentication no
+/swapfile file 1024M               # swapon --show, and in /etc/fstab
+vm.swappiness=10
+ufw: active, deny incoming, allow outgoing, 22/tcp ALLOW
+gable uid=109 gid=112, /opt/gable, /opt/gable/var, /opt/gable/secrets (0700)
+python3-venv, python3-dev, git installed
+```
+
+`systemd-analyze verify` on the installed unit found a real bug: **StartLimitIntervalSec
+and StartLimitBurst were in `[Service]`, where systemd ignores them silently.**
+The crash-loop guard was doing nothing while looking correct. Moved to `[Unit]`;
+`systemctl show` now reports `StartLimitIntervalUSec=5min`, `StartLimitBurst=5`.
+`tests/test_deploy_unit.py` asserts the placement so it cannot regress.
+
+The unit is installed at `/etc/systemd/system/gable.service`, currently
+**disabled and inactive** — correct, because `ExecStart` points at
+`gable.slackapp.app`, which is still a placeholder. Enable and start it when
+Phase 1 lands.
+
+## Still outstanding — needs Chase
+
+1. **Secrets.** `.env` → `/opt/gable/.env` (chmod 600, owned by gable), and the
+   Google service-account JSON → `/opt/gable/secrets/`. I never handle these.
+2. **A git remote.** The repo is local-only, so `make deploy` has nothing to
+   pull yet.
+3. **Firewall scope.** SSH is currently open to any source address. If you want
+   it narrowed to your IP, say the word — I left it open rather than risk
+   locking us both out from a guess.
+
+---
+
+## Original instructions, kept for rebuilding from scratch
+
+The commands below are what was run. They are idempotent and safe to re-run.
 
 ---
 

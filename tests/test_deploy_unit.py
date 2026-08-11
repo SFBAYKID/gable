@@ -60,9 +60,25 @@ def test_execstart_launches_the_installed_package(unit: configparser.ConfigParse
 def test_restart_is_bounded(unit: configparser.ConfigParser) -> None:
     """Restart on failure, but stop rather than hammer external APIs forever."""
     assert unit.get("Service", "Restart") == "on-failure"
-    assert unit.has_option("Service", "StartLimitBurst")
-    assert int(unit.get("Service", "StartLimitBurst")) <= 5
     assert unit.has_option("Service", "RestartSec")
+
+
+def test_start_limits_are_in_the_unit_section_not_service(
+    unit: configparser.ConfigParser,
+) -> None:
+    """StartLimit* in [Service] is rejected by systemd — silently, which is the danger.
+
+    Found on the real droplet: `systemd-analyze verify` reported "Unknown key
+    name 'StartLimitIntervalSec' in section 'Service', ignoring", meaning the
+    crash-loop guard was doing nothing at all while looking correct in the file.
+    `systemctl show` now confirms StartLimitIntervalUSec=5min, Burst=5.
+    """
+    assert unit.has_option("Unit", "StartLimitIntervalSec")
+    assert unit.has_option("Unit", "StartLimitBurst")
+    assert int(unit.get("Unit", "StartLimitBurst")) <= 5
+    # The bug this test exists to prevent.
+    assert not unit.has_option("Service", "StartLimitIntervalSec")
+    assert not unit.has_option("Service", "StartLimitBurst")
 
 
 def test_filesystem_is_read_only_except_var(unit: configparser.ConfigParser) -> None:
