@@ -315,6 +315,36 @@ class Runner:
             self.say(spoken, None)
             return result
 
+        # Read the flyer back and require every value to appear exactly as it
+        # was supplied. A delivered flyer once carried "$460,0000" — four zeros
+        # — against a submission that supplied "$685,000", and every check
+        # passed, because the vision pass reads layout and a plausible-looking
+        # wrong number is not a layout problem. Counting replacements is not
+        # enough either: `replaceAllText` reported success while corrupting the
+        # text it matched inside.
+        #
+        # A wrong price on a real address is the worst thing this system can
+        # produce, so this is deterministic rather than a judgement.
+        wrong = self._values_not_readable_back(output_id, values, pairs)
+        if wrong:
+            store.set_status(
+                self.connection,
+                run_id,
+                "needs_review",
+                f"a filled value did not read back correctly: {wrong[0]}"[:400],
+                output_file_id=output_id,
+                output_url=output_url,
+            )
+            result.status = "needs_review"
+            result.output_url = output_url
+            spoken = safe(
+                f"I filled the design but the {wrong[0]} on it does not match what I was "
+                "given, so I have not sent it as finished."
+            )
+            result.said.append(spoken)
+            self.say(spoken, None)
+            return result
+
         placed = self.place_photo(output_id, self.hero_photo_url, template_label)
         # The sample face is the most visible thing Gable gets wrong: one agent's
         # name beside another agent's photograph. Best effort — a design with no
@@ -467,6 +497,47 @@ class Runner:
             # mirrors it; an empty value leaves the design's own face alone.
             "headshot": person.get("headshot_url", ""),
         }
+
+    def _values_not_readable_back(
+        self, file_id: str, values: dict[str, str], pairs: dict[str, str]
+    ) -> list[str]:
+        """Which supplied values do not appear verbatim on the rendered flyer.
+
+        Args:
+            file_id: The filled presentation.
+            values: What the run intended to put on the flyer.
+            pairs: The literal-to-value replacements actually sent.
+
+        Returns:
+            Field names whose value is missing or corrupted, worst first. Empty
+            when every value reads back exactly.
+
+        Raises:
+            Nothing. A read failure returns no complaints rather than blocking a
+            flyer on a transient Slides error; the other guards still apply.
+        """
+        try:
+            text = "\n".join(self.read_slide_text(file_id))
+        except Exception:
+            logger.exception("could not read the flyer back for verification")
+            return []
+        if not text:
+            return []
+
+        # Only values actually sent to the design. A value the template has no
+        # slot for is not expected to appear.
+        sent = {value for value in pairs.values() if value.strip()}
+        missing: list[str] = []
+        for name, value in values.items():
+            candidate = value.strip()
+            if not candidate or candidate not in sent:
+                continue
+            # `headshot` is an image URL, never text on the flyer.
+            if name == "headshot":
+                continue
+            if candidate not in text:
+                missing.append(name.replace("_", " "))
+        return missing
 
     def _name(self, intake: Intake) -> str:
         """What the finished file is called in Drive, so Carmen can scan for it."""
