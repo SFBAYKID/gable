@@ -36,7 +36,7 @@ EMU_PER_POINT: Final[float] = 12700.0
 WIDTH_FACTORS: Final[dict[str, float]] = {
     "wide": 0.82,  # M W @ %
     "upper": 0.62,  # A-Z
-    "digit": 0.55,  # 0-9 and $
+    "digit": 0.62,  # 0-9 and $ — bold display digits, see note below
     "lower": 0.50,  # a-z
     "narrow": 0.26,  # i l j . , ' : ; ! | space
 }
@@ -45,8 +45,15 @@ WIDTH_FACTORS: Final[dict[str, float]] = {
 #: and the honest answer becomes "this does not fit" rather than a smaller lie.
 MIN_READABLE_PT: Final[float] = 8.0
 
+#: Leave real room, not a rounding allowance. These factors are a five-bucket
+#: approximation of proportional type, and a rendered flyer proved the error is
+#: not small: "$685,000" was estimated at 127.0pt inside a 132.2pt box — a pass
+#: by 4% — and wrapped anyway, dropping the final zero onto a second line. The
+#: heavy sans used for prices carries wider digits than the regular-weight
+#: faces these numbers were derived from. Since the estimator can only ever be
+#: approximate, the margin absorbs its error instead of pretending to precision.
 #: Leave a little room rather than filling the box exactly to the pixel.
-SAFETY: Final[float] = 0.96
+SAFETY: Final[float] = 0.90
 
 
 def _class_of(character: str) -> str:

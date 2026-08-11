@@ -43,6 +43,10 @@ from gable.slides.catalog import for_category
 from gable.slides.selection import rank as rank_templates
 from gable.voice import safe
 
+#: Every Corner House agent is on this domain, so a roster row missing its own
+#: URL still produces a real website rather than the word "Website".
+DEFAULT_BROKERAGE_URL: Final[str] = "cornerhouserealty.com"
+
 logger = logging.getLogger("gable.runner")
 
 #: Chase asked for two inspections: one to catch the obvious, a second to catch
@@ -434,6 +438,11 @@ class Runner:
             "agent_phone": person.get("phone", ""),
             "agent_email": intake.agent_email,
             "open_house": intake.open_house,
+            # `fields.PATTERNS` recognises a website slot and this dictionary
+            # did not supply one, so `replacements()` skipped it and the literal
+            # word "Website" survived onto the flyer — which then failed its own
+            # quality check. The roster already carries the URL.
+            "website": person.get("brokerage_url", "") or DEFAULT_BROKERAGE_URL,
         }
 
     def _name(self, intake: Intake) -> str:

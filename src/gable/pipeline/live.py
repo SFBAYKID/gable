@@ -70,6 +70,30 @@ def safe_replacement_requests(
     return requests
 
 
+def _implied_font_size_pt(height_emu: float) -> float:
+    """Estimate a text box's font size from its height.
+
+    Args:
+        height_emu: The box's rendered height in EMU.
+
+    Returns:
+        A point size, or 0.0 when the height is unusable.
+
+    Raises:
+        Nothing.
+
+    Note:
+        # ASSUMPTION: a single-line box is laid out at roughly 1.2x leading, so
+        # the type is about 0.8 of the box height. Confirmed well enough to
+        # catch overflow rather than to reproduce the designer's exact size —
+        # this feeds the fitter, which only ever shrinks text that does not fit.
+        # A rendered flyer comparing designed and fitted sizes would refine it.
+    """
+    if height_emu <= 0:
+        return 0.0
+    return max(1.0, (height_emu / fitting.EMU_PER_POINT) / 1.2)
+
+
 def place_hero_photo(
     slides: Any,  # noqa: ANN401 - googleapiclient resource, untyped upstream
     file_id: str,
@@ -293,6 +317,18 @@ def build_runner(
                 size = element.get("size", {})
                 width = size.get("width", {}).get("magnitude", 0) * transform.get("scaleX", 1)
                 height = size.get("height", {}).get("magnitude", 0) * transform.get("scaleY", 1)
+
+                # Slides reports no fontSize on a run that inherits its size from
+                # the theme or placeholder, which is most of them on an imported
+                # deck. `plan_fits` skips any box reporting zero, so the boxes
+                # most likely to overflow were the exact ones never checked — a
+                # rendered flyer showed $685,000 clipped to "$685,00" with the
+                # last digit wrapped, and the agent name overlapping the line
+                # beneath it. Estimating from the box geometry brings those back
+                # under the fitter.
+                if size_pt <= 0 and height > 0:
+                    size_pt = _implied_font_size_pt(height)
+
                 # How many lines the box can hold at this size, so a two-line
                 # box is not shrunk as though it were one.
                 lines = 1
