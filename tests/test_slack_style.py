@@ -327,3 +327,78 @@ def test_every_block_builder_renders_a_clean_message() -> None:
             for problem in violations(text):
                 problems.append(f"{name}: {text[:60]!r} — {problem}")
     assert not problems, "\n".join(problems)
+
+
+def test_no_card_repeats_an_action_id() -> None:
+    """Slack rejects a whole message whose action ids are not unique.
+
+    The unknown-agent card emitted the same id on every template button, so
+    Slack answered invalid_blocks and the card could never be posted at all.
+    Only discovered by posting it for real.
+    """
+    from datetime import UTC, datetime
+
+    from gable.models import AgentProfile, Listing, PhotoResult, PhotoSource
+    from gable.slackapp import blocks
+
+    listing = Listing(
+        response_row_id="r1",
+        submitted_at=datetime(2026, 8, 11, tzinfo=UTC),
+        agent_email="lolo@cornerhouserealty.com",
+        agent_name="Lolo Simmons",
+        address="7940 Oakwood Rd, Glen Burnie, MD 21061",
+        price_display="",
+    )
+    agent = AgentProfile(
+        agent_email="lolo@cornerhouserealty.com",
+        agent_name="Lolo Simmons",
+        template_label="Just Listed",
+    )
+    photo = PhotoResult(source=PhotoSource.CARMEN, url="http://198.51.100.7/a.jpg", confidence=1.0)
+
+    cards = {
+        "unknown_agent": blocks.unknown_agent_blocks(
+            listing, ("Just Listed", "Just Sold", "Open House", "Coming Soon"), "run1"
+        ),
+        "listing_ready": blocks.listing_ready_blocks(listing, agent, photo, "run1"),
+        "needs_photo": blocks.needs_photo_blocks(listing, ("Drive",), None, 0.75, "run1"),
+        "failure": blocks.failure_blocks("1 Test St", "Google refused that edit", "run1"),
+    }
+    for name, built in cards.items():
+        ids = [
+            el["action_id"]
+            for block in built
+            for el in (block.get("elements") or [])
+            if isinstance(el, dict) and "action_id" in el
+        ]
+        assert len(ids) == len(set(ids)), f"{name} repeats an action id: {ids}"
+
+
+def test_dispatch_key_recovers_the_route_from_a_suffixed_id() -> None:
+    """Handlers must route on the stable part, not the raw id."""
+    from gable.slackapp.blocks import ACTION_PICK_TEMPLATE, dispatch_key
+
+    assert dispatch_key(f"{ACTION_PICK_TEMPLATE}:2") == ACTION_PICK_TEMPLATE
+    assert dispatch_key(ACTION_PICK_TEMPLATE) == ACTION_PICK_TEMPLATE
+
+
+def test_button_labels_do_not_invite_emoji_expansion() -> None:
+    """emoji:true would let Slack expand a shortcode inside a label."""
+    from datetime import UTC, datetime
+
+    from gable.models import Listing
+    from gable.slackapp import blocks
+
+    listing = Listing(
+        response_row_id="r1",
+        submitted_at=datetime(2026, 8, 11, tzinfo=UTC),
+        agent_email="a@b.com",
+        agent_name="A B",
+        address="1 Test St",
+        price_display="",
+    )
+    built = blocks.unknown_agent_blocks(listing, ("Just Listed",), "run1")
+    for block in built:
+        for el in block.get("elements") or []:
+            if isinstance(el, dict) and el.get("type") == "button":
+                assert el["text"]["emoji"] is False

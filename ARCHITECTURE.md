@@ -63,7 +63,7 @@ Google Form ─────────► Google Sheet
                  │    ↓                     │                              │
                  │  ASK for hero image ─────┼──────────────────────────────┤
                  │    ↓                     │                              │
-                 │  fit image to frame ─────┼─► OpenAI  gpt-image-2        │
+                 │  fit image to frame ─────┼─► Pillow, free; a model only  │
                  │    ↓                     │                              │
                  │  store photo ────────────┼─► public HTTPS URL           │
                  │    ↓                     │                              ▼
@@ -442,15 +442,15 @@ Two consequences worth stating plainly, because both have bitten this design:
 
 Options, in preference order:
 
-1. **DigitalOcean Spaces** — S3-compatible, public-read, cheap, stable URLs, and
-   the droplet is already on DigitalOcean. Recommended. **Not yet configured;
-   `SPACES_KEY`, `SPACES_SECRET` and `SPACES_PUBLIC_BASE` are blank, and until
-   they are set `replaceAllShapesWithImage` cannot be called with a real photo
-   even once.** This is the critical path.
-2. Cloudflare R2 — S3-compatible with a free tier. A reasonable alternative if
-   the Spaces cost is unwelcome; costs a second vendor.
-3. Static files served by the droplet — free, but ties image availability to
-   droplet uptime and puts bandwidth on a 1 GB box.
+1. **The droplet, over plain `http://`** — in use, and the reason there is no
+   critical path here any more. Slides was assumed to require https; it does
+   not, verified live. nginx serves `/var/www/gable-photos`, `photos/store.py`
+   publishes there over ssh, and it costs nothing beyond a droplet already paid
+   for. A photo only has to survive one fetch, so the host needs no durability.
+2. **DigitalOcean Spaces** — S3-compatible, public-read, stable URLs. Still the
+   better answer if photo hosting ever outgrows one box, and `SPACES_*` remains
+   in config for that day. Not needed now.
+3. Cloudflare R2 — S3-compatible with a free tier; costs a second vendor.
 4. Google Drive public links — **do not, and now we know why.** See the table.
 
 Normalize before upload: convert to JPEG, cap the long edge at
@@ -458,7 +458,7 @@ Normalize before upload: convert to JPEG, cap the long edge at
 coordinates), and re-encode at quality 85. **Stream to disk; never hold a
 full-resolution image in memory on a 1 GB droplet.**
 
-### 4.5b Fit the photo to the frame (`photos/enhance.py`)
+### 4.5b Fit the photo to the frame (`photos/fit.py`)
 
 **This is the hardest problem in the product.** Everything else is plumbing;
 this is the part that decides whether the output looks professional or obviously
@@ -472,7 +472,7 @@ script checking that the file is a valid JPEG.
 
 So this is **reprocessing, not resizing**: crop to the frame's aspect ratio while
 keeping the building intact, straighten, correct exposure, upscale if the source
-is small. `GABLE_IMAGE_MODEL` (default `gpt-image-2`) does the work — the newest
+is small. `GABLE_IMAGE_MODEL` (default `gpt-image-1-mini`) does the work — the
 image model, deliberately, because this is the task worth spending capability on.
 
 Strong vision is the requirement here, not strong generation. The model has to
@@ -690,7 +690,8 @@ Named so nobody wastes time adding them:
 - **Automatic publishing anywhere.** Gable renders and posts a link; Carmen holds
   the final say. It never publishes to a social account.
 - **Direct contact with real-estate agents.** Gable talks to Carmen and Chase.
-- **Its own image CDN.** Spaces is sufficient.
+- **Its own image CDN.** The droplet serves photos over http, and Slides copies
+  each one into the presentation at insertion. Nothing needs to stay up.
 
 ---
 
@@ -738,6 +739,12 @@ Named so nobody wastes time adding them:
 | 2026-08-10 | **Hero photos come from Carmen in Slack, not from the form.** | Chase's call. The form's photo columns hold Drive links in `aj@cornerhouserealty.com`'s Drive that neither Gable nor Chase can read (404), and 34 of 40 filled cells hold 3-5 URLs rather than one. Sourcing from Slack removes an access dependency on a third party and an ambiguity about which photo is the hero. It also collapses the CLAUDE.md §8 cascade to its step 5. |
 | 2026-08-10 | **Slides will not fetch an image from Google Drive. Verified.** | Tested three URL forms — `uc?export=view`, `uc?export=download`, `thumbnail?id=` — against a file the service account had made world-readable and which returned valid PNG bytes to an anonymous request. All three rejected: *"There was a problem retrieving the image."* A public `picsum.photos` JPEG in the same batch was accepted with `occurrencesChanged: 1`, so the harness was sound. This was previously an assumption in §4.5; it is now a fact, and it means a separate public host is not optional. |
 | 2026-08-10 | The service account **can** publish a Drive file (`role: reader, type: anyone`) | Worth recording even though it does not help here: the permission call succeeds and the file becomes anonymously fetchable. Drive is a usable public host for anything *other* than a Slides image fetch. |
+
+| 2026-08-11 | **Reverses the Spaces row:** photos are hosted on the droplet over plain `http://` | Slides was assumed to require https. It does not — verified live, with a picsum control in the same batch. nginx on the existing droplet serves them, which removes a vendor, a credential and a monthly cost. Spaces stays in config for the day one box is not enough. |
+| 2026-08-11 | Fitting a photo to the frame is **Pillow, not a model** (`photos/fit.py`) | Cropping and resizing to an aspect ratio is deterministic and free. A model is only needed to invent pixels — upscaling a source too small for the frame. This reverses §4.5b's assignment of the job to `photos/enhance.py` and `gpt-image-2`, and it takes a paid call off the common path entirely. |
+| 2026-08-11 | Conversation and vision run on **`gpt-5-mini`**, images on **`gpt-image-1-mini`** | Priced from each vendor's own page. gpt-5-mini is 4x under Haiku 4.5 and 8x under Sonnet 5 on input, and this is the highest-volume path. Anthropic stays configured as the escalation if tool-picking proves weak. Estimated ~$2/month against ~$16 on Opus 5 plus gpt-image-2. |
+| 2026-08-11 | The Slack house style is **enforced in code**, not documented (`slackapp/style.py`) | A guide nobody can run drifts, and this one already had: every card in `blocks.py` carried emoji, two carried red code spans, and raw HttpError text reached the channel. `violations()` now runs before a message is posted, so a breach cannot reach Carmen. |
+| 2026-08-11 | `action_id` must be **unique within a Slack message** | The unknown-agent card gave every template button the same id, so Slack answered `invalid_blocks` and the card could never be posted at all. Found by posting it for real. Repeated buttons now carry a numeric suffix and handlers route on `dispatch_key`. |
 
 Append to this table. Do not rewrite history — if a decision reverses, add a new
 row explaining why. `CLAUDE.md` §2.7 makes this mandatory rather than polite.

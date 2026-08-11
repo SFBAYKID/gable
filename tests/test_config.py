@@ -299,3 +299,27 @@ def test_disabling_redaction_is_refused() -> None:
 def test_bad_log_level_is_rejected() -> None:
     with pytest.raises(ConfigError):
         _load(LOG_LEVEL="chatty")
+
+
+def test_env_example_documents_every_variable_the_code_reads() -> None:
+    """CLAUDE.md section 10 requires this, and it had already drifted.
+
+    config kept reading GABLE_DRIVE_PHOTOS_FOLDER_ID after the Photos folder was
+    deleted and the variable was dropped from .env.example, so the documented
+    configuration and the real one disagreed with nothing to catch it.
+    """
+    import re
+
+    root = Path(__file__).resolve().parent.parent
+    config_source = (root / "src" / "gable" / "config.py").read_text(encoding="utf-8")
+    example = (root / ".env.example").read_text(encoding="utf-8")
+
+    read = set(
+        re.findall(
+            r'"((?:GABLE|SLACK|OPENAI|ANTHROPIC|SPACES|GOOGLE|LOG|FIRECRAWL)_[A-Z_]+)"',
+            config_source,
+        )
+    )
+    documented = set(re.findall(r"^([A-Z_]+)=", example, re.M))
+    undocumented = sorted(read - documented)
+    assert not undocumented, f".env.example is missing: {undocumented}"

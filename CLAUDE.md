@@ -1,7 +1,8 @@
 # CLAUDE.md — Gable
 
 Operating instructions for the coding agent building **Gable**, a Slack-native
-agent that turns real-estate listing form submissions into finished Canva flyers.
+agent that turns real-estate listing form submissions into finished Google Slides
+posts.
 
 Read this file completely before writing any code. Read `ARCHITECTURE.md` next.
 `AGENTS.md` describes the runtime agent's behavior; this file describes *your*
@@ -12,18 +13,17 @@ behavior while building it.
 ## 1. What Gable is
 
 Carmen is a designer. Real-estate agents submit listings through a Google Form.
-Each submission becomes a flyer she builds by hand in Canva — roughly 20 minutes
-per flyer, most of it spent hunting down a photo of the house.
+Each submission becomes a social post she builds by hand — roughly 20 minutes
+each, most of it spent hunting down a photo of the house.
 
-Gable removes that work. It watches the Google Sheet behind the form, resolves
-the listing photo, verifies the agent's contact details, selects the correct
-Canva template for that agent, and produces a Canva Bulk Create payload. Carmen
-opens Canva, runs Bulk Create, and polishes. Her 20 minutes becomes about one.
+Gable removes that work. It watches the Google Sheet behind the form, identifies
+the submitting agent, picks their template, asks Carmen in Slack for the hero
+photo, fits that photo to the template frame, renders a finished **Google Slides**
+file, and posts her a link. She opens it, adjusts anything she wants, or replies
+in the thread and Gable redoes it. Her 20 minutes becomes about one.
 
 **Gable does not replace Carmen's judgment. It removes her typing and her photo
-hunting.** Every flyer still passes through her before it reaches a client.
-
----
+hunting.** Every post still passes through her before it reaches a client.
 
 ## 2. Non-negotiable rules for you, the building agent
 
@@ -109,7 +109,7 @@ about *work*. The line is whether the decision is yours to make.
 - Spending money that isn't already budgeted, or raising a rate ceiling.
 - Anything irreversible: deleting data, mutating the form-responses tab,
   force-pushing, destroying a droplet.
-- A §4.3 unknown resolving *against* the design — especially Spike A. Stop and
+- A finding that resolves *against* the design, the way Spike A did. Stop and
   report; do not silently redesign.
 - A change to what the product *is*: scope, the photo policy default, which
   channel Gable posts to, adding a database.
@@ -126,8 +126,10 @@ that isn't blocked while you wait.
 **A task is not finished until the documents that describe it are correct
 again.** Stale documentation is worse than missing documentation: the next agent
 reads it, believes it, and builds on something that is no longer real. This has
-already cost this project once — `ARCHITECTURE.md` described a Canva Bulk Create
-export for days after the code had moved to Google Slides.
+already cost this project twice — `ARCHITECTURE.md` described a Canva Bulk
+Create export for days after the code had moved to Google Slides, and §1 of this
+very file still promised "a Canva Bulk Create payload" long after Spike A had
+killed that path.
 
 So: **before you report any work complete, re-read the docs your change touched
 and update the ones your change made false.** In the same commit, not later.
@@ -140,7 +142,7 @@ and update the ones your change made false.** In the same commit, not later.
 | A variable the code reads | `.env.example`, with the comment explaining it |
 | Setup, deploy, or operations | `README.md` |
 | What is blocked, decided, or waiting on Chase | `STATUS.md` |
-| A §4.3 unknown you resolved | §4 of this file, moving it to §4.1/§4.2 with its evidence |
+| Something you verified live that the design rests on | §4.3 of this file, with the evidence |
 
 Rules that make this work:
 
@@ -161,7 +163,7 @@ Rules that make this work:
 
 ## 3. Credentials — read this twice
 
-Chase has offered logins for Canva, DigitalOcean, Slack, and Google.
+Chase has offered logins for DigitalOcean, Slack, and Google.
 
 **You must never type a password, passphrase, 2FA code, or API secret into any
 website, form, or browser session.** Not to be helpful, not to unblock yourself,
@@ -175,7 +177,6 @@ The division of labor is fixed:
 | Create the Google service account, download the JSON key | Chase |
 | Share the Google Sheet with the service account email | Chase |
 | Create the DigitalOcean droplet, add an SSH public key | Chase |
-| Log into Canva in a browser | Chase |
 | Everything downstream of a token already in `.env` | You |
 
 You consume secrets from `.env`. You never acquire them.
@@ -192,68 +193,58 @@ You consume secrets from `.env`. You never acquire them.
 
 ---
 
-## 4. What is actually known about Canva
+## 4. Why this renders in Google Slides
 
-This section is the most valuable thing in this file. It was established by
-direct observation and documentation reading on 2026-08-10. Respect the
-confidence labels — several plausible-sounding things here are **not** confirmed,
-and building on them without checking will waste days.
+Canva was the original target. It is gone, and the reasoning is kept because it
+is the reason nobody repeats the week that proved it.
 
-### 4.1 Verified by direct observation in Chase's live Canva account
+### 4.1 Spike A — settled, and it settled against the design
 
-- The account is on **Canva Teams**, $30/month, 2 members.
-- **Bulk Create opens with no upgrade wall** on this plan.
-- Bulk Create's "Select data source" panel lists working data-connector apps:
-  Google Sheets, Google Analytics, Meta SKU Catalog, BigQuery, Snowflake,
-  HubSpot Data, QrDy Dynamic QR, SheetSync.
-- Bulk Create's manual data table has **"Add text" and "Add image"** column
-  buttons. Adding an image column produces a column carrying an image-type icon,
-  distinct from the `T` on text columns. **Image fields are first-class in Bulk
-  Create.**
-- Private apps are available on this Teams plan. Canva's team settings page
-  reads: "Apps marked as Live will be available to all members of this team."
+**An uploaded CSV or XLSX types every column as text.** Only Canva's *manual*
+data-entry table can carry an image-typed column. Proven by running both paths
+against the same design in the same session: the manual path produced a column
+with an image glyph, the upload produced a `T` on all four fields including the
+photo URL.
 
-### 4.2 Verified from Canva's published documentation
+The photo is the twenty minutes. A file that can carry every text field but not
+the photo does not solve the problem. Full writeup in `spikes/SPIKE_A_RESULT.md`.
 
-- Connect API **Autofill requires a Canva Enterprise organization**. Paid plans
-  get a limited development trial; the autofill response carries a
-  `trial_information` object with `uses_remaining` and `upgrade_url`.
-- Connect API OAuth: authorize at `https://www.canva.com/api/oauth/authorize`,
-  token at `POST https://api.canva.com/rest/v1/oauth/token`, PKCE with `S256`,
-  HTTP Basic client auth, access token lifetime 14400s, **refresh tokens are
-  single-use** and must be rotated on disk every refresh.
-- Apps SDK data-connector `DataTable` cell types: `string` (max 10,000 chars),
-  `number`, `date`, `boolean`, `media`.
-- A `media` image cell is `{ type: 'image_upload', url, thumbnailUrl, mimeType }`
-  where `url` is an **external HTTPS URL or data URL, max 4,096 characters**;
-  mime types JPEG, PNG, WebP, SVG+XML, HEIC, TIFF; max file size 50MB. There is
-  an `ai_disclosure` field with values `app_generated` or `none`.
-- Private Connect API **integrations** are Enterprise-only. (Distinct from
-  private Apps SDK **apps**, which Teams has — see 4.1.)
-- Canva's data-connector docs list supported plans as "Canva Business, Canva
-  Enterprise, Canva for Education, Canva for Nonprofits." **This contradicts the
-  live observation in 4.1.** Trust the observation; note the discrepancy.
+Two further Canva paths were closed at the same time:
 
-### 4.3 NOT verified — spike these before building on them
+- **Connect API autofill** needs a Canva **Enterprise** organization. The account
+  is on Teams. Chase ruled out the cost.
+- **Bulk Create has no API at all**, so even the working path still required a
+  human at a keyboard — which is the thing being removed.
 
-Do not treat any of these as true until you have checked them yourself.
+### 4.2 What replaced it
 
-1. **Whether an uploaded CSV/XLSX can carry image URLs.** Only the *manual*
-   data-entry table was observed to support image columns. Phase 1's entire
-   output format depends on this. **This is Day-1 Spike A and it gates
-   everything.** If uploaded files cannot carry image URLs, Phase 1's deliverable
-   changes shape and you must stop and report before writing the exporter.
-2. Bulk Create's maximum row count per batch.
-3. Whether Bulk Create respects brand-template layout and how it handles text
-   that overflows its box.
-4. Whether a private data-connector app can be released to a Teams team without
-   passing Canva's marketplace review. **Gates all of Phase 2.**
-5. The actual numeric autofill trial quota. A spike script exists
-   (`canva_autofill_spike.py`) that prints it. It compiles and its pure functions
-   are unit-checked, but **it has never been run against Canva's API** — its
-   response-shape assumptions are unverified by design.
+Google Slides, on infrastructure already required for the Sheet. `replaceAllText`
+fills the copy and `replaceAllShapesWithImage` places the photo from a public
+URL. No Enterprise plan, no marketplace review, no second language, same service
+account.
 
----
+Design detail lives in `ARCHITECTURE.md` §2.1 and the §9 decision log. Do not
+re-open Canva without reading both.
+
+### 4.3 Verified live, so build on these
+
+Established by running against the real APIs, not by reading docs:
+
+1. **Slides accepts a plain `http://` image URL.** It rejects every Google Drive
+   URL form, even when the file is world-readable and serves valid bytes to an
+   anonymous client. Slack cannot host either — `files.sharedPublicURL` needs a
+   user token, not a bot token. The droplet serves photos over nginx.
+2. **A service account has a 0 GB quota**, so everything lives in a shared drive.
+   Contributor is sufficient; it can trash but not purge, and Gable never purges.
+3. **Slides has no text-inset field.** "Padding" cannot be set through the API.
+4. **A divider rule is a Line, not a Shape**, and needs `updateLineProperties`.
+5. **`applyMode: RELATIVE` multiplies translation as well as scale**, so every
+   resize sends ABSOLUTE and preserves position explicitly.
+6. **`action_id` must be unique within a Slack message**, or the whole message is
+   rejected.
+
+Each of these cost a real failure to learn. They are in the decision log with
+their evidence.
 
 ## 5. Code standards
 
@@ -328,7 +319,8 @@ gable/
 ├── deploy/                      # systemd unit + droplet provisioning steps
 ├── spikes/                      # findings only; the spike tooling is deleted
 ├── tools/
-│   └── check_connections.py     # prove every .env credential works, live
+│   ├── check_connections.py     # prove every .env credential works, live
+│   └── run_workflows.py         # four end-to-end runs against live services
 ├── src/gable/
 │   ├── config.py                # frozen settings dataclass, env parsing
 │   ├── logging_setup.py         # structured logging + secret redaction
@@ -340,17 +332,24 @@ gable/
 │   │   ├── normalize.py         # raw row -> Listing, validation
 │   │   └── verify.py            # Firecrawl agent-detail verification
 │   ├── photos/
+│   │   ├── fit.py               # decides whether a model is needed at all
 │   │   ├── resolver.py          # the cascade, policy enforcement
 │   │   ├── sources.py           # form / drive / web source adapters
-│   │   ├── enhance.py           # reprocessing of a REAL photo only
-│   │   └── store.py             # publish to a public HTTPS URL
+│   │   ├── enhance.py           # generative upscale of a REAL photo only
+│   │   └── store.py             # publish to the droplet over http
 │   ├── slides/
-│   │   └── renderer.py          # pure Slides batchUpdate request builder
+│   │   ├── renderer.py          # pure batchUpdate builder for a fill
+│   │   ├── edits.py             # one tool per change Carmen can ask for
+│   │   ├── geometry.py          # move, resize, delete — the transform traps
+│   │   ├── edit_common.py       # shared colours, guards, request type
+│   │   └── catalog.py           # the 45 templates, labelled
 │   ├── slackapp/
 │   │   ├── app.py               # Socket Mode bootstrap
 │   │   ├── blocks.py            # Block Kit builders
+│   │   ├── style.py             # the house style, enforced
 │   │   └── handlers.py          # commands, actions, mentions
 │   ├── pipeline/
+│   │   ├── schedule.py          # when to poll: busy hours vs quiet
 │   │   └── orchestrator.py      # end-to-end run for one listing
 │   └── cli.py                   # local invocation without Slack
 └── tests/
@@ -366,30 +365,30 @@ you develop and test without a live workspace.
 
 Do not build these in parallel. Each gate must pass before the next begins.
 
-### Phase 0 — Spikes (before any application code)
+### Phase 0 — done
 
-- **Spike A (blocking):** Determine whether an uploaded CSV/XLSX can carry image
-  URLs into a Bulk Create image column. Ask Chase to run it in his account if you
-  cannot. **If this fails, stop and report — do not design around it silently.**
-- **Spike B:** Confirm the Google service account can read the Sheet.
-- **Spike C:** Confirm Socket Mode connects and the bot can post to
-  `C0BP597644B`.
+Spike A answered (against Canva), Google access proven, Socket Mode connected,
+the droplet provisioned and serving photos.
 
-### Phase 1 — Python pipeline (the whole product, minus one click)
+### Phase 1 — the pipeline, end to end
 
-Sheet watcher → normalize → verify → photo resolve → template lookup →
-Bulk Create file → post to Slack with the file attached. Carmen downloads it and
-runs Bulk Create in Canva.
+Sheet watcher → normalize → identify the agent → ask Carmen for the photo → fit
+it → render a Slides copy → check the render → post the link. Carmen edits in
+Slides or replies in the thread.
 
-Ship this. It captures nearly all the time savings.
+Built so far: the renderer, the edit tools, photo fitting and hosting, the
+template catalogue, the poll schedule, the house style. Not yet wired: the
+Sheets client, the `Runs` tab, the poller, and the orchestrator that joins them.
 
-### Phase 2 — Canva data-connector app (TypeScript, separate repo)
+**Before the poller ever runs against the live Sheet it needs a backfill guard.**
+There are 99 historical rows and no `Runs` tab; a first run without one would
+render all of them.
 
-An Apps SDK data-connector app so Carmen picks listings inside Canva and never
-downloads a file. **Gated on unknown #4 in section 4.3.** Do not start Phase 2
-until Phase 1 has run successfully on real listings for at least a week.
+### Phase 2 — only once Phase 1 has run for a week on real listings
 
----
+Reconcile the three placeholder conventions across the 45 templates, then
+consider the dual-agent open-house designs. Neither is code work first; both are
+decisions about what Carmen wants.
 
 ## 8. The photo policy
 

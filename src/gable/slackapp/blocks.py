@@ -75,6 +75,25 @@ def _context(body: str) -> Block:
     return {"type": "context", "elements": [{"type": "mrkdwn", "text": body}]}
 
 
+def dispatch_key(action_id: str) -> str:
+    """The stable part of an action id, for handler routing.
+
+    Buttons that repeat within one message carry a numeric suffix, because Slack
+    rejects a message whose `action_id`s are not unique. Handlers must therefore
+    route on this rather than on the raw id.
+
+    Args:
+        action_id: The id as it arrives in a Slack action payload.
+
+    Returns:
+        Everything before the first colon, or the whole id if there is none.
+
+    Raises:
+        Nothing.
+    """
+    return action_id.split(":", 1)[0]
+
+
 def _button(text: str, action_id: str, value: str, *, style: str | None = None) -> Block:
     """One action button.
 
@@ -89,7 +108,9 @@ def _button(text: str, action_id: str, value: str, *, style: str | None = None) 
     """
     element: Block = {
         "type": "button",
-        "text": {"type": "plain_text", "text": text[:_BUTTON_TEXT_LIMIT], "emoji": True},
+        # emoji False: this asks Slack NOT to expand :shortcodes: in a label,
+        # which the house style forbids anyway.
+        "text": {"type": "plain_text", "text": text[:_BUTTON_TEXT_LIMIT], "emoji": False},
         "action_id": action_id,
         "value": value,
     }
@@ -304,8 +325,12 @@ def unknown_agent_blocks(
     buttons = [
         # The label is the payload: handlers need to know which template was
         # chosen, and run_id alone cannot carry that.
-        _button(label, ACTION_PICK_TEMPLATE, f"{run_id}|{label}")
-        for label in template_labels
+        # Slack requires action_id to be unique within a message. Repeating
+        # ACTION_PICK_TEMPLATE across the buttons made Slack reject the entire
+        # card with invalid_blocks, so this one could never be posted. The
+        # dispatch key is the part before the colon; handlers match on that.
+        _button(label, f"{ACTION_PICK_TEMPLATE}:{index}", f"{run_id}|{label}")
+        for index, label in enumerate(template_labels)
     ]
     buttons.append(_button("Skip", ACTION_SKIP, run_id))
     return [summary, _actions(*buttons)]

@@ -122,7 +122,6 @@ class Settings:
     # StorageQuotaExceeded.
     drive_id: str
     drive_templates_folder_id: str
-    drive_photos_folder_id: str
     drive_output_folder_id: str
 
     # --- Rendering (Google Slides) ---
@@ -264,7 +263,6 @@ class Settings:
             tab_templates=reader.str_value("GABLE_TAB_TEMPLATES", "Templates"),
             drive_id=reader.str_value("GABLE_DRIVE_ID", ""),
             drive_templates_folder_id=reader.str_value("GABLE_DRIVE_TEMPLATES_FOLDER_ID", ""),
-            drive_photos_folder_id=reader.str_value("GABLE_DRIVE_PHOTOS_FOLDER_ID", ""),
             drive_output_folder_id=reader.str_value("GABLE_DRIVE_OUTPUT_FOLDER_ID", ""),
             slide_width_px=reader.int_value("GABLE_SLIDE_WIDTH_PX", 1080, minimum=100),
             slide_height_px=reader.int_value("GABLE_SLIDE_HEIGHT_PX", 1350, minimum=100),
