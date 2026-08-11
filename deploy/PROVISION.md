@@ -1,8 +1,7 @@
 # Droplet provisioning
 
 > **STATUS: DONE.** Provisioned 2026-08-10. Everything below has been **run and
-> verified on the live droplet** — this is a record, not a plan. The one thing
-> still outstanding is at the bottom.
+> verified on the live droplet** — this is a record, not a plan.
 
 ## The droplet
 
@@ -43,22 +42,26 @@ The crash-loop guard was doing nothing while looking correct. Moved to `[Unit]`;
 
 The unit is installed, active, and enabled. The repository now points
 `ExecStart` at `gable.slackapp.runtime`, which joins Socket Mode to the Sheet
-poller. That updated unit and the new photo-directory permission are not yet
-deployed.
+poller. The runtime is deployed. The exact production database has the
+historical backfill marker and the Slack app has the `files:read` scope.
 
-## Still outstanding — needs Chase
+## Live deployment finding
 
-1. **Slack scope.** Chase must approve `files:read` from
-   `slack/manifest.json` and reinstall the app before the photo handoff can be
-   tested live.
-2. **Backfill database.** Verify adoption in the exact database configured at
-   `/opt/gable/var/gable.db` before deploying the poller.
-3. **Photo directory.** Before the new unit starts, ensure
-   `/var/www/gable-photos` exists and is owned by `gable:gable`; the unit grants
-   write access only to that path and `/opt/gable/var`.
-4. **Firewall scope.** SSH is currently open to any source address. If you want
-   it narrowed to your IP, say the word — I left it open rather than risk
-   locking us both out from a guess.
+At 10:51 Pacific on 2026-08-11, the service accepted a real Slack photo and
+reached the model-backed enlargement. The safe local fallback then found
+`/var/www/gable-photos` owned by root, so the unprivileged service could not
+publish. Ownership was repaired to `gable:gable` and verified with the
+permission check running as the `gable` user. `make deploy` now runs the
+idempotent `install -d` command on every deployment so the ownership cannot
+drift back.
+
+**Photo directory.** `/var/www/gable-photos` exists and is owned by
+`gable:gable`; the unit grants write access only to that path and
+`/opt/gable/var`.
+
+**Firewall scope.** SSH is currently open to any source address. If Chase wants
+it narrowed to one IP, that is still an explicit operator decision; leaving it
+open avoids guessing at the address and locking out maintenance.
 
 ---
 
@@ -197,8 +200,9 @@ the historical-row adoption in `/opt/gable/var/gable.db`, install the Slack
 `files:read` scope, and create the nginx photo directory described above. Then
 start the unit and confirm both Socket Mode and one guarded poll cycle.
 
-Let `make deploy` handle restarts from then on. Nothing gets hand-edited on the
-server.
+Let `make deploy` handle restarts from then on. It also reasserts the photo
+directory's owner and mode before every restart. Nothing gets hand-edited on
+the server.
 
 ## 9. Passwordless restart for deploys
 

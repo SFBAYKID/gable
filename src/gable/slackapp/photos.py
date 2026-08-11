@@ -217,7 +217,13 @@ class PhotoHandoff:
                         "I fitted the photo, but the flyer service could not fetch it. "
                         "I left the run paused."
                     )
-            except (PhotoHandoffError, PublishError, OSError, ValueError):
+            except PublishError:
+                logger.exception("a prepared Slack photo could not be published")
+                return (
+                    "I prepared the photo, but I could not save it to the flyer service. "
+                    "I left this listing paused and reported the problem for repair."
+                )
+            except (PhotoHandoffError, OSError, ValueError):
                 logger.exception("a Slack photo could not be prepared")
                 return "I could not prepare that photo safely. Please send a different image."
             except Exception:

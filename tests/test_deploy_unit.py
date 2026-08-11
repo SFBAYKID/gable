@@ -19,6 +19,7 @@ from pathlib import Path
 import pytest
 
 UNIT_PATH: Path = Path(__file__).resolve().parent.parent / "deploy" / "gable.service"
+MAKEFILE_PATH: Path = Path(__file__).resolve().parent.parent / "Makefile"
 
 
 @pytest.fixture(scope="module")
@@ -87,6 +88,17 @@ def test_filesystem_is_read_only_except_runtime_data_paths(
     assert unit.get("Service", "ProtectSystem") == "strict"
     assert unit.get("Service", "ProtectHome") == "true"
     assert unit.get("Service", "ReadWritePaths") == "/opt/gable/var /var/www/gable-photos"
+
+
+def test_every_deploy_repairs_the_photo_directory_ownership() -> None:
+    """The unprivileged service must be able to publish fitted photos.
+
+    The real droplet had this directory owned by root even though systemd
+    allowed the path. The kernel still denied Gable's writes, so a valid Slack
+    upload failed after it had already been resized.
+    """
+    makefile = MAKEFILE_PATH.read_text(encoding="utf-8")
+    assert "install -d -o gable -g gable -m 0755 /var/www/gable-photos" in makefile
 
 
 def test_no_inbound_listener_is_configured() -> None:

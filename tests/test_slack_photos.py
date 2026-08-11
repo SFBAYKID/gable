@@ -16,6 +16,7 @@ from gable.db import store
 from gable.db.schema import apply_migrations, connect
 from gable.listings.intake import Intake
 from gable.photos.enhance import EnhancementError
+from gable.photos.store import PublishError
 from gable.pipeline.runner import RunResult
 from gable.sheets import repository as repo
 from gable.slackapp.photos import PhotoHandoff
@@ -349,6 +350,27 @@ def test_a_public_host_failure_keeps_the_run_paused(tmp_path: Path) -> None:
     said = handoff.handle(_event(), FakeSlackClient())
 
     assert "could not fetch it" in said
+    connection = connect(path)
+    run = store.latest_run(connection, "response-1")
+    assert run is not None and run.status == "needs_photo"
+    connection.close()
+
+
+def test_a_publish_failure_reports_server_repair_not_a_bad_image(tmp_path: Path) -> None:
+    path = tmp_path / "gable.db"
+    _paused_database(path)
+    handoff = _handoff(path, [])
+
+    def fail_publish(_root: Path, _base: str, _fitted: bytes) -> str:
+        msg = "fixed test failure"
+        raise PublishError(msg)
+
+    object.__setattr__(handoff, "publish", fail_publish)
+
+    said = handoff.handle(_event(), FakeSlackClient())
+
+    assert "could not save it to the flyer service" in said
+    assert "different image" not in said
     connection = connect(path)
     run = store.latest_run(connection, "response-1")
     assert run is not None and run.status == "needs_photo"

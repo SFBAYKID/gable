@@ -84,8 +84,11 @@ moving Phase 2 forward, not working around it.
 
 **The Slack app is live.** Bot authentication and Socket Mode were verified.
 `files:read` from `slack/manifest.json` is installed: on 2026-08-11 a real
-thread upload was fetched and measured successfully. The automatic AI upscale
-added after that test still needs a watched deployment and visual check.
+thread upload was fetched and measured successfully. A watched upload after the
+automatic AI upscale deployment reached the image model successfully; its
+derivative failed the seam gate and correctly fell back to the original. That
+run then exposed a server-directory ownership fault, repaired at 10:54 Pacific.
+A finished live flyer from that repaired path is still pending.
 
 **The deployed droplet is the $6, 1 GB tier with 1 GB swap.** Slack uploads are
 capped at 25 MB before Pillow opens them. The full photo workflow still needs a

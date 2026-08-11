@@ -6,7 +6,7 @@ Last updated 2026-08-11 by the building agent.
 bug list, the guardrails and the order of work — is in `GABLE_HANDOFF.md` on
 the Desktop. Read it before touching code.
 
-**The automatic runtime is wired on main and is not deployed yet.**
+**The automatic runtime is wired, deployed, active, and watching the Sheet.**
 `slackapp.runtime` constructs the real Google clients, database, `Poller`, and
 `Runner`; Socket Mode connects in the background while the poller runs on the
 main thread. `cli.py` also runs one guarded pass locally without Slack.
@@ -17,9 +17,12 @@ hosted, verified, and used to resume that same run. **The receive and download
 portion is verified live:** at 10:24 on 2026-08-11 Gable fetched a real Slack
 upload, read its dimensions, and reached the former undersized-photo refusal.
 That proves `files:read` is installed. Commit `e09bb27` replaces that refusal
-with the guarded automatic upscale, but the new path is not deployed or visually
-verified yet. The production database's backfill flag must still be verified in
-the exact deployed database before the poller is deployed.
+with the guarded automatic upscale and is deployed. A second watched upload
+reached the image model successfully; the seam gate rejected the derivative and
+the local fallback exposed a root-owned photo directory. The directory is now
+owned by `gable:gable`, verified writable as the service user, and repaired on
+every future deploy. The exact production database at `/opt/gable/var/gable.db`
+has the historical backfill marker.
 
 Proven live on two real submissions, invoked manually:
 
@@ -42,8 +45,8 @@ templates have explicit measured hero-layer ids; the other 42 refuse placement
 instead of guessing. Headshot replacement is missing. Conversational font,
 colour, correction, resize, move, and status tools now execute against the
 thread's Slides file and report completion only after Google confirms the
-batch. No flyer should be called demo-ready until the Slack scope is installed
-and a real uploaded-photo render has been inspected.
+batch. No flyer should be called demo-ready until a real uploaded-photo render
+has been inspected. The certification ledger remains 0 of 45 approved.
 
 ---
 
@@ -170,7 +173,7 @@ value — run it after any `.env` change.
 | Anthropic key | Reading requests, drafting copy, Slack change requests | **Done** — key valid |
 | Droplet + SSH key | Running unattended | **Done** — `gable`, Ubuntu 24.04, 1 vCPU / 1 GB, swap active, Python 3.12.3 |
 | **Google service-account JSON + Sheet and shared-drive access** | Reading the sheet — everything depends on it | **Done** — Sheet readable, shared drive writable, Slides round-trip verified; the key is present on the droplet at mode 600. |
-| nginx photo host | Public image URL Slides can fetch | **Done** — the droplet serves photos over HTTP; the Slack upload path still needs to publish locally into that directory. |
+| nginx photo host | Public image URL Slides can fetch | **Done** — the droplet serves photos over HTTP; its directory is owned by the service and deployment reasserts that ownership. |
 | `channels:read` scope (optional) | Letting the checker verify the channel id | Not granted; posting does not need it |
 
 **Every credential is now live.** The Google account was created 2026-08-10 in
@@ -201,9 +204,9 @@ No source file is over 800 lines. `mypy` covers `src`, `tests` and `tools`.
 | `deploy/gable.service` + `PROVISION.md` | **Run.** Droplet provisioned and verified; swap active. |
 | `spikes/` | Findings only — `SPIKE_A.md` and `SPIKE_A_RESULT.md`. The generator and its tests were deleted once Spike A was answered. |
 | Most of `src/gable/` | Built and unit-tested: the runner, orchestrator, poller, schedule, database, sheet client, enrichment, photo fitting and hosting, the edit tools, the field manifest, the image verifier, the vision check and the house style. |
-| **The wiring between them** | **Built on main, not deployed.** The production runtime constructs `Poller` and `Runner`; the Slack-free CLI performs one guarded pass. |
-| The Slack photo handoff | **Built and partly verified live.** Slack file receive, metadata, authenticated download, and dimension reading worked on a real upload. The new AI upscale, publish, render, and final visual result still need one watched production test after deployment. |
-| `photos/enhance.py` | Built and unit-tested. A Slack hero needing more than 2x enlargement gets one guarded high-fidelity image edit, a drift and seam check, an `ai_enhanced` audit flag, and an automatic original-photo fallback. Live image-edit output is not yet visually certified. |
+| **The wiring between them** | **Built and deployed.** The production runtime constructs `Poller` and `Runner`; the Slack-free CLI performs one guarded pass. |
+| The Slack photo handoff | **Built and partly verified live.** Slack receive, authenticated download, model call, fallback fitting, and the repaired publish directory have each run or been checked. A successful resumed render and final visual result still need one watched upload. |
+| `photos/enhance.py` | Built, unit-tested, and invoked live. A Slack hero needing more than 2x enlargement gets one guarded high-fidelity image edit, a drift and seam check, an `ai_enhanced` audit flag, and an automatic original-photo fallback. The first live derivative was rejected by the seam gate and was not used; output is not visually certified. |
 | `photos/resolver.py`, `photos/sources.py`, `listings/verify.py`, `slackapp/handlers.py` | Still docstring-only placeholders. |
 
 `normalize.py`'s `ColumnMap` can be re-pointed at the real headers above without
@@ -218,10 +221,10 @@ The module graph, automatic trigger, Slack photo resume, core conversational
 edits, and notes-aware template selector are built. The current priority order
 is:
 
-1. Verify the backfill adoption in the exact production database before the
-   poller is deployed.
-2. Deploy commit `e09bb27` in a watched window, upload one undersized photo in
-   its listing thread, and inspect the rendered flyer and `ai_enhanced` record.
+1. Re-upload the same undersized photo after the repaired photo-directory
+   permission, then inspect the resumed flyer and its `ai_enhanced` record.
+2. Calibrate the seam gate against real enlargements; the first live derivative
+   was rejected and the original-photo fallback was used.
 3. Replace the agent headshot and measure the exact hero layer for the remaining
    42 templates. The three measured templates use explicit object ids; there is
    no longer a size-based deletion guess.

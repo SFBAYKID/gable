@@ -64,6 +64,7 @@ clean:
 deploy:
 	ssh -i $(GABLE_SSH_KEY) $(GABLE_HOST) "cd $(GABLE_DIR) && git pull --ff-only && \
 		$(GABLE_DIR)/.venv/bin/pip install -e . && \
+		install -d -o gable -g gable -m 0755 /var/www/gable-photos && \
 		systemctl restart gable"
 
 logs:
