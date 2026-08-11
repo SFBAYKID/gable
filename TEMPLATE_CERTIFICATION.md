@@ -299,3 +299,35 @@ The check rejected a frame if *any* element intersected it. Only elements drawn
 is in z-order — so everything before the frame sits behind it and is irrelevant.
 A headshot well naturally sits over a background panel it is in no danger of
 hiding. Considering only what is above took it to **37/45**.
+
+## Read this before trusting any count in this file
+
+The review categories are not all the same kind of measurement, and mixing them
+produced conclusions this file previously stated as fact.
+
+**Deterministic**, decided by code, stable across runs:
+
+| Check | First walk | After the fixes |
+|---|---|---|
+| substring guard | 13 | 3 |
+| no photo frame | 8 | 5 |
+| readback / foreign contact | not yet built | 4, firing correctly |
+
+**Non-deterministic**, decided by the vision pass, which is a model asked to look
+at a picture. Across four walks of the *same* code against the *same* templates:
+
+    overlap              6 -> 11 -> 8 -> 13
+    placeholder survived 7 ->  8 -> 10
+
+That spread is the model disagreeing with itself, not the pipeline changing.
+Earlier entries here read those deltas as regressions and improvements. They
+were mostly neither.
+
+**So: use the deterministic counts to measure progress, and use the vision pass
+to find defects worth looking at.** It is good at noticing something is wrong on
+a specific flyer and unreliable at counting how many flyers are wrong. Judging a
+change by whether its category total went up or down is measuring the model's
+mood.
+
+This is the same error as the seam detector and as reading `needs_review` as
+"broken": treating a number as evidence without checking what produces it.
