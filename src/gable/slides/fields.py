@@ -401,6 +401,16 @@ def resolve(texts: list[str], wanted: list[str] | None = None) -> Resolution:
     )
 
 
+#: Which first-agent field a repeated literal belongs to when a design carries
+#: two agents. A second "AGENT NAME" on a two-agent layout is the co-agent, not
+#: another copy of the submitter.
+SECOND_AGENT_OF: Final[dict[str, str]] = {
+    "agent_name": "agent2_name",
+    "agent_phone": "agent2_phone",
+    "agent_email": "agent2_email",
+}
+
+
 def replacements(resolution: Resolution, values: dict[str, str]) -> dict[str, str]:
     """Turn resolved fields plus data into literal find/replace pairs.
 
@@ -426,7 +436,13 @@ def replacements(resolution: Resolution, values: dict[str, str]) -> dict[str, st
     # Every other literal carrying the same field, so a design that labels one
     # thing twice does not ship with the second label still showing.
     for name, extras in resolution.also.items():
-        value = values.get(name, "").strip()
+        # On a two-agent design the repeated agent literals belong to the
+        # co-agent. Filling them from the submitter put the same person on the
+        # flyer twice, which is wrong in a way that looks deliberate.
+        second = SECOND_AGENT_OF.get(name, "")
+        value = values.get(second, "").strip() if second else ""
+        if not value:
+            value = values.get(name, "").strip()
         if not value:
             continue
         for literal in extras:

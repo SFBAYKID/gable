@@ -33,7 +33,7 @@ from gable import spend
 from gable.db import store
 from gable.listings.enrich import Facts, look_up
 from gable.listings.intake import Intake
-from gable.pipeline import audit
+from gable.pipeline import audit, people
 from gable.pipeline.orchestrator import Outcome, after_research, agent_slots, judge, plan
 from gable.pipeline.vision import Inspection, inspect
 from gable.sheets import repository as repo
@@ -247,6 +247,21 @@ class Runner:
         slots = agent_slots(intake)
         if slots.outcome is Outcome.ASK:
             return self._ask(run_id, slots.say, slots.questions, result)
+
+        # A two-agent post names its co-agent in the notes. Both people's
+        # details have to come from the roster, because putting the submitter in
+        # both slots is wrong in a way that looks entirely deliberate on the
+        # finished flyer. Chase's rule when the roster is missing one: say so.
+        co_agent = people.co_agent(self.connection, intake)
+        if co_agent is not None and not co_agent.get("phone"):
+            missing = co_agent.get("_name", "the second agent")
+            return self._ask(
+                run_id,
+                f"This one names two agents and I do not have contact details for "
+                f"{missing}. What is their phone number and email?",
+                [],
+                result,
+            )
 
         # 5b. Ask for the hero photo BEFORE building anything.
         #
@@ -570,6 +585,9 @@ class Runner:
             "agent_title": "REALTOR",
             "social_handle": DEFAULT_SOCIAL_HANDLE,
             "neighborhood": _city_of(intake.address),
+            # The co-agent on a two-agent design. Empty on every other design,
+            # which leaves those slots to the single-agent values above.
+            **people.co_agent_values(self.connection, intake),
         }
 
     def _values_not_readable_back(

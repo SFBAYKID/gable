@@ -261,6 +261,36 @@ def sync_salespeople(client: ReadsRanges, connection: Connection, tab: str) -> i
     return stored
 
 
+def find_salesperson_by_name(connection: Connection, name: str) -> dict[str, str]:
+    """Look up an agent by the name written in a submission's notes.
+
+    A two-agent post names the co-agent in prose — "Listed by Stacey Abbott,
+    hosted by Jason Vetter" — so there is no email to look them up by. Matching
+    on first and last name is how the roster is reached at all.
+
+    Args:
+        connection: An open database connection.
+        name: A full name as written in the notes.
+
+    Returns:
+        Their row as a dict, or empty when the roster does not have them. Empty
+        is a question for Carmen, never a reason to put the other agent's
+        details in the slot.
+
+    Raises:
+        sqlite3.Error: on a query failure.
+    """
+    parts = [part for part in name.replace(",", " ").split() if part]
+    if len(parts) < 2:
+        return {}
+    first, last = parts[0].lower(), parts[-1].lower()
+    row = connection.execute(
+        "SELECT * FROM salespeople WHERE LOWER(first_name) = ? AND LOWER(last_name) = ?",
+        (first, last),
+    ).fetchone()
+    return dict(row) if row else {}
+
+
 def find_salesperson(connection: Connection, email: str) -> dict[str, str]:
     """Look up an agent by email.
 
