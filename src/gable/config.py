@@ -156,7 +156,9 @@ class Settings:
 
     # --- AI providers ---
     openai_image_api_key: str
+    image_model: str
     anthropic_api_key: str
+    anthropic_model: str
 
     # --- Logging ---
     log_level: str
@@ -281,7 +283,9 @@ class Settings:
             max_retries=reader.int_value("GABLE_MAX_RETRIES", 3, minimum=0, maximum=10),
             dry_run=reader.bool_value("GABLE_DRY_RUN", False),
             openai_image_api_key=reader.secret("OPENAI_IMAGE_API_KEY", False),
+            image_model=reader.str_value("GABLE_IMAGE_MODEL", "gpt-image-2"),
             anthropic_api_key=reader.secret("ANTHROPIC_API_KEY", False),
+            anthropic_model=reader.str_value("GABLE_ANTHROPIC_MODEL", "claude-opus-5"),
             log_level=reader.str_value("LOG_LEVEL", "INFO").upper(),
             log_format=reader.str_value("LOG_FORMAT", "json").lower(),
             log_redact_secrets=reader.bool_value("LOG_REDACT_SECRETS", True),

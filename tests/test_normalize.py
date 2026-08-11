@@ -98,18 +98,20 @@ def test_malformed_email_is_flagged_but_preserved() -> None:
 
 @pytest.mark.parametrize(
     "raw",
-    ["5551234567", "(555) 123-4567", "555-123-4567", "555.123.4567", " 555 123 4567 "],
+    ["8182597432", "(818) 259-7432", "818-259-7432", "818.259.7432", " 818 259 7432 "],
 )
-def test_ten_digit_us_numbers_become_e164(raw: str) -> None:
-    assert normalize_phone(raw) == ("+15551234567", None)
+def test_ten_digit_us_numbers_get_the_display_format(raw: str) -> None:
+    """Chase specified `(818) 259-7432`. It is what a human reads on a flyer."""
+    assert normalize_phone(raw) == ("(818) 259-7432", None)
 
 
-def test_leading_country_code_is_handled() -> None:
-    assert normalize_phone("1-555-123-4567") == ("+15551234567", None)
+def test_leading_country_code_is_stripped() -> None:
+    assert normalize_phone("1-818-259-7432") == ("(818) 259-7432", None)
 
 
-def test_already_e164_is_left_alone() -> None:
-    assert normalize_phone("+15551234567") == ("+15551234567", None)
+def test_e164_input_is_reformatted_for_display() -> None:
+    """E.164 is right for dialling and wrong for print."""
+    assert normalize_phone("+18182597432") == ("(818) 259-7432", None)
 
 
 def test_missing_phone_is_not_a_problem() -> None:
@@ -263,7 +265,7 @@ def _row(**overrides: str) -> dict[str, str]:
         "Agent first name": "Jane",
         "Agent last name": "Doe",
         "Agent email": "Jane@Brokerage.com",
-        "Agent phone": "(555) 123-4567",
+        "Agent phone": "(818) 259-7432",
         "Property address": "123 ANYWHERE ST, ANY CITY, ST 12345",
         "Price": "$1,200,000",
         "Description": "A lovely home.",
@@ -277,7 +279,7 @@ def test_clean_row_produces_a_flyer_ready_listing() -> None:
     assert listing.problems == ()
     assert listing.is_flyer_ready is True
     assert listing.agent_email == "jane@brokerage.com"
-    assert listing.agent_phone == "+15551234567"
+    assert listing.agent_phone == "(818) 259-7432"
     assert listing.price_value == 1_200_000
     assert listing.agent_name == "Jane Doe"
 

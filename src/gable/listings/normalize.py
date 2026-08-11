@@ -148,30 +148,35 @@ def normalize_email(raw: str) -> tuple[str, str | None]:
     return email, None
 
 
+def format_phone_us(digits: str) -> str:
+    """Render ten digits the way a flyer shows them: `(818) 259-7432`.
+
+    Display format, not storage format. E.164 (`+18182597432`) is correct for
+    dialling APIs and wrong for print — nobody puts a plus sign on a listing
+    flyer. Gable's output is read by humans, so the human format wins.
+    """
+    return f"({digits[0:3]}) {digits[3:6]}-{digits[6:10]}"
+
+
 def normalize_phone(raw: str) -> tuple[str, str | None]:
-    """Normalize a US phone number to E.164.
+    """Normalize a US phone number to `(818) 259-7432`.
 
     Returns:
         `(phone, problem)`. On failure the cleaned original is returned rather
         than an empty string, so a flyer shows what the agent submitted instead
-        of nothing.
+        of nothing, and the problem tells Carmen to check it.
     """
     cleaned = clean_text(raw)
     if not cleaned:
         return "", None  # Optional field; absence is not a problem.
 
-    # ASSUMPTION: US numbering plan. ARCHITECTURE.md 4.2 says E.164 without
-    # naming a region, and every agent on this roster is US-based. Settled by
-    # the first non-US agent, at which point this needs a region parameter.
-    if cleaned.startswith("+"):
-        digits = _NON_DIGIT.sub("", cleaned)
-        return (f"+{digits}", None) if digits else (cleaned, f"unparseable phone: {cleaned!r}")
-
+    # ASSUMPTION: US numbering plan. Every agent on this roster is US-based.
+    # Settled by the first non-US agent, at which point this needs a region.
     digits = _NON_DIGIT.sub("", cleaned)
     if len(digits) == _US_NATIONAL_DIGITS:
-        return f"+1{digits}", None
+        return format_phone_us(digits), None
     if len(digits) == _US_NATIONAL_DIGITS + 1 and digits.startswith("1"):
-        return f"+{digits}", None
+        return format_phone_us(digits[1:]), None
     return cleaned, f"phone is not a 10-digit US number: {cleaned!r}"
 
 

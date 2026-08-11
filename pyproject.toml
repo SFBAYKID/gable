@@ -94,7 +94,7 @@ ban-relative-imports = "all"
 [tool.mypy]
 python_version = "3.11"
 strict = true
-files = ["src", "tests"]
+files = ["src", "tests", "tools"]
 warn_unreachable = true
 # A missing annotation must fail loudly rather than degrade to Any.
 disallow_any_unimported = true

@@ -117,6 +117,42 @@ drip-feed questions across ten messages. Gather what you need, present it
 together, say which option you'd pick and why, and keep working on anything
 that isn't blocked while you wait.
 
+### 2.7 Leave the documentation true
+
+**A task is not finished until the documents that describe it are correct
+again.** Stale documentation is worse than missing documentation: the next agent
+reads it, believes it, and builds on something that is no longer real. This has
+already cost this project once — `ARCHITECTURE.md` described a Canva Bulk Create
+export for days after the code had moved to Google Slides.
+
+So: **before you report any work complete, re-read the docs your change touched
+and update the ones your change made false.** In the same commit, not later.
+
+| If you changed… | Update, in the same commit |
+|---|---|
+| A design decision, or a tradeoff | `ARCHITECTURE.md` — the affected section **and** a new row in the §9 decision log |
+| A module, a package, or a file's home | The `CLAUDE.md` §6 layout tree |
+| Anything the runtime agent says or does | `AGENTS.md` |
+| A variable the code reads | `.env.example`, with the comment explaining it |
+| Setup, deploy, or operations | `README.md` |
+| What is blocked, decided, or waiting on Chase | `STATUS.md` |
+| A §4.3 unknown you resolved | §4 of this file, moving it to §4.1/§4.2 with its evidence |
+
+Rules that make this work:
+
+- **Never rewrite history.** The decision log is append-only. If a decision
+  reverses, add a row saying so and why — do not edit the old row away.
+- **Correct the doc, don't work around it.** If the code contradicts
+  `ARCHITECTURE.md`, one of them is wrong. Decide which, fix that one, and say
+  in your summary which you changed.
+- **Delete what is dead.** A section describing a path that no longer exists
+  gets removed, not left with a note. Keep findings that explain *why* something
+  was abandoned — those are the reason the next agent doesn't repeat the work.
+- **This is §2.6 work, not a §2.6 question.** Updating a doc your own change
+  falsified is yours to do. You never need permission for it.
+- Say in your summary which documents you touched and why. "No doc changes
+  needed" is a valid answer — but it means you checked, not that you forgot.
+
 ---
 
 ## 3. Credentials — read this twice
@@ -285,6 +321,10 @@ gable/
 │   └── manifest.yml             # paste into api.slack.com
 ├── assets/
 │   └── gable-icon-512.png       # Slack app icon
+├── deploy/                      # systemd unit + droplet provisioning steps
+├── spikes/                      # findings only; the spike tooling is deleted
+├── tools/
+│   └── check_connections.py     # prove every .env credential works, live
 ├── src/gable/
 │   ├── config.py                # frozen settings dataclass, env parsing
 │   ├── logging_setup.py         # structured logging + secret redaction
@@ -298,10 +338,10 @@ gable/
 │   ├── photos/
 │   │   ├── resolver.py          # the cascade, policy enforcement
 │   │   ├── sources.py           # form / drive / web source adapters
-│   │   ├── enhance.py           # enhancement of a REAL photo only
+│   │   ├── enhance.py           # reprocessing of a REAL photo only
 │   │   └── store.py             # publish to a public HTTPS URL
-│   ├── canva/
-│   │   └── bulk_export.py       # Bulk Create payload builder
+│   ├── slides/
+│   │   └── renderer.py          # pure Slides batchUpdate request builder
 │   ├── slackapp/
 │   │   ├── app.py               # Socket Mode bootstrap
 │   │   ├── blocks.py            # Block Kit builders
@@ -393,13 +433,17 @@ generation are different operations and must be separate code paths.
 
 ## 9. Runtime environment
 
-- **DigitalOcean droplet, $4 tier.** That tier is 512MB-class. Verify current
-  specs before sizing anything.
-- 512MB is tight for Python plus image handling. **Add a 1GB swap file** as part
-  of provisioning, and **stream images to disk — never load a full image into
-  memory**. If you find yourself needing more, say so rather than quietly
-  bloating the process.
-- Python 3.11+. `systemd` service, not `nohup`. Restart on failure.
+- **DigitalOcean droplet — verified live 2026-08-10.** The droplet `gable` exists:
+  Ubuntu 24.04 LTS, SFO3, 1 vCPU / **1 GB** ($6/mo), at the address in the
+  `Makefile`. The original plan said the $4 / 512MB tier; the machine that was
+  actually built is the 1GB one. Size against 1 GB, not 512MB.
+- 1 GB is still tight for Python plus image handling. The **1GB swap file is
+  provisioned and active** (`/swapfile`, confirmed). **Stream images to disk —
+  never load a full image into memory.** If you find yourself needing more, say
+  so rather than quietly bloating the process.
+- **Python 3.12.3** on the droplet (confirmed). `mypy` is nonetheless pinned to
+  `python_version = "3.11"` as a deliberate floor — see the `ARCHITECTURE.md`
+  decision log. `systemd` service, not `nohup`. Restart on failure.
 - Deploy by git pull plus `systemctl restart`, driven by the `Makefile`. No
   editing files on the server by hand.
 - Logs to `journald`, structured JSON, secrets redacted.
@@ -424,8 +468,11 @@ A task is complete only when all of these are true:
 - [ ] Failure paths are tested, not just the happy path.
 - [ ] No secret appears in any log, commit, or docstring.
 - [ ] `.env.example` covers every variable the code reads.
-- [ ] `ARCHITECTURE.md` reflects any design decision you changed.
-- [ ] Your summary distinguishes what you verified from what you assumed.
+- [ ] **You did the §2.7 documentation sweep** — every doc your change made
+      false is now true, in this commit, and the decision log has a row if a
+      design decision moved.
+- [ ] Your summary distinguishes what you verified from what you assumed, and
+      names which documents you updated.
 
 ---
 

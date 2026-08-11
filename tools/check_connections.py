@@ -166,14 +166,22 @@ def check_openai_images(env: dict[str, str]) -> Result:
         "https://api.openai.com/v1/models", headers={"Authorization": f"Bearer {key}"}
     )
     if status == 200:
-        ids = {m.get("id") for m in body.get("data", [])}
-        image_models = sorted(i for i in ids if isinstance(i, str) and "image" in i)
-        detail = f"key valid, {len(ids)} models"
-        if image_models:
-            detail += f"; image-capable: {', '.join(image_models[:3])}"
-        else:
-            detail += "; NO image model visible to this key"
-        return Result("OpenAI (images)", OK, detail)
+        ids = {m.get("id") for m in body.get("data", []) if isinstance(m.get("id"), str)}
+        wanted = env.get("GABLE_IMAGE_MODEL", "gpt-image-2")
+        # Sort descending so the NEWEST model leads. Sorting ascending once made
+        # gpt-image-1 look like the latest available, which it is not.
+        image_models = sorted((i for i in ids if "image" in i), reverse=True)
+        if wanted in ids:
+            return Result(
+                "OpenAI (images)",
+                OK,
+                f"key valid; {wanted} available (newest visible: {image_models[0]})",
+            )
+        return Result(
+            "OpenAI (images)",
+            FAIL,
+            f"GABLE_IMAGE_MODEL={wanted} NOT available to this key. Visible: {image_models[:4]}",
+        )
     return Result(
         "OpenAI (images)", FAIL, f"HTTP {status}: {body.get('error', {}).get('message', body)}"
     )
@@ -217,7 +225,10 @@ def check_google(env: dict[str, str]) -> list[Result]:
 
     info = json.loads(path.read_text(encoding="utf-8"))
     email = info.get("client_email", "?")
-    creds = service_account.Credentials.from_service_account_info(
+    # google-auth ships no annotations for this constructor, so --strict counts
+    # it as an untyped call. Narrowed to this one line rather than exempting the
+    # module, per CLAUDE.md section 5.2.
+    creds = service_account.Credentials.from_service_account_info(  # type: ignore[no-untyped-call]
         info,
         scopes=[
             "https://www.googleapis.com/auth/spreadsheets",

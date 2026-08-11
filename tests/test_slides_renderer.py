@@ -39,7 +39,7 @@ def _listing(**overrides: object) -> Listing:
         "agent_name": "Jane Doe",
         "address": "123 Anywhere St, Any City, ST 12345",
         "price_display": "$1,200,000",
-        "agent_phone": "+15551234567",
+        "agent_phone": "(818) 259-7432",
     }
     base.update(overrides)
     return Listing(**base)  # type: ignore[arg-type]
@@ -80,7 +80,7 @@ def test_values_come_from_the_listing() -> None:
     values = PlaceholderMap.from_listing(_listing()).values
     assert values["price"] == "$1,200,000"
     assert values["address"] == "123 Anywhere St, Any City, ST 12345"
-    assert values["agent_phone"] == "+15551234567"
+    assert values["agent_phone"] == "(818) 259-7432"
 
 
 def test_agents_tab_wins_on_display_name() -> None:
