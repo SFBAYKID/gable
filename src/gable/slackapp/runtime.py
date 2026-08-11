@@ -10,16 +10,23 @@ from __future__ import annotations
 
 import logging
 import sys
+from sqlite3 import Connection
+from typing import Any
 
+from gable import spend
 from gable.config import ConfigError, Settings
 from gable.db.schema import apply_migrations, connect
 from gable.logging_setup import configure_logging
 from gable.pipeline.live import build_runner
 from gable.pipeline.poller import Poller
+from gable.pipeline.runner import Runner
 from gable.runtime import RuntimeComponents, serve
 from gable.sheets import repository as repo
 from gable.sheets.client import SheetClient
 from gable.slackapp.app import build_app
+from gable.slackapp.brain import Decision, think
+from gable.slackapp.editing import SlideEditor
+from gable.slackapp.photos import PhotoHandoff
 
 logger = logging.getLogger("gable.slack.runtime")
 
@@ -62,7 +69,7 @@ def build_components(settings: Settings) -> RuntimeComponents:
     slides = build("slides", "v1", credentials=credentials, cache_discovery=False)
     sheet_client = SheetClient(spreadsheet_id=settings.sheet_id, service=sheets)
 
-    app = build_app()
+    app: Any = None
 
     def slack_post(text: str, thread_ts: str | None) -> str:
         """Post only to Gable's configured channel and return the message id."""
@@ -72,6 +79,99 @@ def build_components(settings: Settings) -> RuntimeComponents:
             thread_ts=thread_ts,
         )
         return str(response.get("ts") or thread_ts or "")
+
+    def runner_for_photo(
+        connection_for_event: Connection, photo_url: str, thread_ts: str
+    ) -> Runner:
+        """Build thread-owned Google clients and a runner for one Slack upload."""
+        event_credentials = service_account.Credentials.from_service_account_file(  # type: ignore[no-untyped-call]
+            str(settings.google_service_account_file), scopes=list(GOOGLE_SCOPES)
+        )
+        event_drive = build("drive", "v3", credentials=event_credentials, cache_discovery=False)
+        event_slides = build("slides", "v1", credentials=event_credentials, cache_discovery=False)
+
+        def post_in_origin_thread(text: str, requested_thread: str | None) -> str:
+            """Keep every resumed-run message in its originating thread."""
+            return slack_post(text, requested_thread or thread_ts)
+
+        return build_runner(
+            settings,
+            connection_for_event,
+            event_drive,
+            event_slides,
+            post_in_origin_thread,
+            hero_photo_url=photo_url,
+        )
+
+    photo_handoff = PhotoHandoff(
+        db_path=settings.db_path,
+        bot_token=settings.slack_bot_token,
+        allowed_channel=settings.slack_channel_id,
+        target_width=settings.slide_width_px,
+        target_height=settings.slide_height_px,
+        public_root=settings.photo_public_root,
+        public_base=settings.photo_public_base,
+        runner_for=runner_for_photo,
+    )
+
+    def execute_action(decision: Decision, thread_ts: str) -> str:
+        """Use thread-owned clients to apply one conversational edit."""
+        action_connection = connect(settings.db_path)
+        try:
+            action_credentials = service_account.Credentials.from_service_account_file(  # type: ignore[no-untyped-call]
+                str(settings.google_service_account_file), scopes=list(GOOGLE_SCOPES)
+            )
+            action_slides = build(
+                "slides", "v1", credentials=action_credentials, cache_discovery=False
+            )
+            return SlideEditor(action_connection, action_slides).execute(decision, thread_ts)
+        except Exception:
+            logger.exception("a Slack edit could not construct its Google client")
+            return "I could not open the flyer to make that change, so I left it unchanged."
+        finally:
+            action_connection.close()
+
+    def guarded_think(message: str) -> Decision:
+        """Run a conversation call only while the shared budget permits it."""
+        if not settings.openai_image_api_key:
+            return think(
+                message,
+                api_key=settings.openai_image_api_key,
+                model=settings.conversation_model,
+            )
+        thought_connection = connect(settings.db_path)
+        estimate = spend.Estimate(
+            service="openai",
+            model=settings.conversation_model,
+            usd=spend.CONVERSATION_RESERVE_USD,
+            detail="conservative conversation-call reservation",
+        )
+        try:
+            return spend.guarded_call(
+                thought_connection,
+                estimate,
+                lambda: think(
+                    message,
+                    api_key=settings.openai_image_api_key,
+                    model=settings.conversation_model,
+                ),
+            )
+        except spend.BudgetExceededError:
+            return Decision(
+                reply=(
+                    "Testing has reached its spending limit, so I did not call the "
+                    "language model or change the flyer."
+                )
+            )
+        finally:
+            thought_connection.close()
+
+    app = build_app(
+        file_share_handler=photo_handoff.handle,
+        action_handler=execute_action,
+        allowed_channel=settings.slack_channel_id,
+        thinker=guarded_think,
+    )
 
     def on_submission(submission: repo.Submission) -> None:
         """Give one new submission a fresh runner bound to the live clients."""

@@ -81,10 +81,12 @@ def test_start_limits_are_in_the_unit_section_not_service(
     assert not unit.has_option("Service", "StartLimitBurst")
 
 
-def test_filesystem_is_read_only_except_var(unit: configparser.ConfigParser) -> None:
+def test_filesystem_is_read_only_except_runtime_data_paths(
+    unit: configparser.ConfigParser,
+) -> None:
     assert unit.get("Service", "ProtectSystem") == "strict"
     assert unit.get("Service", "ProtectHome") == "true"
-    assert unit.get("Service", "ReadWritePaths") == "/opt/gable/var"
+    assert unit.get("Service", "ReadWritePaths") == "/opt/gable/var /var/www/gable-photos"
 
 
 def test_no_inbound_listener_is_configured() -> None:

@@ -238,8 +238,8 @@ _BUG_PATTERNS: Final[tuple[tuple[str, str, str, str, str, str], ...]] = (
     (
         MEDIUM,
         "Substring replacement is still unguarded",
-        "src/gable/pipeline/live.py",
-        r"allow_short=True",
+        "MARKER:substring-safety",
+        "",
         "MIN_FIND_LENGTH exists to stop 'Phone' matching inside 'Phone Number'. "
         "Nothing checks whether a literal changed more than once.",
         "6.12",
@@ -267,13 +267,23 @@ def check_known_bugs() -> list[Finding]:
         if path == "MARKER:spend-unimported":
             hits = _grep_repo(r"from gable\.spend|import spend\b|record_spend\(")
             still_there = (
-                len([h for h in hits if "/spend.py" not in h and "store.py" not in h]) == 0
+                len(
+                    [
+                        h
+                        for h in hits
+                        if "/spend.py" not in h and "store.py" not in h and "watchdog.py" not in h
+                    ]
+                )
+                == 0
             )
         elif path == "MARKER:group-recursion":
             live = _read("src/gable/pipeline/live.py")
             still_there = "elementGroup" not in live and "children" not in live
         elif path == "MARKER:db-path-config":
             still_there = "db_path" not in _read("src/gable/config.py")
+        elif path == "MARKER:substring-safety":
+            live = _read("src/gable/pipeline/live.py")
+            still_there = "safe_replacement_requests" not in live or "occurrences != 1" not in live
         else:
             body = _read(path)
             still_there = bool(body) and bool(re.search(pattern, body, re.MULTILINE))
@@ -285,7 +295,7 @@ def check_known_bugs() -> list[Finding]:
 
 def _grep_repo(pattern: str) -> list[str]:
     """Lines in src/ and tools/ matching a regex."""
-    code, out = _run(["grep", "-rEn", pattern, "src", "tools"])
+    code, out = _run(["grep", "-rEn", "--exclude-dir=__pycache__", pattern, "src", "tools"])
     return out.splitlines() if code == 0 else []
 
 
@@ -353,7 +363,15 @@ def check_safety() -> list[Finding]:
 
     # Emoji anywhere a reader could see one.
     code, out = _run(
-        ["grep", "-rEn", "[\U0001f300-\U0001faff☀-➿]", "src", "AGENTS.md", "ARCHITECTURE.md"]
+        [
+            "grep",
+            "-rEn",
+            "--exclude-dir=__pycache__",
+            "[\U0001f300-\U0001faff☀-➿]",
+            "src",
+            "AGENTS.md",
+            "ARCHITECTURE.md",
+        ]
     )
     if code == 0 and out.strip():
         found.append(

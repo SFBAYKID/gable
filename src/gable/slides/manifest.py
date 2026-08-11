@@ -58,6 +58,10 @@ class Manifest:
 
     template: str
     fields: tuple[Field, ...] = ()
+    #: Exact raster-art layer replaced by the hero photo. Imported PowerPoint
+    #: photos arrive as ordinary shapes, so type and size cannot identify them
+    #: safely; this id is measured per template instead.
+    hero_object_id: str = ""
 
     def required_names(self) -> tuple[str, ...]:
         """Fields that must be filled for this template to be renderable."""
@@ -102,14 +106,24 @@ MANIFESTS: Final[dict[str, Manifest]] = {
             _HERO,
             _HEADSHOT,
         ),
+        # ASSUMPTION: Drive copies preserve Slides object ids. A copied live
+        # template plus a rendered thumbnail would confirm this after any
+        # template replacement; the source file was inspected on 2026-08-11.
+        hero_object_id="p1_i3",
     ),
     "Just Listed — Plus Open House — Offered At": Manifest(
         "Just Listed — Plus Open House — Offered At",
         (_ADDRESS, _PRICE, _BEDS, _BATHS, _SQFT, _AGENT, _PHONE, _OPEN_HOUSE, _HERO, _HEADSHOT),
+        # ASSUMPTION: This id remains stable until Carmen replaces the source
+        # template. Re-running template certification would confirm it.
+        hero_object_id="p1_i10",
     ),
     "Just Sold — With Beds, Baths and SqFt": Manifest(
         "Just Sold — With Beds, Baths and SqFt",
         (_ADDRESS, _PRICE, _BEDS, _BATHS, _SQFT, _AGENT, _PHONE, _EMAIL, _HERO, _HEADSHOT),
+        # ASSUMPTION: This id remains stable until Carmen replaces the source
+        # template. Re-running template certification would confirm it.
+        hero_object_id="p1_i3",
     ),
 }
 

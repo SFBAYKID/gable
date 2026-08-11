@@ -406,7 +406,7 @@ def named_agents(intake: Intake) -> dict[str, str]:
         listing — putting the submitter in the listing slot would be wrong, and
         wrong in a way that looks perfectly correct on the flyer.
     """
-    text = f"{intake.post_details} {intake.extra_notes} {intake.notes}"
+    text = context_text(intake)
     found: dict[str, str] = {}
     for role, pattern in _ROLE_PATTERNS:
         match = pattern.search(text)
@@ -415,6 +415,45 @@ def named_agents(intake: Intake) -> dict[str, str]:
             if name:
                 found[role] = name
     return found
+
+
+def context_text(intake: Intake) -> str:
+    """Every form field that can explain how the requested post should work.
+
+    The template decision cannot read only the request-type dropdown. Agents
+    explain dual representation, hosting roles, dates, and desired calls to
+    action in the three free-text sections, while the structured open-house and
+    side fields add context of their own.
+
+    Args:
+        intake: The parsed form row.
+
+    Returns:
+        Normalized prose containing all selection-relevant fields.
+
+    Raises:
+        Nothing.
+    """
+    parts = (
+        intake.request_type,
+        intake.post_details,
+        intake.open_house,
+        intake.extra_notes,
+        intake.side,
+        intake.notes,
+    )
+    return ". ".join(" ".join(part.split()) for part in parts if part.strip())
+
+
+_MULTIPLE_AGENT_SIGNAL: Final[re.Pattern[str]] = re.compile(
+    r"\b(?:two|both)\s+agents?\b|\bco-?agents?\b|\bco-?list(?:ed|ing)?\b",
+    re.IGNORECASE,
+)
+
+
+def mentions_multiple_agents(intake: Intake) -> bool:
+    """Whether the notes imply a multi-agent post, even without two parsed names."""
+    return bool(_MULTIPLE_AGENT_SIGNAL.search(context_text(intake)))
 
 
 def needs_two_agents(intake: Intake) -> bool:

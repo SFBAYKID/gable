@@ -40,7 +40,7 @@ actually live. Background color `#16222E` is set in the manifest to match.
 | `CLAUDE.md` | Rules for the agent building this. Honesty, code standards, what's verified vs. guessed. **Read first.** |
 | `ARCHITECTURE.md` | System design, data model, decision log. |
 | `AGENTS.md` | How Gable behaves at runtime — Slack message formats, prohibitions. |
-| `slack/manifest.yml` | Paste into api.slack.com to create the app. |
+| `slack/manifest.json` | Paste into api.slack.com to create or update the app. |
 | `.env.example` | Every config variable, documented. |
 | `assets/gable-icon-512.png` | Slack app icon. |
 
@@ -52,7 +52,7 @@ Things that must happen in sequence, because each depends on the last.
 
 **1. You (Chase), not the agent — these involve credentials**
 
-- Create the Slack app from `slack/manifest.yml`, upload the icon, generate the
+- Create the Slack app from `slack/manifest.json`, upload the icon, generate the
   app-level token, install to the workspace, `/invite @Gable` to `C0BP597644B`.
 - Create a Google Cloud service account, enable the Sheets and Drive APIs,
   download the JSON key.
@@ -82,25 +82,22 @@ moving Phase 2 forward, not working around it.
 
 ## Things I want to be straight with you about
 
-**The Slack manifest is unrun.** The YAML follows Slack's documented schema, but
-I have not submitted it to Slack. If Slack rejects a key, delete that key rather
-than guessing at a replacement, and note it in the decision log.
+**The Slack app is live.** Bot authentication and Socket Mode were verified.
+The new photo handoff adds `files:read` to `slack/manifest.json`; Chase must
+approve the app update and reinstall before uploads can be tested live.
 
-**The $4 droplet is 512MB-class.** That's tight for Python plus image handling.
-Provision a 1GB swap file, and make sure the agent streams images to disk rather
-than loading them into memory. If it turns out not to fit, the honest answer is
-a bigger droplet, not a cleverer hack.
+**The deployed droplet is the $6, 1 GB tier with 1 GB swap.** Slack uploads are
+capped at 25 MB before Pillow opens them. The full photo workflow still needs a
+live RSS measurement before adding a systemd memory limit.
 
 **Socket Mode means polling.** No inbound port means no Apps Script webhook, so
-the Sheet gets polled every three minutes. At your volume that's the right
-trade — but it is a trade, and it's documented in `ARCHITECTURE.md` §2.2 so
-nobody rediscovers it as a surprise.
+the Sheet is checked every two minutes from 7 AM Central through 7 PM Pacific
+and every ten minutes otherwise, weekends included.
 
-**The photo source is the real open question.** Your current form doesn't appear
-to collect an upload, and that's exactly where Carmen's twenty minutes go. The
-cheapest fix by a wide margin is adding a file-upload question to the Google
-Form. Everything else — Drive folders, brokerage scraping, generation — is
-working around a gap you could close in five minutes.
+**Hero photos come from Carmen in the listing's Slack thread.** The form's Drive
+links are inaccessible to Gable and often contain several photos with no hero
+choice. The upload is fitted locally, served by nginx, verified anonymously,
+and resumes the same paused run.
 
 **On AI-generated house photos.** You said you're not sure and lean toward
 generating freely. I built it as a config switch defaulting to

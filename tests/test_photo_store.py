@@ -21,6 +21,7 @@ from gable.photos.store import (
     PublishError,
     content_name,
     publish,
+    publish_local,
 )
 
 HOST = PhotoHost(
@@ -154,3 +155,43 @@ def test_url_for_joins_cleanly_whatever_the_base_looks_like() -> None:
 def test_the_host_is_frozen() -> None:
     with pytest.raises(AttributeError):
         HOST.public_base = "http://elsewhere"  # type: ignore[misc]
+
+
+# --- same-box production publishing ----------------------------------------
+
+
+def test_local_publish_writes_a_world_readable_content_addressed_file(tmp_path: Path) -> None:
+    url = publish_local(tmp_path / "gable-photos", "http://198.51.100.7", PNG)
+    published = tmp_path / "gable-photos" / url.rsplit("/", 1)[-1]
+
+    assert published.read_bytes() == PNG
+    assert stat.S_IMODE(published.stat().st_mode) == 0o644
+
+
+def test_local_publish_leaves_an_existing_content_file_untouched(tmp_path: Path) -> None:
+    root = tmp_path / "gable-photos"
+    first = publish_local(root, "http://198.51.100.7", PNG)
+    published = root / first.rsplit("/", 1)[-1]
+    first_inode = published.stat().st_ino
+
+    second = publish_local(root, "http://198.51.100.7", PNG)
+
+    assert second == first
+    assert published.stat().st_ino == first_inode
+
+
+def test_local_publish_refuses_a_broad_or_relative_root() -> None:
+    with pytest.raises(PublishError, match="specific absolute"):
+        publish_local(Path("relative"), "http://198.51.100.7", PNG)
+    with pytest.raises(PublishError, match="specific absolute"):
+        publish_local(Path("/"), "http://198.51.100.7", PNG)
+
+
+def test_local_publish_refuses_a_traversing_name(tmp_path: Path) -> None:
+    with pytest.raises(PublishError, match="content hash"):
+        publish_local(
+            tmp_path / "gable-photos",
+            "http://198.51.100.7",
+            PNG,
+            name="../../outside.jpg",
+        )

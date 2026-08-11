@@ -11,11 +11,12 @@ the Desktop. Read it before touching code.
 `Runner`; Socket Mode connects in the background while the poller runs on the
 main thread. `cli.py` also runs one guarded pass locally without Slack.
 
-The largest remaining Phase 1 gap is the Slack photo handoff. A new submission
-can automatically enter the runner and pause at `needs_photo`, but a
-`file_share` reply is not yet downloaded, fitted, hosted, and used to resume
-that same run. The production database's backfill flag must also be verified
-before the first deploy of the poller.
+The Slack photo handoff is built and unit-tested in the working tree. A
+`file_share` reply is matched to its thread's paused run, downloaded, fitted,
+hosted, verified, and used to resume that same run. It is not live-tested yet:
+Chase must approve the new `files:read` scope and reinstall the Slack app. The
+production database's backfill flag must also be verified before the first
+deploy of the poller.
 
 Proven live on two real submissions, invoked manually:
 
@@ -33,11 +34,13 @@ adopted: 96 historical rows recorded as history, none built.
 ## The customer-facing gaps that remain
 
 The vision pass, automatic text fitting, field manifest, and image URL verifier
-are built. They are not yet enough to certify all 45 templates visually. Photo
-placement still relies on a frame heuristic, headshot replacement is missing,
-and conversational edits are currently refused honestly rather than executed.
-No flyer should be called demo-ready until the real Slack upload path works and
-the rendered output has been inspected.
+are built. They are not yet enough to certify all 45 templates visually. Three
+templates have explicit measured hero-layer ids; the other 42 refuse placement
+instead of guessing. Headshot replacement is missing. Conversational font,
+colour, correction, resize, move, and status tools now execute against the
+thread's Slides file and report completion only after Google confirms the
+batch. No flyer should be called demo-ready until the Slack scope is installed
+and a real uploaded-photo render has been inspected.
 
 ---
 
@@ -158,7 +161,7 @@ value — run it after any `.env` change.
 
 | Needed | For | Status |
 |---|---|---|
-| Slack app from `slack/manifest.yml` → bot + app tokens | Any Slack output | **Done** — `auth.test` ok (team Monarch, bot `@gable`); Socket Mode ticket issued |
+| Slack app from `slack/manifest.json` → bot + app tokens | Any Slack output | **Done** — `auth.test` ok (team Monarch, bot `@gable`); Socket Mode ticket issued |
 | Firecrawl API key | Agent verification | **Done** — key valid, 2548 credits |
 | OpenAI image key | Reprocessing a real photo; policy-gated generation | **Done** — key valid, **`gpt-image-2`** available (newest: `gpt-image-2-2026-04-21`) |
 | Anthropic key | Reading requests, drafting copy, Slack change requests | **Done** — key valid |
@@ -191,13 +194,13 @@ No source file is over 800 lines. `mypy` covers `src`, `tests` and `tools`.
 | `models.py` | Done. Domain types; a synthetic photo cannot be built unflagged. |
 | `listings/normalize.py` | Done. Pure parsing; `ColumnMap` makes headers data. |
 | `slackapp/blocks.py` | Done. Every AGENTS.md §2 message shape. |
-| `slides/renderer.py` and `pipeline/live.py` | Done for the current run path: pure request building plus concrete Drive and Slides I/O. |
+| `slides/renderer.py` and `pipeline/live.py` | Concrete Drive and Slides I/O is built. Hero-layer placement is measured for three templates; the remaining 42 refuse placement until visually measured. |
 | `tools/check_connections.py` | Done. Proves every `.env` credential live, printing identity only. |
 | `deploy/gable.service` + `PROVISION.md` | **Run.** Droplet provisioned and verified; swap active. |
 | `spikes/` | Findings only — `SPIKE_A.md` and `SPIKE_A_RESULT.md`. The generator and its tests were deleted once Spike A was answered. |
 | Most of `src/gable/` | Built and unit-tested: the runner, orchestrator, poller, schedule, database, sheet client, enrichment, photo fitting and hosting, the edit tools, the field manifest, the image verifier, the vision check and the house style. |
 | **The wiring between them** | **Built in the working tree, not deployed.** The production runtime constructs `Poller` and `Runner`; the Slack-free CLI performs one guarded pass. |
-| The Slack photo handoff | **Not written.** Nothing receives a `file_share` event, downloads `url_private`, fits, publishes, and sets `hero_photo_url`. |
+| The Slack photo handoff | **Built and unit-tested, waiting on Chase.** Requires approval and reinstall for the new `files:read` scope before a live upload test. |
 | `photos/enhance.py`, `photos/resolver.py`, `photos/sources.py`, `listings/verify.py`, `slackapp/handlers.py` | Still docstring-only placeholders. |
 
 `normalize.py`'s `ColumnMap` can be re-pointed at the real headers above without
@@ -208,15 +211,17 @@ absorb this exact change.
 
 ## 6. Where the build actually stands
 
-The module graph and automatic trigger are built. The current priority order is:
+The module graph, automatic trigger, Slack photo resume, core conversational
+edits, and notes-aware template selector are built. The current priority order
+is:
 
-1. Receive a Slack `file_share`, download it with bot authorization, fit it to
-   1080 by 1350, publish it on the droplet, verify it, and resume the same run.
-2. Make conversational edit tools operate on the thread's actual Slides file,
-   reporting success only after Google confirms the change.
-3. Replace the agent headshot and make hero-frame discovery safe across grouped
-   PPTX imports.
-4. Use the full notes context — including one-agent versus two-agent language —
-   to select a template by purpose, and ask when intent remains ambiguous.
-5. Wire the $50 spend guard at every paid call and certify all 45 templates with
-   real rendered visual inspection.
+1. Chase approves `files:read` and reinstalls the Slack app; then run one real
+   thread upload through the full workflow and inspect the rendered flyer.
+2. Verify the backfill adoption in the exact production database before the
+   poller is deployed.
+3. Replace the agent headshot and measure the exact hero layer for the remaining
+   42 templates. The three measured templates use explicit object ids; there is
+   no longer a size-based deletion guess.
+4. Certify all 45 templates with real rendered visual inspection. The existing
+   Firecrawl, conversation, and vision calls now share the $50 hard guard and
+   conservative spend ledger.

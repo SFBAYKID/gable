@@ -26,6 +26,7 @@ import logging
 import os
 import re
 import sys
+from collections.abc import Callable
 from typing import Any, Final
 
 from gable.slackapp.brain import Decision, think
@@ -51,6 +52,10 @@ FALLBACK: Final[str] = (
     "Something went wrong at my end just now. Ask me again, or tell me which "
     "listing you mean and I'll pick it up from there."
 )
+
+FileShareHandler = Callable[[dict[str, Any], Any], str]
+ActionHandler = Callable[[Decision, str], str]
+Thinker = Callable[[str], Decision]
 
 
 def clean_mention_text(text: str) -> str:
@@ -111,11 +116,17 @@ def describe_action(decision: Decision) -> str:
     return ""
 
 
-def reply_for_decision(decision: Decision) -> str:
+def reply_for_decision(
+    decision: Decision,
+    action_handler: ActionHandler | None = None,
+    thread_ts: str = "",
+) -> str:
     """Choose an honest reply while action execution is being connected.
 
     Args:
         decision: What the conversational model selected.
+        action_handler: Executes a selected tool against the thread's flyer.
+        thread_ts: Thread that identifies the database run.
 
     Returns:
         The model's reply for conversation and clarification. For an action no
@@ -127,11 +138,69 @@ def reply_for_decision(decision: Decision) -> str:
     """
     if not decision.wants_action or decision.tool == "ask_clarifying":
         return decision.reply
+    if action_handler is not None:
+        return action_handler(decision, thread_ts)
     return "I understood the change, but I could not apply it. I have not changed the flyer."
 
 
-def build_app() -> Any:  # noqa: ANN401 - slack_bolt.App, imported lazily
+def process_file_share(
+    event: dict[str, Any],
+    say: Any,  # noqa: ANN401 - Bolt injection, untyped upstream
+    client: Any,  # noqa: ANN401 - Slack WebClient, untyped upstream
+    handler: FileShareHandler | None,
+) -> None:
+    """Show one progress message and replace it with the photo outcome.
+
+    Args:
+        event: Slack's file-share message event.
+        say: Bolt's thread-aware posting helper.
+        client: Slack Web API client, used to edit the progress message.
+        handler: The real photo workflow, or None in isolated startup checks.
+
+    Raises:
+        Nothing. The surrounding event handler owns its final exception gate.
+    """
+    thread = event.get("thread_ts") or event.get("ts")
+    if handler is None:
+        say(
+            text=safe_reply(
+                "I received the photo, but photo processing is not available right now."
+            ),
+            thread_ts=thread,
+        )
+        return
+    progress = say(
+        text=safe_reply("I have the photo. Fitting it to the flyer now."),
+        thread_ts=thread,
+    )
+    outcome = safe_reply(handler(event, client))
+    progress_ts = str(progress.get("ts") or "") if hasattr(progress, "get") else ""
+    if progress_ts:
+        client.chat_update(
+            channel=event.get("channel"),
+            ts=progress_ts,
+            text=outcome,
+        )
+    else:
+        say(text=outcome, thread_ts=thread)
+
+
+def build_app(
+    file_share_handler: FileShareHandler | None = None,
+    action_handler: ActionHandler | None = None,
+    allowed_channel: str = "",
+    thinker: Thinker = think,
+) -> Any:  # noqa: ANN401 - slack_bolt.App, imported lazily
     """Construct the Bolt app with its handlers registered.
+
+    Args:
+        file_share_handler: Production photo workflow. Optional so import and
+            isolated conversation tests need no Google or database clients.
+        action_handler: Executes model-selected edits against a thread's flyer.
+        allowed_channel: The only channel Gable may answer. Blank preserves the
+            isolated app bootstrap used by connection checks.
+        thinker: Conversation decision function. Production supplies a
+            budget-guarded wrapper; isolated checks use the pure default.
 
     Returns:
         A configured `slack_bolt.App`.
@@ -167,15 +236,20 @@ def build_app() -> Any:  # noqa: ANN401 - slack_bolt.App, imported lazily
         listing stays with that listing.
         """
         try:
+            if allowed_channel and event.get("channel") != allowed_channel:
+                return
             asked = clean_mention_text(event.get("text", ""))
             thread = event.get("thread_ts") or event.get("ts")
             logger.info("mention received: %s", asked[:120])
             if not asked:
                 say(text=safe_reply("I'm here. What would you like me to do?"), thread_ts=thread)
                 return
-            decision = think(asked)
+            decision = thinker(asked)
             logger.info("replying (tool=%s)", decision.tool or "none")
-            say(text=safe_reply(reply_for_decision(decision)), thread_ts=thread)
+            say(
+                text=safe_reply(reply_for_decision(decision, action_handler, str(thread or ""))),
+                thread_ts=thread,
+            )
             follow_up = describe_action(decision)
             if follow_up:
                 say(text=safe_reply(follow_up), thread_ts=thread)
@@ -189,19 +263,35 @@ def build_app() -> Any:  # noqa: ANN401 - slack_bolt.App, imported lazily
                 logger.exception("could not deliver the fallback either")
 
     @app.event("message")
-    def handle_message(event: dict[str, Any], say: Any) -> None:  # noqa: ANN401
+    def handle_message(
+        event: dict[str, Any],
+        say: Any,  # noqa: ANN401
+        client: Any,  # noqa: ANN401
+    ) -> None:
         """Answer a reply in a thread Gable is already part of.
 
         Ignores everything else, including its own messages, so the channel does
         not become a place where Gable talks to itself.
         """
         try:
-            if event.get("bot_id") or event.get("subtype"):
+            if allowed_channel and event.get("channel") != allowed_channel:
+                return
+            if event.get("bot_id"):
+                return
+            if event.get("subtype") == "file_share":
+                process_file_share(event, say, client, file_share_handler)
+                return
+            if event.get("subtype"):
                 return
             if not event.get("thread_ts"):
                 return  # a top-level message that did not mention us
-            decision = think(clean_mention_text(event.get("text", "")))
-            say(text=safe_reply(reply_for_decision(decision)), thread_ts=event["thread_ts"])
+            decision = thinker(clean_mention_text(event.get("text", "")))
+            say(
+                text=safe_reply(
+                    reply_for_decision(decision, action_handler, str(event["thread_ts"]))
+                ),
+                thread_ts=event["thread_ts"],
+            )
         except Exception:
             logger.exception("message handler failed")
 

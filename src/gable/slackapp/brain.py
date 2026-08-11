@@ -139,6 +139,33 @@ TOOLS: Final[list[dict[str, Any]]] = [
     {
         "type": "function",
         "function": {
+            "name": "move_element",
+            "description": "Nudge one unambiguous text element or photo left, right, up, or down.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "target": {
+                        "type": "string",
+                        "description": (
+                            "What to move, such as hero photo, headshot, price, or address."
+                        ),
+                    },
+                    "dx_points": {
+                        "type": "number",
+                        "description": "Horizontal move in points. Positive moves right.",
+                    },
+                    "dy_points": {
+                        "type": "number",
+                        "description": "Vertical move in points. Positive moves down.",
+                    },
+                },
+                "required": ["target", "dx_points", "dy_points"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "correct_field",
             "description": "Replace a wrong value on the flyer, such as a phone number.",
             "parameters": {
@@ -316,6 +343,7 @@ _ACKNOWLEDGEMENTS: Final[dict[str, str]] = {
     "set_font_size": "Making the {target} {direction}.",
     "set_colour": "Changing the {target} to {colour}.",
     "resize_photo": "Making the {which} photo {direction}.",
+    "move_element": "Moving the {target}.",
     "correct_field": "Changing that to {replacement}.",
     "rebuild_flyer": "Starting the flyer again from the template.",
     "report_status": "Let me check where things stand.",

@@ -13,8 +13,10 @@ from gable.listings.intake import (
     COLUMNS,
     Intake,
     address_looks_usable,
+    context_text,
     from_row,
     incoherences,
+    mentions_multiple_agents,
     missing_public_facts,
     named_agents,
     needs_two_agents,
@@ -250,6 +252,25 @@ def test_one_named_agent_is_not_a_dual_agent_post() -> None:
 def test_no_named_agents_is_the_common_case() -> None:
     assert named_agents(_intake()) == {}
     assert needs_two_agents(_intake()) is False
+
+
+def test_template_context_includes_every_notes_section() -> None:
+    intake = _intake(
+        post_details="post detail",
+        open_house="Saturday",
+        extra_notes="extra note",
+        side="buyer side",
+        notes="final note",
+    )
+    text = context_text(intake)
+    for phrase in ("post detail", "Saturday", "extra note", "buyer side", "final note"):
+        assert phrase in text
+
+
+def test_multiple_agents_can_be_flagged_before_both_names_are_known() -> None:
+    intake = _intake(notes="This needs to be a two agent post.")
+    assert named_agents(intake) == {}
+    assert mentions_multiple_agents(intake) is True
 
 
 # --- addresses that are not addresses ---------------------------------------

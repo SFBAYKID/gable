@@ -49,6 +49,10 @@ def test_defaults_match_dotenv_example() -> None:
     assert settings.max_image_calls_per_listing == 1
     assert settings.photo_max_edge_px == 2400
     assert settings.photo_jpeg_quality == 85
+    assert settings.photo_public_root == Path("/var/www/gable-photos")
+    assert settings.photo_public_base == "http://143.110.146.87"
+    assert settings.conversation_model == "gpt-5-mini"
+    assert settings.vision_model == "gpt-5-mini"
     assert settings.tab_responses == "Form Responses 1"
     assert settings.tab_agents == "Sales_People"
     assert settings.db_path == Path("/opt/gable/var/gable.db")
@@ -171,6 +175,17 @@ def test_poll_interval_floor_is_enforced() -> None:
     """A 1-second poll would burn the Sheets quota and the droplet."""
     with pytest.raises(ConfigError):
         _load(GABLE_POLL_INTERVAL_SECONDS="1")
+
+
+@pytest.mark.parametrize("root", ["relative", "/"])
+def test_photo_public_root_must_be_a_specific_absolute_directory(root: str) -> None:
+    with pytest.raises(ConfigError, match="GABLE_PHOTO_PUBLIC_ROOT"):
+        _load(GABLE_PHOTO_PUBLIC_ROOT=root)
+
+
+def test_photo_public_base_must_be_fetchable_by_slides() -> None:
+    with pytest.raises(ConfigError, match="GABLE_PHOTO_PUBLIC_BASE"):
+        _load(GABLE_PHOTO_PUBLIC_BASE="file:///var/www/gable-photos")
 
 
 def test_busy_poll_interval_floor_is_enforced() -> None:

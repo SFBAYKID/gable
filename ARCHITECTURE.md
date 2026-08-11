@@ -130,7 +130,7 @@ most of the operational surface.
 **The tradeoff is real:** with no public endpoint, a Google Apps Script
 `onFormSubmit` webhook cannot reach Gable. The Sheet must be polled instead.
 
-At this volume — a handful of listings a day — a 180-second poll is
+At this volume — a handful of listings a day — a two-minute busy-hours poll is
 indistinguishable from a webhook and dramatically simpler. If volume grows to
 where latency matters, revisit: add Caddy for automatic TLS and switch to HTTP
 events. Do not do that work preemptively.
@@ -156,8 +156,8 @@ dicts. No network, no credentials, no Google client. That split means the entire
 fill behaviour is unit-tested — 36 tests today — without a service account
 existing, and leaves `slides/client.py` holding nothing but I/O.
 
-It is also why the renderer was finishable while the Google credential is still
-blocked.
+It is also why the renderer was testable before Google access existed; the live
+service-account path has since been verified separately.
 
 ### 2.6 The polling schedule
 
@@ -166,8 +166,8 @@ Sheets quota to discover nothing.
 
 | When | Interval |
 |---|---|
-| Mon–Fri, **07:00–17:00 US Central** | every **2 minutes** |
-| All other hours, and weekends | every **10 minutes** |
+| Every day, **07:00–21:00 US Central** | every **2 minutes** |
+| All other hours | every **10 minutes** |
 
 Central is the operating timezone, so the window is defined there and evaluated
 against a timezone-aware clock — **never against droplet-local time**, which is
@@ -175,11 +175,11 @@ UTC and would shift the business-hours window by five or six hours depending on
 daylight saving. That is the kind of bug that works all winter and breaks in
 March.
 
-A request arriving at 4:58pm Friday is picked up within two minutes. One
-arriving Saturday morning waits at most ten. Both are well inside the time it
-takes a human to notice.
+A request arriving at 4:58pm Friday or Saturday is picked up within two
+minutes. Agents submit on weekends, so the busy window deliberately applies
+every day.
 
-`GABLE_POLL_INTERVAL_SECONDS` is the **quiet** rate — nights and weekends — so
+`GABLE_POLL_INTERVAL_SECONDS` is the **quiet** rate — overnight — so
 that variable keeps its meaning as "the slow path," and
 `GABLE_POLL_BUSY_INTERVAL_SECONDS` is the fast one. Both are floored at 30
 seconds by config, because a mistyped `1` is a busy loop against Google's quota.
@@ -250,9 +250,10 @@ Three things in that to build against, not around:
   header reads an empty row and matches nothing. Find the header row by content.
 - **`Lolo ` carries a trailing space.** Real data from a real form. Every join
   key gets trimmed before comparison, or Lolo never matches herself.
-- **`Template` holds `1`, not a Drive file id.** It is a human's shorthand. The
-  mapping from `1` to a real template file does not exist yet — that is what the
-  `Templates` tab in §3.2b is for, and it is the next thing to build.
+- **`Template` holds `1`, not a Drive file id.** It is legacy human shorthand,
+  not a safe production key. Runtime selection now combines the request type
+  and all notes fields with the explicit 45-entry catalogue, then requires an
+  exact Drive filename; it never treats `1` as a file id.
 
 The columns below are the target shape. Everything past `Template` is absent
 today and must be added before the feature that reads it ships.
@@ -351,7 +352,7 @@ absent" is the **normal** path, not an exception.
 When a field the template needs is missing or malformed, Gable asks for that
 specific field, naming the listing:
 
-> ⚠️ **123 Main St — Lolo Simmons**
+> **123 Main St — Lolo Simmons**
 > I don't have a phone number for this listing, and the template has a spot for
 > one. What should it say?
 
@@ -444,19 +445,23 @@ Options, in preference order:
 
 1. **The droplet, over plain `http://`** — in use, and the reason there is no
    critical path here any more. Slides was assumed to require https; it does
-   not, verified live. nginx serves `/var/www/gable-photos`, `photos/store.py`
-   publishes there over ssh, and it costs nothing beyond a droplet already paid
-   for. A photo only has to survive one fetch, so the host needs no durability.
+   not, verified live. nginx serves `/var/www/gable-photos`. Production writes
+   there locally under the systemd unit's narrow `ReadWritePaths`; development
+   may still use the SSH publisher. It costs nothing beyond a droplet already
+   paid for. A photo only has to survive one fetch, so the host needs no
+   durability.
 2. **DigitalOcean Spaces** — S3-compatible, public-read, stable URLs. Still the
    better answer if photo hosting ever outgrows one box, and `SPACES_*` remains
    in config for that day. Not needed now.
 3. Cloudflare R2 — S3-compatible with a free tier; costs a second vendor.
 4. Google Drive public links — **do not, and now we know why.** See the table.
 
-Normalize before upload: convert to JPEG, cap the long edge at
-`GABLE_PHOTO_MAX_EDGE_PX` (2400), strip EXIF (it can carry the photographer's GPS
-coordinates), and re-encode at quality 85. **Stream to disk; never hold a
-full-resolution image in memory on a 1 GB droplet.**
+Normalize before upload: convert to JPEG, strip EXIF (it can carry the
+photographer's GPS coordinates), and fit to exactly 1080 by 1350. Slack download
+size is hard-capped at 25 MB before Pillow opens it. This bounds transport bytes,
+not decoded pixel memory; measure live RSS on representative phone photos before
+adding a systemd memory limit. The fitted output is content-addressed and
+atomically published.
 
 ### 4.5b Fit the photo to the frame (`photos/fit.py`)
 
@@ -587,9 +592,9 @@ personality. Silence reads as broken, and image reprocessing is genuinely slow:
 
 No emoji, here or anywhere. AGENTS.md §2.0 forbids them and `voice.violations()`
 rejects them at the last gate, so a spinner written with one would never be
-sent. **Not yet implemented:** `runner.say` can only post, not update in place —
-it has no message timestamp to edit. Implementing this needs a second injected
-callable, not just a call site.
+sent. The Slack photo handoff posts one fitting message and updates it with the
+outcome. The initial automatic run still has no update-in-place seam for its
+Firecrawl, Drive, render, and vision stages.
 
 Two rules keep this from being noise:
 
@@ -771,3 +776,10 @@ row explaining why. `CLAUDE.md` §2.7 makes this mandatory rather than polite.
 | 2026-08-11 | **Template defects are logged for Carmen, never worked around in code** | Chase's instruction on reviewing two flyers: the "approch" typo, mixed typefaces, the low-contrast logo and panel misalignments belong to the design, not the pipeline. `TEMPLATE_ISSUES.md` records them. A code workaround hides the defect from the person who can fix it and breaks on the next re-export. |
 | 2026-08-11 | Socket Mode connects in the background; the Sheet poller owns the main thread | `Poller.run_forever` installs signal handlers and must run on the main thread. `slackapp.runtime` opens Socket Mode with its non-blocking `connect`, then calls the generic lifecycle in `runtime.py`. Slack event handlers use separate database connections rather than sharing the poller's connection. |
 | 2026-08-11 | Paused and review states suppress polling, and a submission gets at most three fresh attempts | Re-polling `needs_photo` repeated paid research and Slack questions indefinitely. Those states now resume their existing run only after a human response; `start_run` is the hard attempt ceiling. |
+| 2026-08-11 | Slack hero uploads resume the **same paused run** and publish locally on the droplet | A `file_share` is accepted only in the configured channel and originating listing thread, with exactly one image. It is downloaded from a Slack-owned host with bot authorization, capped at 25 MB, fitted to 1080 by 1350, atomically written to nginx's directory, verified anonymously, and passed to `Runner.resume`; no new retry is opened. The app needs Chase to approve and reinstall the new `files:read` scope before live testing. |
+| 2026-08-11 | Conversational edits resolve the Slack thread to one Slides output and report success only after Google confirms | The earlier app announced tools it never executed. Font size, colour, field correction, photo resize, element movement, and status now run through pure request builders. Zero or multiple matching elements is an explicit refusal rather than a guessed object id. |
+| 2026-08-11 | Template choice reads **all notes fields** against explicit per-template purpose metadata | Request type chooses only the broad category. `slides/selection.py` combines post details, open-house details, extra notes, transaction side, and final notes to distinguish one or two agents, one or two dates, and calls to action. Functional mismatches are hard filters; a genuine tie or missing exact Drive file becomes `needs_template`. |
+| 2026-08-11 | The live Slack manifest is JSON at `slack/manifest.json` | This supersedes the earlier path decision recorded above. The installed artifact and current repository file are JSON; setup documentation now names what actually exists. |
+| 2026-08-11 | Hero placement uses an **explicit per-template raster-art object id**, never a largest-shape heuristic | A read-only inspection of the live imported files showed no ordinary image elements: photos and artwork arrive as shapes, and the largest text-free object can instead be a white panel or overlay. Three measured manifests name their exact removable hero layer. The 1080 by 1350 photo is inserted at full-slide bounds behind the surviving masks, which centres it without letterboxing. An unmeasured template or changed object id stops for review without sending a deletion request; the other 42 remain pending in `TEMPLATE_CERTIFICATION.md`. |
+| 2026-08-11 | **Reverses the weekday-only polling window:** busy polling runs every day from 07:00 to 21:00 Central | Chase specified 7 AM Central through 7 PM Pacific, including weekends. Those endpoints are 07:00–21:00 Central because Pacific is two hours behind, and 18 of the 99 historical submissions arrived on weekends. `pipeline/schedule.py` and its DST tests already implement this; the earlier documentation was stale. |
+| 2026-08-11 | Firecrawl, conversation, and visual inspection share one **hard $50 spend guard** | `spend.guarded_call` checks the cumulative SQLite ledger before the vendor, reserves a deliberately conservative per-call estimate, and records it even when a request fails after acceptance. Crossing the ceiling prevents the call. This makes the guard fail safe when exact token usage is unavailable and stops all currently connected paid paths through one mechanism. |

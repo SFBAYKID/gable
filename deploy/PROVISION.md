@@ -41,18 +41,22 @@ The crash-loop guard was doing nothing while looking correct. Moved to `[Unit]`;
 `systemctl show` now reports `StartLimitIntervalUSec=5min`, `StartLimitBurst=5`.
 `tests/test_deploy_unit.py` asserts the placement so it cannot regress.
 
-The unit is installed at `/etc/systemd/system/gable.service`, currently
-**disabled and inactive** — correct, because `ExecStart` points at
-`gable.slackapp.app`, which is still a placeholder. Enable and start it when
-Phase 1 lands.
+The unit is installed, active, and enabled. The repository now points
+`ExecStart` at `gable.slackapp.runtime`, which joins Socket Mode to the Sheet
+poller. That updated unit and the new photo-directory permission are not yet
+deployed.
 
 ## Still outstanding — needs Chase
 
-1. **Secrets.** `.env` → `/opt/gable/.env` (chmod 600, owned by gable), and the
-   Google service-account JSON → `/opt/gable/secrets/`. I never handle these.
-2. **A git remote.** The repo is local-only, so `make deploy` has nothing to
-   pull yet.
-3. **Firewall scope.** SSH is currently open to any source address. If you want
+1. **Slack scope.** Chase must approve `files:read` from
+   `slack/manifest.json` and reinstall the app before the photo handoff can be
+   tested live.
+2. **Backfill database.** Verify adoption in the exact database configured at
+   `/opt/gable/var/gable.db` before deploying the poller.
+3. **Photo directory.** Before the new unit starts, ensure
+   `/var/www/gable-photos` exists and is owned by `gable:gable`; the unit grants
+   write access only to that path and `/opt/gable/var`.
+4. **Firewall scope.** SSH is currently open to any source address. If you want
    it narrowed to your IP, say the word — I left it open rather than risk
    locking us both out from a guess.
 
@@ -66,13 +70,13 @@ The commands below are what was run. They are idempotent and safe to re-run.
 
 ## 1. Create the droplet
 
-- Ubuntu LTS, the $4 tier.
+- Ubuntu LTS, the $6 / 1 GB tier.
 - **Add your SSH public key during creation.** Do not set a root password.
 - Note the IP.
 
-**Please report the tier's actual RAM and disk.** CLAUDE.md §9 says "512MB-class,
-verify current specs before sizing anything," and the swap size below assumes
-512MB. If DigitalOcean has changed that tier, the swap number changes.
+Verify the tier still provides at least 1 GB RAM and 25 GB disk before
+provisioning; the live box was measured rather than inferred from a pricing
+label.
 
 ## 2. Lock down SSH — key only
 
@@ -90,7 +94,7 @@ Keep this session open until you have confirmed a second one still works.
 
 ## 3. Swap — 1GB
 
-512MB plus Python plus Pillow is tight. Swap is what stops an image resize from
+1 GB plus Python and Pillow still benefits from headroom. Swap is what stops an image resize from
 killing the process (CLAUDE.md §9).
 
 ```bash
@@ -148,12 +152,15 @@ sudo -u gable git clone <REPO_URL> /opt/gable
 sudo -u gable python3 -m venv /opt/gable/.venv
 sudo -u gable /opt/gable/.venv/bin/pip install -e /opt/gable
 sudo -u gable mkdir -p /opt/gable/var
+sudo install -d -o gable -g gable -m 0755 /var/www/gable-photos
 ```
 
-`/opt/gable/var` is the only writable path the unit grants. It holds the xlsx
-batches and the temp files photos stream through.
+The unit grants writes only to `/opt/gable/var` and
+`/var/www/gable-photos`. The first holds SQLite and its WAL files; the second is
+nginx's public document root for fitted hero photos.
 
-No repo exists on a remote yet — that is item 8 in my open questions.
+The checkout pulls from `git@github.com:SFBAYKID/gable.git` through the
+read-only deploy key already installed on the droplet.
 
 ## 7. Secrets — you place these, I never touch them
 
@@ -185,10 +192,10 @@ sudo systemctl daemon-reload
 sudo systemctl enable gable
 ```
 
-**Do not `start` it yet.** `ExecStart` points at `gable.slackapp.app`, which is
-still a Phase 0 placeholder with no `__main__`. Starting it now fails five times
-and trips the restart limiter. Enable it so it comes back after a reboot, and
-start it when Phase 1 lands.
+`ExecStart` points at `gable.slackapp.runtime`. Before the first start, verify
+the historical-row adoption in `/opt/gable/var/gable.db`, install the Slack
+`files:read` scope, and create the nginx photo directory described above. Then
+start the unit and confirm both Socket Mode and one guarded poll cycle.
 
 Let `make deploy` handle restarts from then on. Nothing gets hand-edited on the
 server.
@@ -216,8 +223,8 @@ Scoped to exactly that one command — not a blanket NOPASSWD.
 3. `sudo ufw status verbose`.
 4. The value for `make deploy GABLE_HOST=…` — the SSH user and host.
 5. Where you put the service-account JSON, so I can fix `ProtectHome` if needed.
-6. `systemctl status gable` after step 8. "enabled, inactive (dead)" is correct
-   at this stage and is what I expect to see.
+6. `systemctl status gable` after step 8. It should be enabled and active only
+   after the backfill and Slack-scope prerequisites are complete.
 
 
 ---

@@ -164,6 +164,11 @@ Gable:   On it. Drop the new one here.
 check costs three seconds; the guess costs a post that is wrong in a way that
 looks right.
 
+Once the target is unambiguous, font size, colour, literal field correction,
+photo resize, and element movement execute against the Slides output belonging
+to that Slack thread. Gable says "Done" only after Slides confirms every request
+in the batch; a missing or multiply matched target is a question, not a guess.
+
 **When Gable does not know, it asks.** This applies to which field, which
 listing, which photo, and what a value should be — never resolved by picking the
 convenient interpretation.
@@ -190,14 +195,11 @@ indefinitely and re-enters on `/gable run`.
 Anything slower than a moment gets a status message, edited in place rather than
 posted repeatedly. Image work is genuinely slow, and silence reads as broken.
 
-> **Not implemented as of 2026-08-11.** `runner.say` can only post; it has no
-> message timestamp and no update path, so nothing can be edited in place.
-> Implementing this needs a second injected callable — `edit(ts, text)` —
-> threaded through `Runner`, not just a call site. The real gap is larger than
-> it looks: a run makes ten-plus sequential network round trips (Firecrawl, a
-> Drive copy, several Slides batch updates, a thumbnail fetch, a vision call)
-> with a worst case past three minutes, and today Gable says nothing for all of
-> it.
+The Slack photo handoff implements this contract: it posts one fitting message
+and replaces that message with the verified outcome. The initial automatic run
+still lacks stage-by-stage message editing because `runner.say` can post but
+cannot update an existing timestamp; that remaining gap covers Firecrawl,
+Drive, rendering, and vision stages.
 
 ```
 Working on it…
@@ -278,7 +280,7 @@ Gable must never:
    discrepancy; use what the agent submitted.
 8. **Report a flyer ready with any required field empty.**
 9. **Retry a failing listing more than 3 times.** After that, fail it loudly and
-   move on. Retry storms on a 512MB droplet take the whole process down.
+   move on. Retry storms can take the 1 GB process down and spend in a loop.
 10. **Log a secret**, or echo a token into Slack.
 
 ---
@@ -355,14 +357,13 @@ be explained from that log is a bug.
 An agent that can spend money in a loop must have a hard ceiling. Put the
 ceiling in code, not in a comment.
 
-> **Not implemented as of 2026-08-11.** `src/gable/spend.py` exists and holds
-> the $50 ceiling Chase set, and **nothing imports it**; `db/store.record_spend`
-> and the `spend` table have zero writers. The per-listing and per-URL caps
-> above are also unenforced. So the ceiling is, functionally, a comment — which
-> is the exact thing this section prohibits. The live risk is not the per-run
-> cost (about two to six cents) but the re-poll loop described in
-> `GABLE_HANDOFF.md` §6.1, which re-runs an unfinished listing every two
-> minutes indefinitely.
+The current paid paths — Firecrawl property research, conversation, and visual
+inspection — all call `spend.guarded_call` before the vendor. Each reserves a
+conservative amount and writes it to the spend table even if the vendor fails;
+reaching $50 prevents the call. Image generation is not connected yet and must
+use the same guard plus its per-listing cap when it is added. The 24-hour
+brokerage-URL cache belongs to the future web-photo resolver and remains a
+requirement for that path.
 
 ---
 

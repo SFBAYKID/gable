@@ -23,10 +23,13 @@ the droplet has a disk; `prune` exists for when that stops being true.
 from __future__ import annotations
 
 import hashlib
+import os
 import re
 import shlex
 import subprocess
+import uuid
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Final
 
 #: Published names must look exactly like this. `shlex.quote` blocks shell
@@ -164,6 +167,62 @@ def publish(host: PhotoHost, image_bytes: bytes, name: str | None = None) -> str
         msg = f"publishing {filename} failed: {stderr[:300]}"
         raise PublishError(msg)
     return host.url_for(filename)
+
+
+def publish_local(
+    root: Path,
+    public_base: str,
+    image_bytes: bytes,
+    name: str | None = None,
+) -> str:
+    """Publish through the nginx directory on the same machine as Gable.
+
+    Production runs on the photo host itself. SSHing from the unprivileged
+    service back into its own box required a root key that systemd correctly
+    hides, so the live path writes to the one explicitly permitted web root.
+    A unique staging file is atomically renamed into place; existing
+    content-addressed files are left untouched.
+
+    Args:
+        root: nginx's writable document root.
+        public_base: Public origin Google Slides can fetch.
+        image_bytes: The already-fitted image.
+        name: Optional safe content-addressed filename.
+
+    Returns:
+        The public URL.
+
+    Raises:
+        ValueError: if the image is empty.
+        PublishError: if the name or filesystem write is unsafe or fails.
+    """
+    filename = name or content_name(image_bytes)
+    if not SAFE_NAME.fullmatch(filename):
+        msg = "refusing to publish a filename that is not a content hash and image suffix"
+        raise PublishError(msg)
+    if not image_bytes:
+        msg = "cannot publish an empty image"
+        raise ValueError(msg)
+    if not root.is_absolute() or len(root.parts) < 3:
+        msg = "the local photo root must be a specific absolute directory"
+        raise PublishError(msg)
+
+    try:
+        root.mkdir(parents=True, exist_ok=True)
+        destination = root / filename
+        if destination.is_file():
+            return f"{public_base.rstrip('/')}/{filename}"
+        staging = root / f".{filename}.{uuid.uuid4().hex}.part"
+        with staging.open("xb") as handle:
+            handle.write(image_bytes)
+            handle.flush()
+            os.fsync(handle.fileno())
+        staging.chmod(0o644)
+        staging.replace(destination)
+    except OSError as exc:
+        msg = f"publishing {filename} into the local photo host failed"
+        raise PublishError(msg) from exc
+    return f"{public_base.rstrip('/')}/{filename}"
 
 
 def verify_public(url: str, timeout: int = 20) -> tuple[bool, str]:

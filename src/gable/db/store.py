@@ -47,6 +47,7 @@ class RunRow:
     run_id: str
     response_row_id: str
     status: str
+    output_file_id: str = ""
     output_url: str = ""
     slack_thread_ts: str = ""
     failure_reason: str = ""
@@ -322,7 +323,8 @@ def latest_run(connection: sqlite3.Connection, response_row_id: str) -> RunRow |
         sqlite3.Error: on a query failure.
     """
     row = connection.execute(
-        "SELECT run_id, response_row_id, status, output_url, slack_thread_ts, failure_reason"
+        "SELECT run_id, response_row_id, status, output_file_id, output_url,"
+        " slack_thread_ts, failure_reason"
         " FROM runs WHERE response_row_id = ? ORDER BY created_at DESC LIMIT 1",
         (response_row_id,),
     ).fetchone()
@@ -346,7 +348,8 @@ def run_for_thread(connection: sqlite3.Connection, thread_ts: str) -> RunRow | N
         sqlite3.Error: on a query failure.
     """
     row = connection.execute(
-        "SELECT run_id, response_row_id, status, output_url, slack_thread_ts, failure_reason"
+        "SELECT run_id, response_row_id, status, output_file_id, output_url,"
+        " slack_thread_ts, failure_reason"
         " FROM runs WHERE slack_thread_ts = ? ORDER BY created_at DESC LIMIT 1",
         (thread_ts,),
     ).fetchone()
@@ -368,7 +371,8 @@ def paused_runs(connection: sqlite3.Connection) -> list[RunRow]:
     """
     placeholders = ",".join("?" * len(PAUSED))
     rows = connection.execute(
-        "SELECT run_id, response_row_id, status, output_url, slack_thread_ts, failure_reason"
+        "SELECT run_id, response_row_id, status, output_file_id, output_url,"
+        " slack_thread_ts, failure_reason"
         f" FROM runs WHERE status IN ({placeholders}) ORDER BY created_at",
         tuple(sorted(PAUSED)),
     ).fetchall()
@@ -381,6 +385,7 @@ def _to_run(row: sqlite3.Row) -> RunRow:
         run_id=row["run_id"],
         response_row_id=row["response_row_id"],
         status=row["status"],
+        output_file_id=row["output_file_id"] or "",
         output_url=row["output_url"] or "",
         slack_thread_ts=row["slack_thread_ts"] or "",
         failure_reason=row["failure_reason"] or "",

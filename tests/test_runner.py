@@ -95,7 +95,7 @@ class Recorder:
         self.copied = True
         return ("out-1", "https://docs.google.com/presentation/d/out-1/edit")
 
-    def place_photo(self, file_id: str, url: str) -> bool:  # noqa: ARG002
+    def place_photo(self, file_id: str, url: str, template_label: str) -> bool:  # noqa: ARG002
         """Pretend the hero photo went on, and remember that it did."""
         self.photo_placed = True
         return True
@@ -274,8 +274,7 @@ def test_a_flyer_that_still_shows_a_placeholder_is_not_delivered(
     rec = StubbornFill()
     result = _runner(db, rec).run(submission)
     assert result.status == "needs_review"
-    # The last message is the "have a look" follow-up; the verdict is before it.
-    assert any("I rendered it" in said for said in rec.said)
+    assert any("did not match exactly once" in said for said in rec.said)
 
 
 # --- every exit records a status --------------------------------------------
@@ -521,7 +520,12 @@ def test_a_photo_that_will_not_go_on_stops_delivery(db: sqlite3.Connection) -> N
     _record(db, submission)
 
     class NoPlace(Recorder):
-        def place_photo(self, file_id: str, url: str) -> bool:  # noqa: ARG002
+        def place_photo(
+            self,
+            _file_id: str,
+            _url: str,
+            _template_label: str,
+        ) -> bool:
             """Fail the way a rejected image URL would."""
             return False
 
@@ -538,3 +542,19 @@ def test_the_photo_is_placed_on_a_delivered_flyer(db: sqlite3.Connection) -> Non
     result = _runner(db, rec).run(submission)
     assert result.status == "delivered"
     assert rec.photo_placed is True
+
+
+def test_an_unsafe_text_match_stops_before_photo_placement(db: sqlite3.Connection) -> None:
+    class UnsafeRecorder(Recorder):
+        def fill(self, file_id: str, pairs: dict[str, str]) -> int:  # noqa: ARG002
+            self.filled = pairs
+            return -1
+
+    rec = UnsafeRecorder()
+    submission = _submission(rid="rid-unsafe-text")
+    _record(db, submission)
+    result = _runner(db, rec).run(submission)
+
+    assert result.status == "needs_review"
+    assert rec.photo_placed is False
+    assert "did not match exactly once" in result.said[-1]

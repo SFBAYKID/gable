@@ -470,3 +470,59 @@ def test_a_clarifying_question_still_reaches_the_person() -> None:
     )
 
     assert reply_for_decision(decision) == decision.reply
+
+
+def test_an_action_reply_comes_from_the_executor_after_it_runs() -> None:
+    from gable.slackapp.app import reply_for_decision
+    from gable.slackapp.brain import Decision
+
+    decision = Decision(
+        reply="Making the price bigger.",
+        tool="set_font_size",
+        arguments={"target": "price", "points": 32},
+    )
+    calls: list[str] = []
+
+    def execute(_decision: Decision, thread_ts: str) -> str:
+        calls.append(thread_ts)
+        return "Done. I changed the price text to 32 points."
+
+    assert reply_for_decision(decision, execute, "thread-1") == (
+        "Done. I changed the price text to 32 points."
+    )
+    assert calls == ["thread-1"]
+
+
+def test_file_share_progress_is_replaced_with_the_real_outcome() -> None:
+    from typing import Any
+
+    from gable.slackapp.app import process_file_share
+
+    posted: list[dict[str, object]] = []
+
+    def say(**kwargs: object) -> dict[str, str]:
+        posted.append(kwargs)
+        return {"ts": "progress-ts"}
+
+    class Client:
+        def chat_update(self, **kwargs: object) -> None:
+            posted.append(kwargs)
+
+    def handler(_event: dict[str, Any], _client: Any) -> str:  # noqa: ANN401
+        return "I fitted the photo and finished the flyer."
+
+    process_file_share(
+        {"channel": "C0BP597644B", "thread_ts": "thread-ts"},
+        say,
+        Client(),
+        handler,
+    )
+
+    assert posted == [
+        {"text": "I have the photo. Fitting it to the flyer now.", "thread_ts": "thread-ts"},
+        {
+            "channel": "C0BP597644B",
+            "ts": "progress-ts",
+            "text": "I fitted the photo and finished the flyer.",
+        },
+    ]

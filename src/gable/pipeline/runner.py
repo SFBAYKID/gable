@@ -29,6 +29,7 @@ from dataclasses import dataclass, field
 from sqlite3 import Connection
 from typing import Any, Final
 
+from gable import spend
 from gable.db import store
 from gable.listings.enrich import Facts, look_up
 from gable.listings.intake import Intake
@@ -39,6 +40,7 @@ from gable.slides import fields as template_fields
 from gable.slides import fitting
 from gable.slides import manifest as template_manifest
 from gable.slides.catalog import for_category
+from gable.slides.selection import rank as rank_templates
 from gable.voice import safe
 
 logger = logging.getLogger("gable.runner")
@@ -93,7 +95,7 @@ class Runner:
     #: none has been supplied yet.
     hero_photo_url: str = ""
     #: Places the hero photo into a rendered flyer.
-    place_photo: Callable[[str, str], bool] = lambda _fid, _url: False
+    place_photo: Callable[[str, str, str], bool] = lambda _fid, _url, _template: False
     #: Proves that the photo URL is usable for the target slot. The live
     #: builder supplies the network checker; the runner itself performs no
     #: hidden I/O.
@@ -276,8 +278,26 @@ class Runner:
         output_id, output_url = self.copy_template(template_id, self._name(intake))
         changed = self.fill(output_id, pairs)
         logger.info("run %s filled %d field(s)", run_id, changed)
+        if not pairs or changed != len(pairs):
+            store.set_status(
+                self.connection,
+                run_id,
+                "needs_review",
+                "the template text did not match each intended field exactly once",
+                output_file_id=output_id,
+                output_url=output_url,
+            )
+            result.status = "needs_review"
+            result.output_url = output_url
+            spoken = safe(
+                "I copied the design, but one of its fields did not match exactly once. "
+                "I stopped before changing any text."
+            )
+            result.said.append(spoken)
+            self.say(spoken, None)
+            return result
 
-        placed = self.place_photo(output_id, self.hero_photo_url)
+        placed = self.place_photo(output_id, self.hero_photo_url, template_label)
         if not placed:
             # The photo is the point of the flyer. Delivering without it, after
             # being given one, is worse than stopping.
@@ -410,12 +430,17 @@ class Runner:
         return f"{intake.category} — {intake.address} — {intake.agent_name}".strip(" —")
 
 
-def default_research(api_key: str) -> Callable[[str], Facts]:
+def default_research(
+    api_key: str,
+    connection: Connection | None = None,
+) -> Callable[[str], Facts]:
     """A research function bound to a Firecrawl key.
 
     Args:
         api_key: The Firecrawl key. Empty disables lookups, and the run then
             asks rather than researching.
+        connection: Spend ledger for the live paid path. Tests and offline
+            callers may omit it.
 
     Returns:
         A callable taking an address.
@@ -425,7 +450,18 @@ def default_research(api_key: str) -> Callable[[str], Facts]:
     """
 
     def research(address: str) -> Facts:
-        return look_up(address, api_key)
+        if connection is None or not api_key:
+            return look_up(address, api_key)
+        estimate = spend.Estimate(
+            service="firecrawl",
+            model="search",
+            usd=spend.FIRECRAWL_PER_SEARCH,
+            detail="one property search reservation",
+        )
+        try:
+            return spend.guarded_call(connection, estimate, lambda: look_up(address, api_key))
+        except spend.BudgetExceededError:
+            return Facts(caveats=["Testing has reached its spending limit"])
 
     return research
 
@@ -455,32 +491,16 @@ def template_picker(
         Nothing.
     """
 
-    def score(name: str, intake: Intake) -> int:
-        lowered = name.lower()
-        points = 0
-        wants_open_house = intake.mentions_open_house
-        mentions_open_house = "open house" in lowered
-        if mentions_open_house and not wants_open_house:
-            # The single worst mismatch: an empty open-house tag on a flyer.
-            points -= 10
-        if wants_open_house and mentions_open_house:
-            points += 5
-        if "dual" in lowered or "two agents" in lowered:
-            points += (
-                5 if intake.post_details and "hosted by" in intake.post_details.lower() else -8
-            )
-        if "bracket placeholders" in lowered or "cleanest" in lowered:
-            points += 4  # written in tokens throughout, so it fills completely
-        return points
-
     def pick(category: str, intake: Intake) -> tuple[str, str]:
         if not category or not for_category(category):
             return "", ""
-        wanted = {entry.filename for entry in for_category(category)}
-        candidates = [c for c in list_templates() if c.get("name") in wanted]
-        if not candidates:
+        available = {str(item.get("name") or ""): item for item in list_templates()}
+        ranked = rank_templates(category, intake)
+        if not ranked:
             return "", ""
-        best = max(candidates, key=lambda c: score(str(c["name"]), intake))
-        return str(best["id"]), str(best["name"])
+        candidate = available.get(ranked[0].filename)
+        if candidate is None:
+            return "", ""
+        return str(candidate["id"]), str(candidate["name"])
 
     return pick

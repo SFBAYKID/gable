@@ -13,28 +13,77 @@ import uuid
 from sqlite3 import Connection
 from typing import Any
 
+from gable import spend
 from gable.config import Settings
 from gable.photos.store import PhotoHost
 from gable.photos.verify import verify as verify_image
 from gable.pipeline.runner import Runner, default_research, template_picker
+from gable.pipeline.vision import Inspection
+from gable.pipeline.vision import inspect as inspect_flyer
 from gable.slides import fitting
+from gable.slides import manifest as template_manifest
 from gable.slides.edits import replace_text
+from gable.slides.elements import descendants, font_size_pt, text_content
 from gable.voice import is_clean
 
 logger = logging.getLogger("gable.live")
+
+
+def safe_replacement_requests(
+    presentation: dict[str, Any],
+    pairs: dict[str, str],
+) -> list[dict[str, Any]]:
+    """Build replacements only when every literal occurs exactly once.
+
+    ``replaceAllText`` matches substrings. A literal such as ``Phone`` can
+    therefore hit both ``Phone`` and ``Phone Number`` while Google still
+    returns success. Reading the complete recursive text first turns that
+    silent corruption into a refusal before any batch is sent.
+
+    Args:
+        presentation: Current Slides presentation payload.
+        pairs: Literal text to replacement value.
+
+    Returns:
+        One request per pair, or an empty list when any literal is absent or
+        appears more than once.
+
+    Raises:
+        Nothing.
+    """
+    page_ids = [str(page.get("objectId") or "") for page in presentation.get("slides", [])]
+    texts = [
+        text_content(element)
+        for page in presentation.get("slides", [])
+        for element in descendants(page.get("pageElements", []))
+    ]
+    requests: list[dict[str, Any]] = []
+    for literal, value in pairs.items():
+        occurrences = sum(text.count(literal) for text in texts)
+        if occurrences != 1:
+            logger.error(
+                "refused an unsafe text replacement with %d occurrence(s)",
+                occurrences,
+            )
+            return []
+        requests.extend(replace_text(literal, value, page_ids, allow_short=True))
+    return requests
 
 
 def place_hero_photo(
     slides: Any,  # noqa: ANN401 - googleapiclient resource, untyped upstream
     file_id: str,
     url: str,
+    template_label: str,
 ) -> bool:
-    """Replace the design's photo placeholder and verify the API accepted it.
+    """Replace a measured hero layer and verify the API accepted it.
 
     Args:
         slides: A Slides v1 resource.
         file_id: The copied presentation to edit.
         url: A public image URL already verified by the runner.
+        template_label: Exact catalogue filename used to find measured layer
+            metadata.
 
     Returns:
         True only when Google reports a reply for every placement request.
@@ -58,36 +107,22 @@ def place_hero_photo(
             logger.error("hero photo placement found no usable slide size")
             return False
 
-        best: tuple[float, dict[str, Any]] | None = None
-        for element in page.get("pageElements", []):
-            if element.get("shape", {}).get("text"):
-                continue
-            transform = element.get("transform", {})
-            size = element.get("size", {})
-            width = size.get("width", {}).get("magnitude", 0) * transform.get("scaleX", 1)
-            height = size.get("height", {}).get("magnitude", 0) * transform.get("scaleY", 1)
-            if width <= 0 or height <= 0:
-                continue
-            area = width * height
-            if area < (slide_w * slide_h) * 0.12:
-                continue
-            if best is None or area > best[0]:
-                best = (area, element)
-
-        if best is None:
-            logger.error("hero photo placement found no plausible frame")
+        target_id = template_manifest.manifest_for(template_label).hero_object_id
+        if not target_id:
+            logger.error("hero photo placement has no measured layer for this template")
+            return False
+        matches = [
+            element
+            for element in page.get("pageElements", [])
+            if element.get("objectId") == target_id
+        ]
+        if len(matches) != 1 or "elementGroup" in matches[0] or text_content(matches[0]):
+            logger.error("hero photo placement could not confirm the measured layer")
             return False
 
-        _, frame = best
-        transform = frame.get("transform", {})
-        size = frame.get("size", {})
-        width = size.get("width", {}).get("magnitude", 0) * transform.get("scaleX", 1)
-        height = size.get("height", {}).get("magnitude", 0) * transform.get("scaleY", 1)
-        left = transform.get("translateX", 0)
-        top = transform.get("translateY", 0)
         hero_id = f"gableHero_{uuid.uuid4().hex}"
         requests: list[dict[str, Any]] = [
-            {"deleteObject": {"objectId": frame["objectId"]}},
+            {"deleteObject": {"objectId": target_id}},
             {
                 "createImage": {
                     "objectId": hero_id,
@@ -95,14 +130,14 @@ def place_hero_photo(
                     "elementProperties": {
                         "pageObjectId": page["objectId"],
                         "size": {
-                            "width": {"magnitude": width, "unit": "EMU"},
-                            "height": {"magnitude": height, "unit": "EMU"},
+                            "width": {"magnitude": slide_w, "unit": "EMU"},
+                            "height": {"magnitude": slide_h, "unit": "EMU"},
                         },
                         "transform": {
                             "scaleX": 1,
                             "scaleY": 1,
-                            "translateX": left,
-                            "translateY": top,
+                            "translateX": 0,
+                            "translateY": 0,
                             "unit": "EMU",
                         },
                     },
@@ -136,6 +171,8 @@ def build_runner(
     drive: Any,  # noqa: ANN401 - googleapiclient resource, untyped upstream
     slides: Any,  # noqa: ANN401
     slack_post: Any,  # noqa: ANN401
+    *,
+    hero_photo_url: str = "",
 ) -> Runner:
     """Assemble a `Runner` that talks to the real services.
 
@@ -146,6 +183,7 @@ def build_runner(
         slides: A Slides v1 resource.
         slack_post: A callable taking `(text, thread_ts)` and returning the
             thread timestamp it landed in.
+        hero_photo_url: A fitted, published photo when resuming a paused run.
 
     Returns:
         A ready `Runner`.
@@ -188,9 +226,10 @@ def build_runner(
         presentation = slides.presentations().get(presentationId=file_id).execute()
         out: list[str] = []
         for page in presentation.get("slides", []):
-            for element in page.get("pageElements", []):
-                runs = element.get("shape", {}).get("text", {}).get("textElements", [])
-                text = "".join(r.get("textRun", {}).get("content", "") for r in runs).strip()
+            # PPTX imports often wrap the design in elementGroup; descendants
+            # follows its children so placeholders inside a group stay visible.
+            for element in descendants(page.get("pageElements", [])):
+                text = text_content(element)
                 if text:
                     out.append(text)
         return out
@@ -212,12 +251,9 @@ def build_runner(
         if not pairs:
             return 0
         presentation = slides.presentations().get(presentationId=file_id).execute()
-        page_ids = [page["objectId"] for page in presentation.get("slides", [])]
-        requests: list[dict[str, Any]] = []
-        for literal, value in pairs.items():
-            # allow_short because these literals came off the slide itself, so
-            # they are known to exist and known to be what we mean.
-            requests.extend(replace_text(literal, value, page_ids, allow_short=True))
+        requests = safe_replacement_requests(presentation, pairs)
+        if len(requests) != len(pairs):
+            return -1
         reply = (
             slides.presentations()
             .batchUpdate(presentationId=file_id, body={"requests": requests})
@@ -232,20 +268,11 @@ def build_runner(
         presentation = slides.presentations().get(presentationId=file_id).execute()
         boxes: list[fitting.TextBox] = []
         for page in presentation.get("slides", []):
-            for element in page.get("pageElements", []):
-                shape = element.get("shape", {})
-                runs = shape.get("text", {}).get("textElements", [])
-                text = "".join(r.get("textRun", {}).get("content", "") for r in runs).strip()
+            for element in descendants(page.get("pageElements", [])):
+                text = text_content(element)
                 if not text:
                     continue
-                size_pt = 0.0
-                for run in runs:
-                    magnitude = (
-                        run.get("textRun", {}).get("style", {}).get("fontSize", {}).get("magnitude")
-                    )
-                    if magnitude:
-                        size_pt = float(magnitude)
-                        break
+                size_pt = font_size_pt(element)
                 transform = element.get("transform", {})
                 size = element.get("size", {})
                 width = size.get("width", {}).get("magnitude", 0) * transform.get("scaleX", 1)
@@ -297,26 +324,53 @@ def build_runner(
         verdict = verify_image(url, slot)
         return verdict.ok, verdict.say
 
-    def place_photo(file_id: str, url: str) -> bool:
-        """Put the hero photo exactly where the design leaves room for it.
+    def look_at(image_bytes: bytes) -> Inspection:
+        """Run the paid visual check only while the hard budget permits it."""
+        if not settings.openai_image_api_key or not image_bytes:
+            return inspect_flyer(
+                image_bytes,
+                api_key=settings.openai_image_api_key,
+                model=settings.vision_model,
+            )
+        estimate = spend.Estimate(
+            service="openai",
+            model=settings.vision_model,
+            usd=spend.VISION_RESERVE_USD,
+            detail="conservative vision-call reservation",
+        )
+        try:
+            return spend.guarded_call(
+                connection,
+                estimate,
+                lambda: inspect_flyer(
+                    image_bytes,
+                    api_key=settings.openai_image_api_key,
+                    model=settings.vision_model,
+                ),
+            )
+        except spend.BudgetExceededError:
+            return Inspection(looks_right=False, confident=False, checked=False)
+
+    def place_photo(file_id: str, url: str, template_label: str) -> bool:
+        """Put a centred 4:5 hero behind a template's measured masks.
 
         Three things were learned the hard way, and each is why a line here
         looks the way it does.
 
-        **Do not inherit the frame's transform.** An imported PPTX element can
-        carry a 2160% scale against a tiny intrinsic size; passing both to
-        `createImage` produced an image rendered at zero by zero — present in
-        the file, invisible on the slide. Absolute EMU throughout.
+        **Do not infer a frame from size.** Imported photos, white card panels,
+        and whole element groups can all look like large text-free shapes in
+        the API. The manifest names the exact removable raster-art layer.
 
-        **Do not go full bleed.** A photo stretched over the whole slide covers
-        the headline and the card. The frame's own bounds are the design's
-        answer to where the photo goes, so they are used.
+        **Use the full slide bounds.** Slack already fits the photo to the
+        template's 1080 by 1350 canvas. Matching that 4:5 box keeps it centred
+        without letterboxing; the surviving design panels mask the parts that
+        are not meant to show.
 
         **Replace the placeholder, do not sit behind it.** These designs ship
         with sky-and-grass artwork in the photo frame. A photo merely sent to
         the back hides behind it, so the placeholder is removed first.
         """
-        return place_hero_photo(slides, file_id, url)
+        return place_hero_photo(slides, file_id, url, template_label)
 
     return Runner(
         connection=connection,
@@ -325,12 +379,14 @@ def build_runner(
         read_slide_text=read_slide_text,
         copy_template=copy_template,
         fill=fill,
-        research=default_research(settings.firecrawl_api_key),
+        research=default_research(settings.firecrawl_api_key, connection),
         place_photo=place_photo,
         check_photo=check_photo,
+        look_at=look_at,
         read_text_boxes=read_text_boxes,
         apply=apply,
         thumbnail=thumbnail,
+        hero_photo_url=hero_photo_url,
     )
 
 

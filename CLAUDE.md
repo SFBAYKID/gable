@@ -313,7 +313,7 @@ gable/
 ├── pyproject.toml
 ├── Makefile                     # deploy, lint, test, run
 ├── slack/
-│   └── manifest.yml             # paste into api.slack.com
+│   └── manifest.json            # paste into api.slack.com
 ├── assets/
 │   └── gable-icon-512.png       # Slack app icon
 ├── deploy/                      # systemd unit + droplet provisioning steps
@@ -347,11 +347,16 @@ gable/
 │   │   ├── renderer.py          # pure batchUpdate builder for a fill
 │   │   ├── edits.py             # one tool per change Carmen can ask for
 │   │   ├── geometry.py          # move, resize, delete — the transform traps
+│   │   ├── elements.py          # recurse through imported element groups
+│   │   ├── selection.py         # notes-aware template purpose and routing
 │   │   ├── edit_common.py       # shared colours, guards, request type
 │   │   └── catalog.py           # the 45 templates, labelled
 │   ├── slackapp/
 │   │   ├── app.py               # Socket Mode listener
 │   │   ├── brain.py             # reads intent, picks a tool, asks when unsure
+│   │   ├── editing.py           # execute edits on the thread's Slides file
+│   │   ├── photos.py            # Slack upload to fitted same-run resume
+│   │   ├── runtime.py           # production Slack + poller assembly
 │   │   ├── blocks.py            # Block Kit builders
 │   │   ├── style.py             # the house style, enforced
 │   │   └── handlers.py          # commands, actions, mentions
@@ -359,6 +364,7 @@ gable/
 │   │   ├── schedule.py          # when to poll: busy hours vs quiet
 │   │   ├── poller.py            # the watch loop, and the backfill refusal
 │   │   └── orchestrator.py      # decides each step; performs none of them
+│   ├── runtime.py               # Slack-free process lifecycle
 │   └── cli.py                   # local invocation without Slack
 └── tests/
 ```

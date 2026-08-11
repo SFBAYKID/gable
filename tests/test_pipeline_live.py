@@ -4,16 +4,23 @@ from __future__ import annotations
 
 from typing import Any
 
-from gable.pipeline.live import place_hero_photo
+from gable.pipeline.live import place_hero_photo, safe_replacement_requests
 
 
 class FakeSlides:
     """A minimal Slides resource that records placement requests."""
 
-    def __init__(self, *, fail_update: bool = False, complete_reply: bool = True) -> None:
+    def __init__(
+        self,
+        *,
+        fail_update: bool = False,
+        complete_reply: bool = True,
+        include_target: bool = True,
+    ) -> None:
         """Configure whether the batch succeeds and reports every request."""
         self.fail_update = fail_update
         self.complete_reply = complete_reply
+        self.include_target = include_target
         self.operation = ""
         self.body: dict[str, Any] = {}
 
@@ -40,6 +47,40 @@ class FakeSlides:
     def execute(self) -> dict[str, Any]:
         """Return a presentation or configured update result."""
         if self.operation == "get":
+            elements: list[dict[str, Any]] = [
+                {
+                    "objectId": "large-design-group",
+                    "size": {
+                        "width": {"magnitude": 9_000_000},
+                        "height": {"magnitude": 10_000_000},
+                    },
+                    "transform": {"scaleX": 1, "scaleY": 1},
+                    "elementGroup": {"children": []},
+                },
+                {
+                    "objectId": "white-card-panel",
+                    "size": {
+                        "width": {"magnitude": 9_000_000},
+                        "height": {"magnitude": 8_000_000},
+                    },
+                    "transform": {"scaleX": 1, "scaleY": 1},
+                    "shape": {
+                        "shapeProperties": {"shapeBackgroundFill": {"solidFill": {"color": {}}}}
+                    },
+                },
+            ]
+            if self.include_target:
+                elements.append(
+                    {
+                        "objectId": "p1_i3",
+                        "size": {
+                            "width": {"magnitude": 8_000_000},
+                            "height": {"magnitude": 6_000_000},
+                        },
+                        "transform": {"scaleX": 1, "scaleY": 1},
+                        "shape": {"shapeProperties": {"shapeBackgroundFill": {}}},
+                    }
+                )
             return {
                 "pageSize": {
                     "width": {"magnitude": 10_000_000},
@@ -48,29 +89,7 @@ class FakeSlides:
                 "slides": [
                     {
                         "objectId": "page-1",
-                        "pageElements": [
-                            {
-                                "objectId": "small-brand-piece",
-                                "size": {
-                                    "width": {"magnitude": 1_000_000},
-                                    "height": {"magnitude": 1_000_000},
-                                },
-                                "transform": {"scaleX": 1, "scaleY": 1},
-                            },
-                            {
-                                "objectId": "photo-placeholder",
-                                "size": {
-                                    "width": {"magnitude": 8_000_000},
-                                    "height": {"magnitude": 6_000_000},
-                                },
-                                "transform": {
-                                    "scaleX": 1,
-                                    "scaleY": 1,
-                                    "translateX": 1_000_000,
-                                    "translateY": 500_000,
-                                },
-                            },
-                        ],
+                        "pageElements": elements,
                     }
                 ],
             }
@@ -87,7 +106,15 @@ class FakeSlides:
 def test_hero_photo_success_is_based_on_the_slides_reply() -> None:
     slides = FakeSlides()
 
-    assert place_hero_photo(slides, "deck-1", "https://images.example/house.jpg") is True
+    assert (
+        place_hero_photo(
+            slides,
+            "deck-1",
+            "https://images.example/house.jpg",
+            "Just Listed — Bracket Placeholders (cleanest)",
+        )
+        is True
+    )
 
     requests = slides.body["requests"]
     assert [next(iter(request)) for request in requests] == [
@@ -97,12 +124,29 @@ def test_hero_photo_success_is_based_on_the_slides_reply() -> None:
     ]
     hero_id = requests[1]["createImage"]["objectId"]
     assert hero_id.startswith("gableHero_")
+    assert requests[0]["deleteObject"]["objectId"] == "p1_i3"
+    assert requests[1]["createImage"]["elementProperties"]["size"] == {
+        "width": {"magnitude": 10_000_000, "unit": "EMU"},
+        "height": {"magnitude": 12_500_000, "unit": "EMU"},
+    }
+    assert requests[1]["createImage"]["elementProperties"]["transform"] == {
+        "scaleX": 1,
+        "scaleY": 1,
+        "translateX": 0,
+        "translateY": 0,
+        "unit": "EMU",
+    }
     assert requests[2]["updatePageElementsZOrder"]["pageElementObjectIds"] == [hero_id]
 
 
 def test_hero_photo_reports_a_slides_failure_instead_of_raising() -> None:
     assert (
-        place_hero_photo(FakeSlides(fail_update=True), "deck-1", "https://images.example/house.jpg")
+        place_hero_photo(
+            FakeSlides(fail_update=True),
+            "deck-1",
+            "https://images.example/house.jpg",
+            "Just Listed — Bracket Placeholders (cleanest)",
+        )
         is False
     )
 
@@ -110,7 +154,90 @@ def test_hero_photo_reports_a_slides_failure_instead_of_raising() -> None:
 def test_hero_photo_rejects_an_incomplete_api_reply() -> None:
     assert (
         place_hero_photo(
-            FakeSlides(complete_reply=False), "deck-1", "https://images.example/house.jpg"
+            FakeSlides(complete_reply=False),
+            "deck-1",
+            "https://images.example/house.jpg",
+            "Just Listed — Bracket Placeholders (cleanest)",
         )
         is False
     )
+
+
+def test_hero_photo_refuses_an_unmeasured_template_without_deleting_anything() -> None:
+    slides = FakeSlides()
+
+    assert (
+        place_hero_photo(slides, "deck-1", "https://images.example/house.jpg", "Unknown") is False
+    )
+    assert slides.body == {}
+
+
+def test_hero_photo_refuses_when_the_measured_layer_is_absent() -> None:
+    slides = FakeSlides(include_target=False)
+
+    assert (
+        place_hero_photo(
+            slides,
+            "deck-1",
+            "https://images.example/house.jpg",
+            "Just Listed — Bracket Placeholders (cleanest)",
+        )
+        is False
+    )
+    assert slides.body == {}
+
+
+def test_replacement_is_refused_when_a_literal_matches_a_substring_twice() -> None:
+    presentation = {
+        "slides": [
+            {
+                "objectId": "page-1",
+                "pageElements": [
+                    {
+                        "objectId": "phone",
+                        "shape": {"text": {"textElements": [{"textRun": {"content": "Phone"}}]}},
+                    },
+                    {
+                        "objectId": "phone-label",
+                        "shape": {
+                            "text": {"textElements": [{"textRun": {"content": "Phone Number"}}]}
+                        },
+                    },
+                ],
+            }
+        ]
+    }
+
+    assert safe_replacement_requests(presentation, {"Phone": "(555) 123-4567"}) == []
+
+
+def test_replacement_counts_text_inside_imported_groups() -> None:
+    presentation = {
+        "slides": [
+            {
+                "objectId": "page-1",
+                "pageElements": [
+                    {
+                        "objectId": "group-1",
+                        "elementGroup": {
+                            "children": [
+                                {
+                                    "objectId": "price",
+                                    "shape": {
+                                        "text": {
+                                            "textElements": [{"textRun": {"content": "[PRICE]"}}]
+                                        }
+                                    },
+                                }
+                            ]
+                        },
+                    }
+                ],
+            }
+        ]
+    }
+
+    requests = safe_replacement_requests(presentation, {"[PRICE]": "$525,000"})
+
+    assert len(requests) == 1
+    assert requests[0]["replaceAllText"]["pageObjectIds"] == ["page-1"]

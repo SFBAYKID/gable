@@ -145,6 +145,8 @@ class Settings:
     spaces_region: str
     spaces_bucket: str
     spaces_public_base: str
+    photo_public_root: Path
+    photo_public_base: str
     photo_max_edge_px: int
     photo_jpeg_quality: int
 
@@ -159,6 +161,8 @@ class Settings:
 
     # --- AI providers ---
     openai_image_api_key: str
+    conversation_model: str
+    vision_model: str
     image_model: str
     anthropic_api_key: str
     anthropic_model: str
@@ -289,6 +293,10 @@ class Settings:
             spaces_region=reader.str_value("SPACES_REGION", "nyc3"),
             spaces_bucket=reader.str_value("SPACES_BUCKET", "gable-photos"),
             spaces_public_base=reader.str_value("SPACES_PUBLIC_BASE", ""),
+            photo_public_root=reader.path_value(
+                "GABLE_PHOTO_PUBLIC_ROOT", Path("/var/www/gable-photos")
+            ),
+            photo_public_base=reader.str_value("GABLE_PHOTO_PUBLIC_BASE", "http://143.110.146.87"),
             photo_max_edge_px=reader.int_value(
                 "GABLE_PHOTO_MAX_EDGE_PX", 2400, minimum=400, maximum=8000
             ),
@@ -309,6 +317,8 @@ class Settings:
             dry_run=reader.bool_value("GABLE_DRY_RUN", False),
             db_path=reader.path_value("GABLE_DB_PATH", Path("/opt/gable/var/gable.db")),
             openai_image_api_key=reader.secret("OPENAI_IMAGE_API_KEY", False),
+            conversation_model=reader.str_value("GABLE_CONVERSATION_MODEL", "gpt-5-mini"),
+            vision_model=reader.str_value("GABLE_VISION_MODEL", "gpt-5-mini"),
             image_model=reader.str_value("GABLE_IMAGE_MODEL", "gpt-image-2"),
             anthropic_api_key=reader.secret("ANTHROPIC_API_KEY", False),
             anthropic_model=reader.str_value("GABLE_ANTHROPIC_MODEL", "claude-opus-5"),
@@ -341,6 +351,10 @@ def _validate_cross_field(settings: Settings, problems: list[str]) -> None:
     # requires HTTPS. A non-HTTPS base parses fine and then fails at render.
     if settings.spaces_public_base and not settings.spaces_public_base.startswith("https://"):
         problems.append("SPACES_PUBLIC_BASE must start with https:// — Slides requires HTTPS")
+    if not settings.photo_public_base.startswith(("http://", "https://")):
+        problems.append("GABLE_PHOTO_PUBLIC_BASE must start with http:// or https://")
+    if not settings.photo_public_root.is_absolute() or len(settings.photo_public_root.parts) < 3:
+        problems.append("GABLE_PHOTO_PUBLIC_ROOT must be a specific absolute directory")
 
     # A My Drive folder id would parse fine and then fail on the first render
     # with StorageQuotaExceeded. Shared drive ids start with "0A"; folder ids

@@ -30,6 +30,7 @@ from gable.listings.intake import (
     Question,
     address_looks_usable,
     incoherences,
+    mentions_multiple_agents,
     missing_public_facts,
     named_agents,
     needs_two_agents,
@@ -259,6 +260,25 @@ def agent_slots(intake: Intake) -> Step:
     """
     roles = named_agents(intake)
     if not needs_two_agents(intake):
+        if mentions_multiple_agents(intake):
+            return Step(
+                outcome=Outcome.ASK,
+                questions=[
+                    Question(
+                        "agents",
+                        "This sounds like a two-agent post. Who are the two agents, "
+                        "and which role does each have?",
+                        True,
+                    )
+                ],
+                say=(
+                    "The notes make this sound like a two-agent post, but they do not "
+                    "name both roles clearly. Who are the two agents, and which one is "
+                    "listing or hosting?"
+                ),
+                category=intake.category,
+                detail="multiple agents implied, roles unclear",
+            )
         return Step(outcome=Outcome.BUILD, detail="one agent", category=intake.category)
 
     listing_agent = roles.get("listing", "")

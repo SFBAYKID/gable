@@ -205,6 +205,13 @@ def test_two_agents_with_unclear_roles_are_asked_about() -> None:
     assert "listing agent" in step.say
 
 
+def test_notes_that_imply_two_agents_without_roles_are_asked_about() -> None:
+    step = agent_slots(_intake(notes="Please make this a two agent post."))
+    assert step.outcome is Outcome.ASK
+    assert "two-agent" in step.say
+    assert "which" in step.questions[0].ask.lower()
+
+
 @pytest.mark.parametrize("case", ["Sold", "Open House", "New Listing"])
 def test_every_spoken_step_is_a_sentence_not_a_token(case: str) -> None:
     step = plan(_intake(request_type=case))

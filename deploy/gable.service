@@ -77,17 +77,17 @@ LockPersonality=true
 # SQLite database and temporary photo artifacts under var. SQLite's WAL and
 # shared-memory files are created beside the database, so its path must stay
 # under this directory.
-ReadWritePaths=/opt/gable/var
+ReadWritePaths=/opt/gable/var /var/www/gable-photos
 
 # Outbound TCP only. Socket Mode, Google, Firecrawl, and Spaces are all
 # AF_INET/AF_INET6; AF_UNIX is kept for journald's socket.
 RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
 
-# NOTE: no MemoryMax. The droplet is 512MB-class with 1GB of swap, and a hard
+# NOTE: no MemoryMax. The droplet has 1GB of RAM plus 1GB of swap, and a hard
 # cap there converts a large photo into an OOM kill and then a restart loop —
-# the exact failure ARCHITECTURE.md section 6 says to avoid. The real defence is
-# streaming images to disk instead of holding them in memory (CLAUDE.md
-# section 9). Revisit once the droplet's actual specs are confirmed.
+# the exact failure ARCHITECTURE.md section 6 says to avoid. Slack download size
+# is capped before Pillow handles it; revisit a memory cap only with live RSS
+# measurements from the full photo workflow.
 
 [Install]
 WantedBy=multi-user.target
