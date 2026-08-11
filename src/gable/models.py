@@ -134,12 +134,16 @@ class PhotoSource(StrEnum):
 
 @dataclass(frozen=True, slots=True)
 class AgentProfile:
-    """One row of the `Agents` tab (ARCHITECTURE.md 3.2)."""
+    """One row of the `Agents` tab (ARCHITECTURE.md 3.2).
+
+    `slides_template_id` is a Drive **file ID**, never a filename. Renaming a
+    template in Drive must not silently break the mapping.
+    """
 
     agent_email: str
     agent_name: str
     brokerage_url: str = ""
-    canva_template_id: str = ""
+    slides_template_id: str = ""
     template_label: str = ""
     photo_folder_id: str = ""
     active: bool = True
@@ -156,7 +160,16 @@ class AgentProfile:
     @property
     def display_template(self) -> str:
         """What Carmen sees in Slack. Falls back to the id, then to a warning."""
-        return self.template_label or self.canva_template_id or "(no template mapped)"
+        return self.template_label or self.slides_template_id or "(no template mapped)"
+
+    @property
+    def has_template(self) -> bool:
+        """True if this agent can actually be rendered.
+
+        An agent row with a label but no file ID looks mapped and is not. That
+        pauses the listing with `needs_template` rather than failing mid-render.
+        """
+        return bool(self.slides_template_id)
 
 
 @dataclass(frozen=True, slots=True)

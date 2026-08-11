@@ -190,7 +190,7 @@ def test_display_template_prefers_the_human_label() -> None:
     agent = AgentProfile(
         agent_email="j@b.com",
         agent_name="Jane",
-        canva_template_id="DAF123",
+        slides_template_id="1a2B3cD4eF5gH",
         template_label="Template 3 — Luxury Estate",
     )
     assert agent.display_template == "Template 3 — Luxury Estate"
@@ -199,6 +199,18 @@ def test_display_template_prefers_the_human_label() -> None:
 def test_display_template_warns_when_nothing_is_mapped() -> None:
     agent = AgentProfile(agent_email="j@b.com", agent_name="Jane")
     assert "no template" in agent.display_template
+
+
+def test_a_label_without_a_file_id_is_not_a_usable_template() -> None:
+    """Looks mapped, isn't. Must pause as needs_template, not fail mid-render."""
+    agent = AgentProfile(agent_email="j@b.com", agent_name="Jane", template_label="Template 1")
+    assert agent.has_template is False
+    assert (
+        AgentProfile(
+            agent_email="j@b.com", agent_name="Jane", slides_template_id="1a2B3c"
+        ).has_template
+        is True
+    )
 
 
 # --- listing ----------------------------------------------------------------

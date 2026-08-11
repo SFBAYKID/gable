@@ -119,7 +119,21 @@ class Settings:
     tab_responses: str
     tab_agents: str
     tab_runs: str
+    tab_templates: str
+
+    # --- Google Drive ---
+    # A Shared Drive, never a My Drive folder: service accounts have a 0 GB
+    # storage quota, so files they create anywhere else fail with
+    # StorageQuotaExceeded.
+    drive_id: str
+    drive_templates_folder_id: str
     drive_photos_folder_id: str
+    drive_output_folder_id: str
+
+    # --- Rendering (Google Slides) ---
+    slide_width_px: int
+    slide_height_px: int
+    max_image_url_bytes: int
 
     # --- Firecrawl ---
     firecrawl_api_key: str
@@ -240,7 +254,18 @@ class Settings:
             tab_responses=reader.str_value("GABLE_TAB_RESPONSES", "Form Responses 1"),
             tab_agents=reader.str_value("GABLE_TAB_AGENTS", "Agents"),
             tab_runs=reader.str_value("GABLE_TAB_RUNS", "Runs"),
+            tab_templates=reader.str_value("GABLE_TAB_TEMPLATES", "Templates"),
+            drive_id=reader.str_value("GABLE_DRIVE_ID", ""),
+            drive_templates_folder_id=reader.str_value("GABLE_DRIVE_TEMPLATES_FOLDER_ID", ""),
             drive_photos_folder_id=reader.str_value("GABLE_DRIVE_PHOTOS_FOLDER_ID", ""),
+            drive_output_folder_id=reader.str_value("GABLE_DRIVE_OUTPUT_FOLDER_ID", ""),
+            slide_width_px=reader.int_value("GABLE_SLIDE_WIDTH_PX", 1080, minimum=100),
+            slide_height_px=reader.int_value("GABLE_SLIDE_HEIGHT_PX", 1350, minimum=100),
+            # Slides' documented cap. Lowering it is allowed; raising it past
+            # 2048 would produce URLs Google rejects at insertion time.
+            max_image_url_bytes=reader.int_value(
+                "GABLE_MAX_IMAGE_URL_BYTES", 2048, minimum=256, maximum=2048
+            ),
             firecrawl_api_key=reader.secret("FIRECRAWL_API_KEY", require_credentials),
             verify_cache_hours=reader.int_value("GABLE_VERIFY_CACHE_HOURS", 24, minimum=1),
             photo_policy=reader.enum_value(
@@ -309,6 +334,16 @@ def _validate_cross_field(settings: Settings, problems: list[str]) -> None:
     if settings.spaces_public_base and not settings.spaces_public_base.startswith("https://"):
         problems.append("SPACES_PUBLIC_BASE must start with https:// — Canva requires HTTPS")
 
+    # A My Drive folder id would parse fine and then fail on the first render
+    # with StorageQuotaExceeded. Shared drive ids start with "0A"; folder ids
+    # do not. ASSUMPTION: that prefix convention holds — settled the first time
+    # the Drive client lists the drive, which reports its own type.
+    if settings.drive_id and not settings.drive_id.startswith("0A"):
+        problems.append(
+            f"GABLE_DRIVE_ID={settings.drive_id!r} does not look like a shared drive id "
+            "(expected to start with '0A'). Service accounts cannot create files "
+            "outside a shared drive."
+        )
     if settings.photo_policy is PhotoPolicy.GENERATE_FREELY and not settings.generation_available:
         problems.append(
             "GABLE_PHOTO_POLICY=generate_freely requires a usable image provider: set "
