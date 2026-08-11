@@ -235,3 +235,42 @@ is not a design Gable can finish.
 **0 of 45 certified.** One template delivers with correct supplied values and
 still carries another person's contact details. Certification remains Carmen's
 judgement and she has not seen any of these.
+
+## After the resolver fix — 2026-08-11, final walk of the session
+
+| Outcome | First walk | Now |
+|---|---|---|
+| delivered | 2 (one carrying a wrong price) | 1, verified correct |
+| needs_review | 41 | 39 |
+| failed | 2 | 0 |
+
+Remaining review causes: 8 placeholder survived, 8 no photo frame, 6 overlap,
+6 substring guard (down from 13), 5 clipped, 3 foreign contact, 3 other.
+
+### `Just Listed — Book a Tour, DM for Details` — the first flyer worth posting
+
+Read back and looked at. Everything on it is right:
+
+* address `13838 Dayton Meadows, Dayton, MD 21036`, complete
+* `Offers from $685,000`, the supplied price, correctly placed
+* 5 beds / 2.5 baths / 3,070 sq ft — **researched from the web**, nobody typed them
+* the agent's real name, headshot, phone and email
+* the supplied hero photo filling its frame
+* clean layout: nothing clipped, overlapping, or shrunk
+
+The only blemishes on it are the two **template** defects already logged for
+Carmen in `TEMPLATE_ISSUES.md`: the "approch" typo in the footer and the
+low-contrast logo sitting over the photo. Neither is Gable's to fix, and both
+are in the design.
+
+**This is the first flyer in the project that a person could post.** It is still
+not *certified* — certification means Carmen looked at it — but the gap is now
+her judgement rather than a list of defects.
+
+### What the guards are worth
+
+Three of them fired on real problems during this walk that would otherwise have
+shipped: the readback caught a value that did not survive filling, the absence
+check caught three flyers carrying a phone number belonging to someone else, and
+the substring guard caught six literals embedded in longer text. None of those
+are visible to a person skimming a thumbnail.
