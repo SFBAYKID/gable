@@ -10,6 +10,7 @@ one — so these stay hermetic and cannot be perturbed by a developer's shell.
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
@@ -40,7 +41,8 @@ def test_defaults_match_dotenv_example() -> None:
     settings = _load()
     assert settings.photo_policy is PhotoPolicy.GENERATE_WITH_APPROVAL
     assert settings.photo_min_confidence == 0.75
-    assert settings.poll_interval_seconds == 180
+    assert settings.poll_interval_seconds == 600
+    assert settings.poll_busy_interval_seconds == 120
     assert settings.max_batch == 25
     assert settings.max_description_chars == 400
     assert settings.max_retries == 3
@@ -167,6 +169,31 @@ def test_poll_interval_floor_is_enforced() -> None:
     """A 1-second poll would burn the Sheets quota and the droplet."""
     with pytest.raises(ConfigError):
         _load(GABLE_POLL_INTERVAL_SECONDS="1")
+
+
+def test_busy_poll_interval_floor_is_enforced() -> None:
+    """The busy rate gets the same floor as the quiet one."""
+    with pytest.raises(ConfigError):
+        _load(GABLE_POLL_BUSY_INTERVAL_SECONDS="1")
+
+
+def test_poll_schedule_maps_the_quiet_variable_to_the_quiet_rate() -> None:
+    """`GABLE_POLL_INTERVAL_SECONDS` is nights and weekends, not the busy rate.
+
+    Getting these backwards would poll every 10 minutes during the working day
+    and every 2 minutes at 3am — the exact opposite of the intent, and silent.
+    """
+    settings = _load(
+        GABLE_POLL_INTERVAL_SECONDS="900",
+        GABLE_POLL_BUSY_INTERVAL_SECONDS="60",
+    )
+    schedule = settings.poll_schedule
+    assert schedule.quiet_interval_seconds == 900
+    assert schedule.busy_interval_seconds == 60
+    # Monday 09:00 Central.
+    assert schedule.interval_seconds(datetime(2026, 8, 10, 14, 0, tzinfo=UTC)) == 60
+    # Sunday 09:00 Central.
+    assert schedule.interval_seconds(datetime(2026, 8, 16, 14, 0, tzinfo=UTC)) == 900
 
 
 def test_batch_ceiling_is_enforced() -> None:

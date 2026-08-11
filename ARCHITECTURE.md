@@ -179,8 +179,16 @@ A request arriving at 4:58pm Friday is picked up within two minutes. One
 arriving Saturday morning waits at most ten. Both are well inside the time it
 takes a human to notice.
 
-`GABLE_POLL_INTERVAL_SECONDS` remains the fallback for anything outside the
-business window, so a single value still describes the quiet path.
+`GABLE_POLL_INTERVAL_SECONDS` is the **quiet** rate — nights and weekends — so
+that variable keeps its meaning as "the slow path," and
+`GABLE_POLL_BUSY_INTERVAL_SECONDS` is the fast one. Both are floored at 30
+seconds by config, because a mistyped `1` is a busy loop against Google's quota.
+
+Implemented in `pipeline/schedule.py` as pure functions over a caller-supplied
+instant — nothing in that module reads a clock, which is what makes the daylight
+saving behaviour testable rather than a thing that surfaces in March. What it
+deliberately does not model: holidays, and per-agent timezones. Central is the
+operating timezone, full stop.
 
 ---
 
@@ -406,10 +414,36 @@ Normalize before upload: convert to JPEG, cap the long edge at
 coordinates), and re-encode at quality 85. **Stream to disk; never hold a
 full-resolution image in memory on a 1 GB droplet.**
 
+### 4.5b Fit the photo to the frame (`photos/enhance.py`)
+
+**This is the hardest problem in the product.** Everything else is plumbing;
+this is the part that decides whether the output looks professional or obviously
+machine-made.
+
+A photo an agent shot on their phone is the wrong aspect ratio, often the wrong
+exposure, and never composed for a 1080 × 1350 frame with a text panel across the
+bottom third. Scaling it naively produces a stretched house, or a roofline
+guillotined at the top — errors that are glaring to a client and invisible to a
+script checking that the file is a valid JPEG.
+
+So this is **reprocessing, not resizing**: crop to the frame's aspect ratio while
+keeping the building intact, straighten, correct exposure, upscale if the source
+is small. `GABLE_IMAGE_MODEL` (default `gpt-image-2`) does the work — the newest
+image model, deliberately, because this is the task worth spending capability on.
+
+Strong vision is the requirement here, not strong generation. The model has to
+*see* where the house is in the frame before it can decide where to cut.
+
+**Reprocessing and generation stay on separate code paths.** Reprocessing
+reshapes a real photograph of the real property. Generation invents a subject: it
+is policy-gated, off by default, and always disclosed — an image model cannot
+know what 123 Main St looks like, and a wrong house on marketing for a real
+address is not a stylistic choice.
+
 ### 4.6 Look up template (`sheets/repository.py`)
 
-`agent_email` → `Agents` row. Unknown agent, or `active` false, pauses the
-listing and asks in Slack.
+`email` → `Salespeople` row → `slides_template_id`. Unknown agent, or `active`
+false, pauses the listing as `needs_template` and asks in Slack.
 
 ### 4.7 Render (`slides/renderer.py` + `slides/client.py`)
 
@@ -438,13 +472,100 @@ file per request, not per batch — Carmen opens a link, not a spreadsheet.
 `slides/client.py` is **not written yet.** It is blocked on the Google service
 account and on a real template existing in the drive.
 
+### 4.7b Inspect the render before delivering
+
+Gable **looks at its own output.** `pages.getThumbnail` returns a PNG of the
+rendered post; a vision pass over it asks the questions a script cannot:
+
+- Does the photo actually sit correctly in the frame, or is it stretched,
+  squashed, or cropped through the middle of the house?
+- Is any text overflowing its box or colliding with the background art?
+- Is a `{{placeholder}}` still visible anywhere on the page?
+
+This exists because the failure mode here is *silent*. A render can succeed at
+every API level — valid file, valid image, HTTP 200 throughout — and still be
+obviously wrong to any human who looks at it. The API cannot tell you the
+roofline is cut off. A model looking at the picture can.
+
+A render that fails inspection is **not delivered as if it were fine.** Gable
+says what looked wrong and offers to retry with different framing.
+
+This is also why `ANTHROPIC_API_KEY` matters as much as the image key: one model
+makes the picture fit, the other checks whether it did.
+
 ### 4.8 Deliver (`slackapp/`)
 
 Post to `C0BP597644B`: a Block Kit summary per listing (address, agent, template,
 photo thumbnail, provenance badge, any flags), **a link to the rendered Slides
 file**, and buttons for `Approve`, `Replace photo`, `Skip`.
 
+There is no attachment and nothing to download. The link is the deliverable —
+Carmen opens the live Slides file and edits it, or replies in the thread.
+
 Anything AI-generated gets a loud, unmissable badge. Not a footnote.
+
+---
+
+## 4A. Conversation design
+
+This is what makes Gable an agent rather than a scheduled job, and it is as much
+of the product as the renderer.
+
+### 4A.1 Confirm before acting
+
+Gable restates what it understood and waits for a yes. Ambiguity is resolved by
+asking, never by taking the likely reading.
+
+> **Carmen:** update the image
+> **Gable:** Just to confirm — replace the **hero image** on 123 Main St?
+> *(the large photo at the top)*
+> **Carmen:** yes
+> **Gable:** On it. Drop the new one here.
+
+"Update the image" could mean the hero, the headshot, or one of three secondary
+photos. Asking costs three seconds. Guessing costs a wrong post that looks right,
+which is the exact failure `AGENTS.md` §5 is written against.
+
+The rule generalises: **when Gable does not know, it asks.** It never picks the
+convenient reading of an ambiguous instruction.
+
+### 4A.2 Show that it is working
+
+Anything slower than a moment gets a status message, updated in place, with some
+personality. Silence reads as broken, and image reprocessing is genuinely slow:
+
+> 🔄 Working on it…
+> 🔄 One sec — fitting the image to the template…
+> 🔄 Shake and bake. Almost there…
+> 🔄 Checking how it turned out…
+
+Two rules keep this from being noise:
+
+- **Name the real stage where possible.** "Fitting the image to the template"
+  tells Carmen more than "working", and if it stalls she knows where.
+- **Never let personality obscure state.** A failure is reported plainly, in
+  words, with what failed. The fun is in the waiting, never in the outcome.
+
+### 4A.3 Tools, not a script
+
+The model is given tools — look up an agent, fetch a template, reprocess an
+image, render, re-render one field, ask a question, write a value back to
+`Salespeople` — and decides which to call.
+
+That is what lets Carmen say *"make the price bigger and use the other photo"*
+and have it work, without anyone having anticipated that sentence. A branching
+script would need every phrasing enumerated in advance; a tool-using model needs
+the tools to be correct and the intent to be confirmed.
+
+### 4A.4 Never claim more than it did
+
+From `AGENTS.md` §5, and it outranks everything above. If a photo's provenance is
+uncertain, say so and give the confidence. If verification did not run, say so.
+If something failed, name what failed.
+
+The failure mode to design against is Gable reporting confident success on a post
+that is subtly wrong, and Carmen — trusting it after fifty good runs — shipping
+it without looking.
 
 ---
 
@@ -554,6 +675,15 @@ Named so nobody wastes time adding them:
 | 2026-08-10 | Output canvas is Instagram Post 4:5, 1080 × 1350 | Confirmed on export from the Corner House template library. The product is social posts, not only printed flyers. |
 | 2026-08-10 | The real droplet is 1 vCPU / **1 GB** ($6/mo), not the $4 / 512MB tier | Verified live: 961 MB RAM, 1 GB swap active, Python 3.12.3. `CLAUDE.md` §9 corrected. Size against 1 GB. |
 | 2026-08-10 | `mypy` now covers `tools/` as well as `src` and `tests` | `tools/check_connections.py` was ~310 lines of real annotated code sitting outside the strict gate. Adding it surfaced one genuine `no-untyped-call` on `google-auth`, narrowed to a single line rather than a module exemption. |
+
+| 2026-08-10 | **Gable is a conversational agent, not a pipeline** | §1 rewritten. It runs until it needs a human, then asks — for the hero image, for a phone number the form never collected, for confirmation it understood. AI-centric (the model chooses tools and inspects its own output) and human-centric (asks rather than guesses) are both requirements, not adjectives. New §4A covers confirmation, progress messages and tool use. |
+| 2026-08-10 | Polling is schedule-aware: **2 min Mon–Fri 07:00–17:00 US Central, 10 min otherwise** | Requests arrive during the working day; polling at the same rate at 3am burns Sheets quota to find nothing. Evaluated against a timezone-aware Central clock, never droplet-local UTC — that variant works all winter and breaks in March. |
+| 2026-08-10 | `Agents` tab renamed **`Salespeople`**, joined on first/last/email | Matches how Chase describes it and how a human corrects it. Gains `phone`, which the form does not collect and which belongs to the agent rather than the listing — asked once ever, not once per listing. |
+| 2026-08-10 | Agent headshot is a dynamic image field, not a template variant | The Corner House library bakes an agent photo into many designs. One template per agent per request type is ~40 × N and unmaintainable; a second `replaceAllShapesWithImage` target keeps it at ~40 total. |
+| 2026-08-10 | Phone renders as **`(818) 259-7432`**, not E.164 | Display format, not storage format. E.164 is right for dialling an API and wrong for print — nobody puts a plus sign on a flyer. The output is read by a human. |
+| 2026-08-10 | Image model pinned to **`gpt-image-2`** via `GABLE_IMAGE_MODEL` | Verified available to the key against `/v1/models` and the images endpoint. Fitting a phone photo to a 1080×1350 frame is the hardest task in the product and gets the newest model. An earlier report claiming only `gpt-image-1` was a display bug in the checker — it sorted ascending, so `gpt-image-1` appeared newest. |
+| 2026-08-10 | **Gable inspects its own render before delivering** (§4.7b) | The failure mode is silent: every API call can succeed while the roofline is cropped off. The API cannot see that; a vision pass over the rendered thumbnail can. This is why the Anthropic key matters as much as the image key — one model makes the picture fit, the other checks whether it did. |
+| 2026-08-10 | Asking for missing fields is a first-class stage (§4.3b) | The form collects no price, phone or beds/baths, and its address column is empty on every observed row. "A required field is absent" is the normal path, so it gets a named status (`needs_info`), a specific question, and a pause — not a failure. |
 
 Append to this table. Do not rewrite history — if a decision reverses, add a new
 row explaining why. `CLAUDE.md` §2.7 makes this mandatory rather than polite.

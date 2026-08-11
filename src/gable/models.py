@@ -84,6 +84,7 @@ class RunStatus(StrEnum):
     PENDING = "pending"
     NEEDS_PHOTO = "needs_photo"
     NEEDS_TEMPLATE = "needs_template"
+    NEEDS_INFO = "needs_info"
     READY = "ready"
     DELIVERED = "delivered"
     FAILED = "failed"
@@ -93,16 +94,26 @@ class RunStatus(StrEnum):
         """True if this run is finished and must not be reprocessed.
 
         This is the idempotency test: the poller skips any row whose latest
-        `Runs` status is terminal. `needs_photo` and `needs_template` are
-        deliberately NOT terminal — they are paused, waiting on Carmen
-        indefinitely, and are re-checked on `/gable run` (AGENTS.md 6).
+        `Runs` status is terminal. The three `needs_*` states are deliberately
+        NOT terminal — they are paused, waiting on Carmen indefinitely, and are
+        re-checked on `/gable run` (AGENTS.md 6).
         """
         return self in {RunStatus.DELIVERED, RunStatus.FAILED}
 
     @property
     def is_paused(self) -> bool:
-        """True if this run is waiting on a human rather than on Gable."""
-        return self in {RunStatus.NEEDS_PHOTO, RunStatus.NEEDS_TEMPLATE}
+        """True if this run is waiting on a human rather than on Gable.
+
+        `needs_info` covers a field the form did not collect — most often the
+        agent's phone number, which the live intake form has no column for.
+        Gable asks rather than shipping a post with an empty line, and rather
+        than failing a listing that is one answer away from ready.
+        """
+        return self in {
+            RunStatus.NEEDS_PHOTO,
+            RunStatus.NEEDS_TEMPLATE,
+            RunStatus.NEEDS_INFO,
+        }
 
 
 class PhotoSource(StrEnum):

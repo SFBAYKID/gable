@@ -32,6 +32,8 @@ from typing import Final, TypeVar
 
 from dotenv import load_dotenv
 
+from gable.pipeline.schedule import PollSchedule
+
 # PEP 695 (`def f[T](...)`) is 3.12+. CLAUDE.md section 9 sets 3.11 as the
 # floor and the droplet's distro Python sets the ceiling, so TypeVar it is.
 _Numeric = TypeVar("_Numeric", int, float)
@@ -149,6 +151,7 @@ class Settings:
 
     # --- Pipeline ---
     poll_interval_seconds: int
+    poll_busy_interval_seconds: int
     max_batch: int
     max_description_chars: int
     max_retries: int
@@ -189,6 +192,26 @@ class Settings:
         """
         return (
             self.photo_reprocess and self.photo_policy.allows_reprocessing and self.images_available
+        )
+
+    @property
+    def poll_schedule(self) -> PollSchedule:
+        """The two-rate poll schedule described in ARCHITECTURE.md 2.6.
+
+        `GABLE_POLL_INTERVAL_SECONDS` is the quiet rate — nights and weekends —
+        so a single unchanged variable still describes the slow path. The busy
+        rate applies Mon-Fri 07:00-17:00 US Central.
+
+        Returns:
+            A frozen `PollSchedule`. Both intervals are already range-checked by
+            `load`, so this cannot raise on a `Settings` that exists.
+
+        Raises:
+            Nothing.
+        """
+        return PollSchedule(
+            busy_interval_seconds=self.poll_busy_interval_seconds,
+            quiet_interval_seconds=self.poll_interval_seconds,
         )
 
     @classmethod
@@ -274,7 +297,10 @@ class Settings:
                 "GABLE_PHOTO_JPEG_QUALITY", 85, minimum=40, maximum=100
             ),
             poll_interval_seconds=reader.int_value(
-                "GABLE_POLL_INTERVAL_SECONDS", 180, minimum=MIN_POLL_INTERVAL_SECONDS
+                "GABLE_POLL_INTERVAL_SECONDS", 600, minimum=MIN_POLL_INTERVAL_SECONDS
+            ),
+            poll_busy_interval_seconds=reader.int_value(
+                "GABLE_POLL_BUSY_INTERVAL_SECONDS", 120, minimum=MIN_POLL_INTERVAL_SECONDS
             ),
             max_batch=reader.int_value("GABLE_MAX_BATCH", 25, minimum=1, maximum=MAX_ALLOWED_BATCH),
             max_description_chars=reader.int_value(
