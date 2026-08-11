@@ -28,83 +28,49 @@ element Carmen meant. Resolving "the price" to an object id is
 
 from __future__ import annotations
 
-import re
-from typing import Any, Final
+from typing import Any
 
-Request = dict[str, Any]
+from gable.slides.edit_common import (
+    MAX_FONT_PT,
+    MIN_FONT_PT,
+    NAMED_COLOURS,
+    EditError,
+    Request,
+    parse_colour,
+    require_object_id,
+)
+from gable.slides.geometry import (
+    delete_element,
+    move_element,
+    resize_element,
+    scale_element,
+)
 
-#: Slides measures type in points and geometry in EMU or PT. Points throughout
-#: here, because that is what a human means by "font size".
-MIN_FONT_PT: Final[float] = 1.0
-MAX_FONT_PT: Final[float] = 400.0
-
-#: Scale guards. A 0x scale makes an element vanish in a way that reads as data
-#: loss; anything past 10x is almost certainly a misparsed instruction.
-MIN_SCALE: Final[float] = 0.05
-MAX_SCALE: Final[float] = 10.0
-
-#: Text box insets, in points. Slides' own default is 7.2pt (0.1 inch) on each
-#: side. "Padding" in Carmen's words means these.
-DEFAULT_INSET_PT: Final[float] = 7.2
-MAX_INSET_PT: Final[float] = 200.0
-
-_HEX_RE: Final[re.Pattern[str]] = re.compile(r"^#?([0-9a-fA-F]{6})$")
-
-#: Names Carmen is likely to say, mapped to hex. Keeps "make it black" working
-#: without the model having to invent a hex code.
-NAMED_COLOURS: Final[dict[str, str]] = {
-    "black": "#000000",
-    "white": "#FFFFFF",
-    "red": "#FF0000",
-    "navy": "#1B2A4A",
-    "grey": "#808080",
-    "gray": "#808080",
-    "green": "#2E7D32",
-    "blue": "#1565C0",
-    "gold": "#B8860B",
-    "cream": "#F5F0E6",
-}
-
-
-class EditError(Exception):
-    """Raised when an edit request cannot be built safely."""
-
-
-def parse_colour(value: str) -> dict[str, float]:
-    """Turn `#RRGGBB` or a colour name into a Slides `rgbColor`.
-
-    Args:
-        value: `#1B2A4A`, `1B2A4A`, or a name from `NAMED_COLOURS`.
-
-    Returns:
-        `{"red": float, "green": float, "blue": float}` with each in 0.0-1.0.
-
-    Raises:
-        EditError: if the value is neither a known name nor six hex digits. The
-            message lists the names, because the usual cause is Carmen saying a
-            colour nobody mapped yet.
-    """
-    key = value.strip().lower()
-    if key in NAMED_COLOURS:
-        value = NAMED_COLOURS[key]
-    match = _HEX_RE.match(value.strip())
-    if not match:
-        known = ", ".join(sorted(NAMED_COLOURS))
-        msg = f"cannot read colour {value!r}; use #RRGGBB or one of: {known}"
-        raise EditError(msg)
-    digits = match.group(1)
-    return {
-        "red": int(digits[0:2], 16) / 255.0,
-        "green": int(digits[2:4], 16) / 255.0,
-        "blue": int(digits[4:6], 16) / 255.0,
-    }
-
-
-def _require_object_id(object_id: str) -> None:
-    """Reject an empty target before it becomes an opaque Google error."""
-    if not object_id or not object_id.strip():
-        msg = "object_id is required; nothing identifies which element to change"
-        raise EditError(msg)
+__all__ = [
+    "NAMED_COLOURS",
+    "EditError",
+    "Request",
+    "delete_element",
+    "move_element",
+    "parse_colour",
+    "replace_image",
+    "replace_text",
+    "resize_element",
+    "scale_element",
+    "scale_font_size",
+    "set_alignment",
+    "set_content_alignment",
+    "set_font_family",
+    "set_font_size",
+    "set_line_colour",
+    "set_line_spacing",
+    "set_outline",
+    "set_padding",
+    "set_shape_fill",
+    "set_text_colour",
+    "set_text_weight",
+    "set_transparency",
+]
 
 
 # --- text styling -----------------------------------------------------------
@@ -125,7 +91,7 @@ def set_font_size(object_id: str, points: float) -> list[Request]:
     Raises:
         EditError: if `object_id` is empty or `points` is out of range.
     """
-    _require_object_id(object_id)
+    require_object_id(object_id)
     if not MIN_FONT_PT <= points <= MAX_FONT_PT:
         msg = f"font size must be {MIN_FONT_PT}-{MAX_FONT_PT}pt, got {points}"
         raise EditError(msg)
@@ -175,7 +141,7 @@ def set_font_family(object_id: str, family: str) -> list[Request]:
             not validated here — Slides silently falls back on an unknown font,
             and the §4.7b vision pass is the honest check for that.
     """
-    _require_object_id(object_id)
+    require_object_id(object_id)
     if not family.strip():
         msg = "font family is empty"
         raise EditError(msg)
@@ -206,7 +172,7 @@ def set_text_colour(object_id: str, colour: str) -> list[Request]:
     Raises:
         EditError: on an empty target or an unreadable colour.
     """
-    _require_object_id(object_id)
+    require_object_id(object_id)
     return [
         {
             "updateTextStyle": {
@@ -238,7 +204,7 @@ def set_text_weight(
         EditError: if neither `bold` nor `italic` was given — an edit that
             changes nothing is a misunderstood instruction, not a no-op.
     """
-    _require_object_id(object_id)
+    require_object_id(object_id)
     style: dict[str, Any] = {}
     fields: list[str] = []
     if bold is not None:
@@ -281,7 +247,7 @@ def set_alignment(object_id: str, alignment: str) -> list[Request]:
     Raises:
         EditError: on an unknown alignment.
     """
-    _require_object_id(object_id)
+    require_object_id(object_id)
     spoken = {"left": "START", "right": "END", "centre": "CENTER", "center": "CENTER"}
     value = spoken.get(alignment.strip().lower(), alignment.strip().upper())
     if value not in {"START", "CENTER", "END", "JUSTIFIED"}:
@@ -314,7 +280,7 @@ def set_line_spacing(object_id: str, percent: float) -> list[Request]:
     Raises:
         EditError: if `percent` is outside 20-500.
     """
-    _require_object_id(object_id)
+    require_object_id(object_id)
     if not 20.0 <= percent <= 500.0:
         msg = f"line spacing must be 20-500%, got {percent}"
         raise EditError(msg)
@@ -360,7 +326,7 @@ def set_padding(object_id: str, **_ignored: float | None) -> list[Request]:
     Raises:
         EditError: always, naming the two tools that do work.
     """
-    _require_object_id(object_id)
+    require_object_id(object_id)
     msg = (
         "Slides does not expose text insets over the API, so padding cannot be set "
         "directly (verified: the API rejects 'leftInset' as an unknown field). Use "
@@ -387,7 +353,7 @@ def set_content_alignment(object_id: str, alignment: str) -> list[Request]:
     Raises:
         EditError: on an unknown alignment.
     """
-    _require_object_id(object_id)
+    require_object_id(object_id)
     value = alignment.strip().upper()
     if value not in {"TOP", "MIDDLE", "BOTTOM"}:
         msg = f"content alignment must be top, middle or bottom; got {alignment!r}"
@@ -425,7 +391,7 @@ def set_line_colour(object_id: str, colour: str, weight_pt: float | None = None)
     Raises:
         EditError: on an empty target, unreadable colour, or bad weight.
     """
-    _require_object_id(object_id)
+    require_object_id(object_id)
     properties: dict[str, Any] = {
         "lineFill": {"solidFill": {"color": {"rgbColor": parse_colour(colour)}}}
     }
@@ -468,7 +434,7 @@ def set_shape_fill(object_id: str, colour: str) -> list[Request]:
     Raises:
         EditError: on an empty target or unreadable colour.
     """
-    _require_object_id(object_id)
+    require_object_id(object_id)
     return [
         {
             "updateShapeProperties": {
@@ -502,7 +468,7 @@ def set_outline(
     Raises:
         EditError: if neither argument was given, or the weight is out of range.
     """
-    _require_object_id(object_id)
+    require_object_id(object_id)
     outline: dict[str, Any] = {}
     fields: list[str] = []
     if colour is not None:
@@ -543,7 +509,7 @@ def set_transparency(object_id: str, alpha: float) -> list[Request]:
     Raises:
         EditError: if `alpha` is outside 0.0-1.0.
     """
-    _require_object_id(object_id)
+    require_object_id(object_id)
     if not 0.0 <= alpha <= 1.0:
         msg = f"alpha must be 0.0-1.0, got {alpha}"
         raise EditError(msg)
@@ -556,179 +522,6 @@ def set_transparency(object_id: str, alpha: float) -> list[Request]:
             }
         }
     ]
-
-
-# --- geometry ---------------------------------------------------------------
-
-
-def scale_element(object_id: str, factor: float) -> list[Request]:
-    """Make an element bigger or smaller.
-
-    *"Make the image bigger."*
-
-    Applies a multiplicative scale about the element's own origin. Slides
-    composes this with the element's existing transform, so it is relative.
-
-    Args:
-        object_id: The element to resize.
-        factor: Multiplier. 1.1 is a nudge; 0.5 halves it.
-
-    Returns:
-        One `updatePageElementTransform` request with `applyMode: RELATIVE`.
-
-    Raises:
-        EditError: if `factor` is outside `MIN_SCALE`-`MAX_SCALE`.
-    """
-    _require_object_id(object_id)
-    if not MIN_SCALE <= factor <= MAX_SCALE:
-        msg = f"scale must be {MIN_SCALE}-{MAX_SCALE}, got {factor}"
-        raise EditError(msg)
-    return [
-        {
-            "updatePageElementTransform": {
-                "objectId": object_id,
-                "applyMode": "RELATIVE",
-                "transform": {
-                    "scaleX": factor,
-                    "scaleY": factor,
-                    "translateX": 0,
-                    "translateY": 0,
-                    "unit": "PT",
-                },
-            }
-        }
-    ]
-
-
-def resize_element(
-    object_id: str,
-    scale_x: float,
-    scale_y: float,
-    current_transform: dict[str, Any],
-) -> list[Request]:
-    """Stretch an element on one axis, without moving it.
-
-    *"That box is too narrow for the phone number."*
-
-    Separate from `scale_element` because widening a text box without making its
-    type taller is a common fix — a box sized for the word "Phone" cannot hold
-    "(443) 854-8554".
-
-    **Why this needs the current transform.** A RELATIVE transform is composed
-    with the element's existing one, and that multiplies `translateX` and
-    `translateY` as well as the scale. Widening a box 4x with RELATIVE therefore
-    also throws it four times further from the origin — off the slide entirely.
-    This was observed live: the phone, email and website boxes vanished from a
-    rendered flyer while their icons stayed put. So this emits an ABSOLUTE
-    transform that keeps the original translation and changes only the scale.
-
-    Args:
-        object_id: The element to resize.
-        scale_x: Horizontal multiplier, relative to the element's current scale.
-        scale_y: Vertical multiplier.
-        current_transform: The element's existing `transform`, straight from
-            `presentations.get`. Must carry `scaleX`, `scaleY` and a `unit`.
-
-    Returns:
-        One `updatePageElementTransform` request with `applyMode: ABSOLUTE`.
-
-    Raises:
-        EditError: if either factor is out of range, or `current_transform` is
-            missing the keys needed to preserve position.
-    """
-    _require_object_id(object_id)
-    for name, value in (("scale_x", scale_x), ("scale_y", scale_y)):
-        if not MIN_SCALE <= value <= MAX_SCALE:
-            msg = f"{name} must be {MIN_SCALE}-{MAX_SCALE}, got {value}"
-            raise EditError(msg)
-    missing = {"scaleX", "scaleY", "unit"} - set(current_transform)
-    if missing:
-        msg = (
-            f"current_transform is missing {sorted(missing)}; without it the element "
-            "would be repositioned as well as resized"
-        )
-        raise EditError(msg)
-    return [
-        {
-            "updatePageElementTransform": {
-                "objectId": object_id,
-                "applyMode": "ABSOLUTE",
-                "transform": {
-                    "scaleX": current_transform["scaleX"] * scale_x,
-                    "scaleY": current_transform["scaleY"] * scale_y,
-                    "shearX": current_transform.get("shearX", 0),
-                    "shearY": current_transform.get("shearY", 0),
-                    "translateX": current_transform.get("translateX", 0),
-                    "translateY": current_transform.get("translateY", 0),
-                    "unit": current_transform["unit"],
-                },
-            }
-        }
-    ]
-
-
-def move_element(object_id: str, dx_pt: float, dy_pt: float) -> list[Request]:
-    """Nudge an element.
-
-    *"Move the price down a bit."*
-
-    Args:
-        object_id: The element to move.
-        dx_pt: Points to move right; negative moves left.
-        dy_pt: Points to move down; negative moves up.
-
-    Returns:
-        One `updatePageElementTransform` request with `applyMode: RELATIVE`.
-
-    Raises:
-        EditError: if both deltas are zero, or either exceeds a slide's span.
-    """
-    _require_object_id(object_id)
-    if dx_pt == 0 and dy_pt == 0:
-        msg = "move_element was asked to move nothing"
-        raise EditError(msg)
-    for name, value in (("dx_pt", dx_pt), ("dy_pt", dy_pt)):
-        if abs(value) > 2000:
-            msg = f"{name} of {value}pt is larger than any slide; likely a misread instruction"
-            raise EditError(msg)
-    return [
-        {
-            "updatePageElementTransform": {
-                "objectId": object_id,
-                "applyMode": "RELATIVE",
-                "transform": {
-                    "scaleX": 1,
-                    "scaleY": 1,
-                    "translateX": dx_pt,
-                    "translateY": dy_pt,
-                    "unit": "PT",
-                },
-            }
-        }
-    ]
-
-
-def delete_element(object_id: str) -> list[Request]:
-    """Remove an element entirely.
-
-    *"Make it less busy — drop the tagline."*
-
-    Args:
-        object_id: The element to delete.
-
-    Returns:
-        One `deleteObject` request.
-
-    Raises:
-        EditError: if `object_id` is empty.
-
-    Note:
-        Destructive and not undoable through the API. The caller must confirm
-        with Carmen first (AGENTS.md §2.6) — this function deliberately does not
-        know how to ask.
-    """
-    _require_object_id(object_id)
-    return [{"deleteObject": {"objectId": object_id}}]
 
 
 # --- content ----------------------------------------------------------------
@@ -784,7 +577,7 @@ def replace_image(object_id: str, image_url: str) -> list[Request]:
     Raises:
         EditError: on an empty target or URL.
     """
-    _require_object_id(object_id)
+    require_object_id(object_id)
     if not image_url.strip():
         msg = "replace_image needs a URL"
         raise EditError(msg)

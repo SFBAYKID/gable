@@ -23,7 +23,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import Final
 
-from PIL import Image
+from PIL import Image, ImageOps
 
 #: Below this, enlarging is visible as softness on a printed flyer. A 1080-wide
 #: frame filled from a 540-wide source is a 2x enlargement, which is the most a
@@ -200,9 +200,14 @@ def fit_locally(
         raise ValueError(msg)
 
     with Image.open(io.BytesIO(image_bytes)) as opened:
+        # Apply EXIF orientation FIRST. A portrait photo from a phone is stored
+        # landscape with an orientation tag, so without this the crop runs along
+        # the wrong axis: a 4000x3000-stored portrait shot would be trimmed 40%
+        # off its sides instead of 6% off top and bottom, and ship sideways.
+        upright = ImageOps.exif_transpose(opened)
         # Flyers are JPEG; a palette or alpha image must be flattened first or
         # Pillow refuses to save, and transparency would show as black anyway.
-        im: Image.Image = opened.convert("RGB")
+        im: Image.Image = upright.convert("RGB")
 
         source_aspect = im.width / im.height
         target_aspect = target_width / target_height
@@ -239,4 +244,8 @@ def image_dimensions(image_bytes: bytes) -> tuple[int, int]:
         OSError: if Pillow cannot identify the format.
     """
     with Image.open(io.BytesIO(image_bytes)) as im:
-        return im.width, im.height
+        # As displayed, not as stored — see `fit_locally`. `assess` compares
+        # these against the frame, so reporting stored dimensions for a rotated
+        # photo makes it choose the wrong crop axis.
+        upright = ImageOps.exif_transpose(im)
+        return upright.width, upright.height

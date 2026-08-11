@@ -188,3 +188,40 @@ def test_unreadable_bytes_raise_rather_than_stretch() -> None:
     """An unreadable upload deserves a specific message, not a silent fallback."""
     with pytest.raises(OSError):
         fit_locally(b"this is not an image", FRAME_W, FRAME_H)
+
+
+# --- EXIF orientation -------------------------------------------------------
+
+
+def _portrait_stored_landscape() -> bytes:
+    """A JPEG stored 4000x3000 with Orientation=6 — an ordinary phone portrait.
+
+    What a human sees is 3000x4000. Reporting the stored dimensions makes
+    `assess` choose the wrong crop axis.
+    """
+    im = Image.new("RGB", (4000, 3000), (120, 160, 200))
+    exif = im.getexif()
+    exif[274] = 6  # Orientation: rotate 90 CW
+    buf = io.BytesIO()
+    im.save(buf, format="JPEG", exif=exif)
+    return buf.getvalue()
+
+
+def test_dimensions_are_reported_as_displayed_not_as_stored() -> None:
+    assert image_dimensions(_portrait_stored_landscape()) == (3000, 4000)
+
+
+def test_a_rotated_photo_is_cropped_on_the_right_axis() -> None:
+    """Stored dims would say trim 40% off the sides; displayed says 6% off the top."""
+    stored = assess(4000, 3000, FRAME_W, FRAME_H)
+    displayed = assess(3000, 4000, FRAME_W, FRAME_H)
+    assert stored.crop_loss > 0.35
+    assert displayed.crop_loss < 0.10
+
+    w, h = image_dimensions(_portrait_stored_landscape())
+    assert assess(w, h, FRAME_W, FRAME_H).crop_loss == pytest.approx(displayed.crop_loss)
+
+
+def test_fitting_a_rotated_photo_still_produces_the_frame() -> None:
+    out = fit_locally(_portrait_stored_landscape(), FRAME_W, FRAME_H)
+    assert image_dimensions(out) == (FRAME_W, FRAME_H)

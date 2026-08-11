@@ -39,6 +39,14 @@ from gable.slides.edits import (
 )
 
 OID = "p1_i50"
+#: A real transform shape, matching what presentations.get returns.
+TRANSFORM: dict[str, Any] = {
+    "scaleX": 2.0,
+    "scaleY": 2.0,
+    "translateX": 500.0,
+    "translateY": 900.0,
+    "unit": "EMU",
+}
 
 
 def _only(requests: list[dict[str, Any]]) -> tuple[str, dict[str, Any]]:
@@ -56,6 +64,12 @@ def test_hex_becomes_zero_to_one_floats() -> None:
     assert parse_colour("#FF0000") == {"red": 1.0, "green": 0.0, "blue": 0.0}
 
 
+def test_three_digit_hex_is_expanded() -> None:
+    """A model will happily emit #ABC; expanding beats refusing."""
+    assert parse_colour("#FFF") == {"red": 1.0, "green": 1.0, "blue": 1.0}
+    assert parse_colour("#F00") == parse_colour("#FF0000")
+
+
 def test_hex_without_hash_is_accepted() -> None:
     assert parse_colour("00FF00")["green"] == 1.0
 
@@ -70,7 +84,7 @@ def test_every_named_colour_parses() -> None:
         parse_colour(name)
 
 
-@pytest.mark.parametrize("bad", ["", "#FFF", "puce", "#GGGGGG", "12345"])
+@pytest.mark.parametrize("bad", ["", "puce", "#GGGGGG", "12345", "#FFFF"])
 def test_unreadable_colour_lists_the_known_names(bad: str) -> None:
     with pytest.raises(EditError, match="cannot read colour"):
         parse_colour(bad)
@@ -274,19 +288,37 @@ def test_alpha_outside_zero_to_one_is_refused(alpha: float) -> None:
 # --- geometry ---------------------------------------------------------------
 
 
-def test_scale_is_relative_so_it_composes_with_the_template() -> None:
-    """ABSOLUTE would discard the template's own placement."""
-    kind, body = _only(scale_element(OID, 1.25))
+def test_scale_does_not_move_the_element() -> None:
+    """The test this replaces asserted the bug.
+
+    It required `applyMode: RELATIVE`, which composes with the existing
+    transform and multiplies translateX/Y by the factor. A photo at 1.2M EMU
+    scaled 1.5x would grow AND jump 0.65 inches sideways over the text panel.
+    """
+    kind, body = _only(scale_element(OID, 1.25, TRANSFORM))
     assert kind == "updatePageElementTransform"
-    assert body["applyMode"] == "RELATIVE"
-    assert body["transform"]["scaleX"] == 1.25
-    assert body["transform"]["scaleY"] == 1.25
+    assert body["applyMode"] == "ABSOLUTE"
+    assert body["transform"]["translateX"] == TRANSFORM["translateX"]
+    assert body["transform"]["translateY"] == TRANSFORM["translateY"]
+
+
+def test_scale_multiplies_the_existing_scale_uniformly() -> None:
+    _, body = _only(scale_element(OID, 1.5, TRANSFORM))
+    assert body["transform"]["scaleX"] == TRANSFORM["scaleX"] * 1.5
+    assert body["transform"]["scaleY"] == TRANSFORM["scaleY"] * 1.5
 
 
 @pytest.mark.parametrize("factor", [0, -1, 11])
 def test_absurd_scale_is_refused(factor: float) -> None:
-    with pytest.raises(EditError, match="scale must be"):
-        scale_element(OID, factor)
+    with pytest.raises(EditError, match="must be"):
+        scale_element(OID, factor, TRANSFORM)
+
+
+def test_scale_refuses_a_rotated_element() -> None:
+    """Scaling one axis of a rotated element changes its angle and skews it."""
+    rotated = {**TRANSFORM, "shearX": 0.3}
+    with pytest.raises(EditError, match="rotated or skewed"):
+        scale_element(OID, 1.2, rotated)
 
 
 def test_move_is_relative() -> None:
@@ -304,9 +336,6 @@ def test_moving_nowhere_is_refused() -> None:
 def test_moving_off_any_slide_is_refused() -> None:
     with pytest.raises(EditError, match="larger than any slide"):
         move_element(OID, 5000, 0)
-
-
-TRANSFORM = {"scaleX": 2.0, "scaleY": 2.0, "translateX": 500.0, "translateY": 900.0, "unit": "EMU"}
 
 
 def test_resize_can_widen_without_making_text_taller() -> None:
@@ -412,7 +441,7 @@ def test_replace_image_needs_a_url() -> None:
         lambda: set_shape_fill("", "black"),
         lambda: set_outline("", colour="black"),
         lambda: set_transparency("", 0.5),
-        lambda: scale_element("", 1.1),
+        lambda: scale_element("", 1.1, TRANSFORM),
         lambda: move_element("", 1, 1),
         lambda: delete_element(""),
         lambda: replace_image("", "http://x.test/a.jpg"),

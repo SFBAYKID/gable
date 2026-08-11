@@ -267,10 +267,19 @@ def test_empty_url_rejected() -> None:
         validate_image_url("")
 
 
-def test_http_rejected() -> None:
-    """Slides requires a publicly accessible URL; http leaks it for no benefit."""
-    with pytest.raises(TemplateError, match="https"):
-        validate_image_url("http://example.com/photo.jpg")
+def test_http_is_accepted_because_our_own_host_serves_it() -> None:
+    """Verified live: Slides fetches plain http:// fine.
+
+    Demanding https here would have rejected every URL `photos/store.publish`
+    produces, failing each listing at the final step — the modules were written
+    against contradictory contracts and this is the seam.
+    """
+    validate_image_url("http://143.110.146.87/a1b2c3d4e5f6a7b8.jpg")
+
+
+def test_a_non_http_scheme_is_still_rejected() -> None:
+    with pytest.raises(TemplateError, match="must be http"):
+        validate_image_url("ftp://example.test/a.jpg")
 
 
 def test_url_over_the_slides_two_kilobyte_limit_rejected() -> None:
@@ -341,3 +350,24 @@ def test_filename_is_bounded() -> None:
 
 def test_filename_survives_missing_data() -> None:
     assert flyer_filename(_listing(address="", agent_name="")) == "unknown address — unknown agent"
+
+
+# --- the seam between publishing and rendering ------------------------------
+
+
+def test_a_url_publish_produces_is_one_the_renderer_accepts() -> None:
+    """The cross-module contract, asserted in one place.
+
+    These two modules were written against contradictory rules — `store` emits
+    http:// by design, and this validator demanded https:// — so a correctly
+    published photo failed at the final step. Nothing caught it because every
+    other test is within-module.
+    """
+    from gable.photos.store import PhotoHost, content_name
+
+    host = PhotoHost(
+        ssh_target="root@198.51.100.7",
+        ssh_key_path="/dev/null",
+        public_base="http://198.51.100.7",
+    )
+    validate_image_url(host.url_for(content_name(b"\xff\xd8\xff" + b"0" * 32)))

@@ -160,10 +160,19 @@ def validate_image_url(url: str) -> None:
     """
     if not url:
         raise TemplateError("hero photo URL is empty")
-    if not url.startswith("https://"):
-        # Slides requires a publicly accessible URL; http:// would also leak the
-        # request in transit for no benefit.
-        raise TemplateError(f"hero photo URL must be https://, got {url[:60]!r}")
+    if not url.startswith(("https://", "http://")):
+        # Slides needs a URL it can fetch anonymously. Plain http:// IS accepted
+        # — verified live 2026-08-10 against the real API — which is what lets
+        # the droplet host photos with no certificate. An earlier version of this
+        # check demanded https and would have rejected every URL `photos/store`
+        # produces, failing each listing at the final step.
+        #
+        # The residual risk is integrity, not confidentiality: a listing photo is
+        # public marketing anyway, but Slides copies the image into the
+        # presentation permanently, so an on-path substitution would stick.
+        # Acceptable for a host we own on a fetch we initiate; revisit if the
+        # host ever moves off our own infrastructure.
+        raise TemplateError(f"hero photo URL must be http(s)://, got {url[:60]!r}")
     if len(url.encode("utf-8")) > MAX_IMAGE_URL_BYTES:
         raise TemplateError(
             f"hero photo URL is {len(url.encode('utf-8'))} bytes, "

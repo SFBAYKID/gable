@@ -23,10 +23,17 @@ the droplet has a disk; `prune` exists for when that stops being true.
 from __future__ import annotations
 
 import hashlib
+import re
 import shlex
 import subprocess
 from dataclasses import dataclass
 from typing import Final
+
+#: Published names must look exactly like this. `shlex.quote` blocks shell
+#: metacharacters but says nothing about `..`, and the SSH target may be root —
+#: so `name="../../../root/.ssh/authorized_keys"` would be an arbitrary root
+#: write the moment any caller passes a name derived from form input.
+SAFE_NAME: Final[re.Pattern[str]] = re.compile(r"^[a-f0-9]{16}\.(jpg|jpeg|png|gif)$")
 
 #: Where nginx serves from on the droplet.
 REMOTE_ROOT: Final[str] = "/var/www/gable-photos"
@@ -89,6 +96,9 @@ def content_name(image_bytes: bytes, suffix: str = ".jpg") -> str:
     if not image_bytes:
         msg = "cannot name an empty image"
         raise ValueError(msg)
+    if suffix not in {".jpg", ".jpeg", ".png", ".gif"}:
+        msg = f"suffix {suffix!r} is not a format Slides accepts"
+        raise ValueError(msg)
     digest = hashlib.sha256(image_bytes).hexdigest()[:16]
     return f"{digest}{suffix}"
 
@@ -112,7 +122,18 @@ def publish(host: PhotoHost, image_bytes: bytes, name: str | None = None) -> str
             "problem retrieving the image" from Google.
     """
     filename = name or content_name(image_bytes)
+    if not SAFE_NAME.match(filename):
+        msg = (
+            f"refusing to publish {filename!r}: a published name must be a content hash "
+            "plus an image suffix. Anything else can traverse out of the web root."
+        )
+        raise PublishError(msg)
     remote_path = f"{host.remote_root}/{filename}"
+    # Write to a temporary name and rename into place. An intra-filesystem
+    # rename is atomic, so nginx never serves a half-written file — and a
+    # truncated JPEG still starts FFD8FF, which means `verify_public` would
+    # otherwise certify it as valid.
+    staging = f"{remote_path}.part"
     command = [
         "ssh",
         "-i",
@@ -124,7 +145,8 @@ def publish(host: PhotoHost, image_bytes: bytes, name: str | None = None) -> str
         host.ssh_target,
         # A quoted heredoc-free write: cat the bytes straight to the file, then
         # make it world-readable so nginx (and therefore Google) can read it.
-        f"cat > {shlex.quote(remote_path)} && chmod 644 {shlex.quote(remote_path)}",
+        f"cat > {shlex.quote(staging)} && chmod 644 {shlex.quote(staging)} "
+        f"&& mv -f {shlex.quote(staging)} {shlex.quote(remote_path)}",
     ]
     try:
         result = subprocess.run(
