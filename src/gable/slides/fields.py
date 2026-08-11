@@ -208,6 +208,10 @@ class Resolution:
     unrecognised: list[str] = field(default_factory=list)
     #: Fields the caller asked about that this template does not have.
     absent: list[str] = field(default_factory=list)
+    #: Further literals carrying the same field. A design that labels the agent
+    #: both "AGENT NAME" and "Realtor Name" has two, and filling only the first
+    #: leaves the second on the finished flyer looking like a real caption.
+    also: dict[str, tuple[str, ...]] = field(default_factory=dict)
 
     @property
     def has_address(self) -> bool:
@@ -273,6 +277,7 @@ def resolve(texts: list[str], wanted: list[str] | None = None) -> Resolution:
         Nothing.
     """
     found: dict[str, str] = {}
+    also: dict[str, list[str]] = {}
     unrecognised: list[str] = []
 
     for raw in texts:
@@ -281,17 +286,30 @@ def resolve(texts: list[str], wanted: list[str] | None = None) -> Resolution:
             continue
         matched = False
         for name, patterns in PATTERNS.items():
-            if name in found:
-                continue  # first occurrence wins; templates repeat labels
-            if any(pattern.match(text) for pattern in patterns):
+            if not any(pattern.match(text) for pattern in patterns):
+                continue
+            if name not in found:
                 found[name] = text
-                matched = True
-                break
+            elif text != found[name]:
+                # A second literal for a slot already resolved. These designs
+                # label the same thing more than one way, and replacing only
+                # the first left "Realtor Name" and "123 ANYWHERE ST., ANY
+                # CITY" sitting on finished flyers.
+                also.setdefault(name, [])
+                if text not in also[name]:
+                    also[name].append(text)
+            matched = True
+            break
         if not matched and ("[" in text or text.isupper()):
             unrecognised.append(text)
 
     absent = [name for name in (wanted or []) if name not in found]
-    return Resolution(fields=found, unrecognised=unrecognised, absent=absent)
+    return Resolution(
+        fields=found,
+        unrecognised=unrecognised,
+        absent=absent,
+        also={name: tuple(extra) for name, extra in also.items()},
+    )
 
 
 def replacements(resolution: Resolution, values: dict[str, str]) -> dict[str, str]:
@@ -311,8 +329,17 @@ def replacements(resolution: Resolution, values: dict[str, str]) -> dict[str, st
     Raises:
         Nothing.
     """
-    return {
+    pairs = {
         literal: values[name]
         for name, literal in resolution.fields.items()
         if values.get(name, "").strip()
     }
+    # Every other literal carrying the same field, so a design that labels one
+    # thing twice does not ship with the second label still showing.
+    for name, extras in resolution.also.items():
+        value = values.get(name, "").strip()
+        if not value:
+            continue
+        for literal in extras:
+            pairs[literal] = value
+    return pairs
