@@ -15,9 +15,6 @@
 credentials.json
 client_secret*.json
 
-# canva_autofill_spike.py caches OAuth access/refresh tokens next to itself.
-.canva_tokens.json
-
 # ---------------------------------------------------------------------------
 # Python
 # ---------------------------------------------------------------------------

@@ -1,4 +1,4 @@
-"""Gable — turns real-estate listing form submissions into Canva Bulk Create files.
+"""Gable — turns real-estate listing form submissions into finished social posts.
 
 The package is deliberately importable without Slack, Google, or network access:
 `gable.pipeline.orchestrator` is driven by `gable.cli` for local development, and

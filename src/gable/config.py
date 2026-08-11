@@ -61,21 +61,14 @@ class PhotoPolicy(StrEnum):
         return self is PhotoPolicy.GENERATE_WITH_APPROVAL
 
     @property
-    def allows_enhancement(self) -> bool:
-        """True if a *real* retrieved photo may be enhanced.
+    def allows_reprocessing(self) -> bool:
+        """True if a *real* photo may be reshaped to fit the template frame.
 
-        Enhancement and generation are separate operations on separate code
-        paths (CLAUDE.md section 8). Every policy except `no_ai` permits it.
+        Reprocessing changes framing, exposure and resolution; generation
+        invents a subject. They are different operations on separate code
+        paths. Every policy except `no_ai` permits reprocessing.
         """
         return self is not PhotoPolicy.NO_AI
-
-
-class ImageProvider(StrEnum):
-    """Backend used for enhancement and, where policy permits, generation."""
-
-    OPENAI = "openai"
-    GEMINI = "gemini"
-    NONE = "none"
 
 
 class ConfigError(Exception):
@@ -142,10 +135,7 @@ class Settings:
     # --- Photo policy ---
     photo_policy: PhotoPolicy
     photo_min_confidence: float
-    photo_enhance: bool
-    image_provider: ImageProvider
-    openai_api_key: str
-    gemini_api_key: str
+    photo_reprocess: bool
     max_image_calls_per_listing: int
 
     # --- Photo hosting ---
@@ -164,48 +154,40 @@ class Settings:
     max_retries: int
     dry_run: bool
 
+    # --- AI providers ---
+    openai_image_api_key: str
+    anthropic_api_key: str
+
     # --- Logging ---
     log_level: str
     log_format: str
     log_redact_secrets: bool
 
     @property
-    def image_provider_key(self) -> str:
-        """The API key belonging to the configured provider, or empty."""
-        if self.image_provider is ImageProvider.OPENAI:
-            return self.openai_api_key
-        if self.image_provider is ImageProvider.GEMINI:
-            return self.gemini_api_key
-        return ""
-
-    @property
-    def provider_is_usable(self) -> bool:
-        """True when a provider is selected AND its key is present.
-
-        `GABLE_IMAGE_PROVIDER=openai` with a blank `OPENAI_API_KEY` is the state
-        `.env.example` ships in. It means "no usable provider", not "broken
-        config" — Phase 1 needs no image model at all.
-        """
-        return self.image_provider is not ImageProvider.NONE and bool(self.image_provider_key)
+    def images_available(self) -> bool:
+        """True when an image model can actually be called."""
+        return bool(self.openai_image_api_key)
 
     @property
     def generation_available(self) -> bool:
         """True only if policy permits generation AND something can generate.
 
         Both halves matter. Gable must never imply to Carmen that it could have
-        generated a photo when no provider is configured (AGENTS.md section 5).
+        produced a photo when no key is configured (AGENTS.md section 5).
         """
-        return self.photo_policy.allows_generation and self.provider_is_usable
+        return self.photo_policy.allows_generation and self.images_available
 
     @property
-    def enhancement_enabled(self) -> bool:
-        """True if a real retrieved photo may be enhanced.
+    def reprocessing_enabled(self) -> bool:
+        """True if a real photo may be reshaped to fit the template frame.
 
         Policy is authoritative and the flag is subordinate: `no_ai` disables
-        enhancement regardless of `GABLE_PHOTO_ENHANCE`, rather than forcing the
-        operator to edit two variables to express one intent.
+        reprocessing regardless of `GABLE_PHOTO_REPROCESS`, rather than forcing
+        the operator to edit two variables to express one intent.
         """
-        return self.photo_enhance and self.photo_policy.allows_enhancement
+        return (
+            self.photo_reprocess and self.photo_policy.allows_reprocessing and self.images_available
+        )
 
     @classmethod
     def load(
@@ -274,12 +256,7 @@ class Settings:
             photo_min_confidence=reader.float_value(
                 "GABLE_PHOTO_MIN_CONFIDENCE", 0.75, minimum=0.0, maximum=1.0
             ),
-            photo_enhance=reader.bool_value("GABLE_PHOTO_ENHANCE", True),
-            image_provider=reader.enum_value(
-                "GABLE_IMAGE_PROVIDER", ImageProvider, ImageProvider.NONE
-            ),
-            openai_api_key=reader.str_value("OPENAI_API_KEY", ""),
-            gemini_api_key=reader.str_value("GEMINI_API_KEY", ""),
+            photo_reprocess=reader.bool_value("GABLE_PHOTO_REPROCESS", True),
             max_image_calls_per_listing=reader.int_value(
                 "GABLE_MAX_IMAGE_CALLS_PER_LISTING", 1, minimum=0, maximum=5
             ),
@@ -303,6 +280,8 @@ class Settings:
             ),
             max_retries=reader.int_value("GABLE_MAX_RETRIES", 3, minimum=0, maximum=10),
             dry_run=reader.bool_value("GABLE_DRY_RUN", False),
+            openai_image_api_key=reader.secret("OPENAI_IMAGE_API_KEY", False),
+            anthropic_api_key=reader.secret("ANTHROPIC_API_KEY", False),
             log_level=reader.str_value("LOG_LEVEL", "INFO").upper(),
             log_format=reader.str_value("LOG_FORMAT", "json").lower(),
             log_redact_secrets=reader.bool_value("LOG_REDACT_SECRETS", True),
@@ -328,11 +307,10 @@ def _validate_cross_field(settings: Settings, problems: list[str]) -> None:
     usable provider: the operator asked for automatic generation and there is
     nothing to generate with.
     """
-    # Canva image cells require an external HTTPS URL (CLAUDE.md 4.2). A photo
-    # published to a base that is not HTTPS cannot be consumed regardless of
-    # how Spike A resolves.
+    # Google Slides fetches an inserted image over the public internet and
+    # requires HTTPS. A non-HTTPS base parses fine and then fails at render.
     if settings.spaces_public_base and not settings.spaces_public_base.startswith("https://"):
-        problems.append("SPACES_PUBLIC_BASE must start with https:// — Canva requires HTTPS")
+        problems.append("SPACES_PUBLIC_BASE must start with https:// — Slides requires HTTPS")
 
     # A My Drive folder id would parse fine and then fail on the first render
     # with StorageQuotaExceeded. Shared drive ids start with "0A"; folder ids
@@ -344,10 +322,10 @@ def _validate_cross_field(settings: Settings, problems: list[str]) -> None:
             "(expected to start with '0A'). Service accounts cannot create files "
             "outside a shared drive."
         )
-    if settings.photo_policy is PhotoPolicy.GENERATE_FREELY and not settings.generation_available:
+    if settings.photo_policy is PhotoPolicy.GENERATE_FREELY and not settings.images_available:
         problems.append(
-            "GABLE_PHOTO_POLICY=generate_freely requires a usable image provider: set "
-            "GABLE_IMAGE_PROVIDER and its API key, or choose a different policy"
+            "GABLE_PHOTO_POLICY=generate_freely requires OPENAI_IMAGE_API_KEY: "
+            "set it, or choose a policy that does not generate automatically"
         )
     if settings.log_format not in {"json", "console"}:
         problems.append(f"LOG_FORMAT must be json or console, got {settings.log_format!r}")

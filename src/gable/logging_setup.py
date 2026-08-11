@@ -52,12 +52,10 @@ SECRET_ENV_VARS: Final[tuple[str, ...]] = (
     "SLACK_SIGNING_SECRET",
     "SLACK_CLIENT_SECRET",
     "FIRECRAWL_API_KEY",
-    "OPENAI_API_KEY",
-    "GEMINI_API_KEY",
+    "OPENAI_IMAGE_API_KEY",
+    "ANTHROPIC_API_KEY",
     "SPACES_KEY",
     "SPACES_SECRET",
-    "CANVA_CLIENT_ID",
-    "CANVA_CLIENT_SECRET",
 )
 
 #: Literal values shorter than this are not redacted. Without this floor an
@@ -74,7 +72,7 @@ MIN_REDACTABLE_SECRET_LENGTH: Final[int] = 8
 #: `private_key` field inside a Google service-account JSON, which CLAUDE.md
 #: section 3 says must never be printed even in a stack trace.
 #:
-#: ASSUMPTION: `sk-` for OpenAI and `xoxp-`/`xoxa-`/`xoxr-` for other Slack
+#: ASSUMPTION: `sk-` for OpenAI/Anthropic and `xoxp-`/`xoxa-`/`xoxr-` for other Slack
 #: token classes. These are widely repeated prefixes, but I have NOT read them
 #: in vendor documentation and have not observed them here. Would be settled by
 #: reading Slack's token-types page and OpenAI's API-key docs.

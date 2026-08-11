@@ -1,16 +1,17 @@
 """Normalize a photo and publish it to a public HTTPS URL.
 
-Canva image cells take an external HTTPS URL: max 4,096 characters, JPEG / PNG /
-WebP / SVG+XML / HEIC / TIFF, 50MB ceiling (verified from Canva's Apps SDK docs,
-CLAUDE.md 4.2). DigitalOcean Spaces is the recommended host.
+Google Slides takes an external HTTPS URL: max 2 kB of URL, PNG / JPEG / GIF,
+50 MB and 25 megapixels (verified from Google's API reference). The image is
+fetched once at insertion and stored inside the presentation, so the URL only
+has to be reachable for that moment — but it must be public, since a Drive link
+requires auth. DigitalOcean Spaces is the recommended host.
 
 Normalization before upload: convert to JPEG, cap the long edge at
 `GABLE_PHOTO_MAX_EDGE_PX`, strip EXIF (it can carry the photographer's GPS
 coordinates), re-encode at `GABLE_PHOTO_JPEG_QUALITY`.
 
 Assumes: the Spaces bucket is public-read and `SPACES_PUBLIC_BASE` resolves to
-it. Whether an uploaded Bulk Create file can carry such a URL at all is Spike A
-and is NOT yet answered (CLAUDE.md 4.3 item 1).
+it.
 
 Does not handle: retaining a scraped image after upload. It is deleted
 immediately (ARCHITECTURE.md 7).

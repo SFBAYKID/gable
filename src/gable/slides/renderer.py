@@ -44,8 +44,8 @@ from gable.models import AgentProfile, Listing
 #: time. `Any` is the honest annotation.
 Request = dict[str, Any]
 
-#: Slides caps the image URL at 2 kB — tighter than Canva's 4,096 characters,
-#: so anything that fit Canva fits here, but it is still worth enforcing.
+#: Slides caps the image URL at 2 kB. Enforced before the request is sent so a
+#: long signed URL fails with a sentence instead of a Google error code.
 MAX_IMAGE_URL_BYTES: Final[int] = 2048
 
 #: Formats `replaceAllShapesWithImage` accepts.

@@ -313,30 +313,32 @@ def unknown_agent_blocks(
 
 def batch_delivered_blocks(
     ready_addresses: tuple[str, ...],
-    filename: str,
     held_back: int = 0,
 ) -> list[Block]:
     """The batch summary from AGENTS.md 2.5.
 
     The headline count is `len(ready_addresses)` and nothing else. AGENTS.md 2.5
-    is explicit: never report a count that includes held-back listings. "4
-    flyers ready" must mean four are actually ready.
+    is explicit: never report a count that includes held-back listings. "4 posts
+    ready" must mean four are actually ready.
+
+    There is no file to download. Each ready listing is posted individually with
+    a link to its own Google Slides file, which Carmen can open and edit
+    directly; this message just says what landed.
 
     Args:
-        ready_addresses: Addresses actually included in the file.
-        filename: The attached Bulk Create file.
+        ready_addresses: Addresses actually rendered.
         held_back: How many listings are waiting on something.
 
     Returns:
         Block Kit blocks ready to post.
     """
     count = len(ready_addresses)
-    noun = "flyer" if count == 1 else "flyers"
+    noun = "post" if count == 1 else "posts"
     blocks: list[Block] = [
-        _text(f"📦  *{count} {noun} ready* — `{filename}`"),
+        _text(f"📦  *{count} {noun} ready*"),
         _text(
-            "Open Canva ▸ your flyer template ▸ Apps ▸ Bulk create ▸ Upload data\n"
-            "Connect each field once; Canva remembers the mapping next time."
+            "Each one is a Google Slides file — open the link on its message to "
+            "tweak it yourself, or reply in that thread and I'll redo it."
         ),
     ]
     if ready_addresses:

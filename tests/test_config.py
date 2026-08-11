@@ -17,7 +17,6 @@ import pytest
 from gable.config import (
     DEFAULT_SLACK_CHANNEL_ID,
     ConfigError,
-    ImageProvider,
     PhotoPolicy,
     Settings,
 )
@@ -200,80 +199,64 @@ def test_policy_semantics(
 ) -> None:
     """All four policies are implemented faithfully (CLAUDE.md section 8)."""
     assert policy.allows_generation is generates
-    assert policy.allows_enhancement is enhances
+    assert policy.allows_reprocessing is enhances
     assert policy.requires_approval_before_generating is needs_approval
 
 
-def test_generate_freely_without_a_usable_provider_is_rejected() -> None:
-    """The one unsatisfiable combination: automatic generation, nothing to generate with."""
+def test_generate_freely_without_an_image_key_is_rejected() -> None:
+    """The one unsatisfiable combination: auto-generate, nothing to generate with."""
     with pytest.raises(ConfigError) as excinfo:
-        _load(GABLE_PHOTO_POLICY="generate_freely", GABLE_IMAGE_PROVIDER="none")
-    assert any("usable image provider" in problem for problem in excinfo.value.problems)
+        _load(GABLE_PHOTO_POLICY="generate_freely")
+    assert any("OPENAI_IMAGE_API_KEY" in problem for problem in excinfo.value.problems)
 
 
-def test_generate_freely_with_a_provider_but_no_key_is_rejected() -> None:
-    """A selected provider with a blank key is not a usable provider."""
-    with pytest.raises(ConfigError):
-        _load(GABLE_PHOTO_POLICY="generate_freely", GABLE_IMAGE_PROVIDER="openai")
-
-
-def test_generate_freely_with_a_usable_provider_is_accepted() -> None:
-    settings = _load(
-        GABLE_PHOTO_POLICY="generate_freely",
-        GABLE_IMAGE_PROVIDER="openai",
-        OPENAI_API_KEY="sk-abc123",
-    )
+def test_generate_freely_with_an_image_key_is_accepted() -> None:
+    settings = _load(GABLE_PHOTO_POLICY="generate_freely", OPENAI_IMAGE_API_KEY="sk-abc123def456")
     assert settings.generation_available is True
 
 
-def test_dotenv_example_defaults_boot_cleanly() -> None:
-    """The shipped defaults must start: provider selected, key blank, approval policy.
+def test_no_image_key_still_boots() -> None:
+    """A deployment that never touches an image model is a normal state."""
+    settings = _load()
+    assert settings.images_available is False
+    assert settings.generation_available is False
+    assert settings.reprocessing_enabled is False
 
-    This is the regression that motivated the degrade-don't-fail rule. A Phase 1
-    deployment generates no images at all and must not be blocked by that.
-    """
-    settings = _load(
-        GABLE_PHOTO_POLICY="generate_with_approval",
-        GABLE_IMAGE_PROVIDER="openai",
-        OPENAI_API_KEY="",
-        GABLE_PHOTO_ENHANCE="true",
+
+def test_reprocessing_needs_both_the_flag_and_a_key() -> None:
+    """Reshaping a real photo to fit the frame still calls an image model."""
+    assert _load(GABLE_PHOTO_REPROCESS="true").reprocessing_enabled is False
+    assert (
+        _load(
+            GABLE_PHOTO_REPROCESS="true", OPENAI_IMAGE_API_KEY="sk-abc123def456"
+        ).reprocessing_enabled
+        is True
     )
-    assert settings.provider_is_usable is False
-    assert settings.generation_available is False
-    assert settings.enhancement_enabled is True
 
 
-def test_no_ai_policy_overrides_the_enhance_flag() -> None:
-    """Policy is authoritative; the flag is subordinate (CLAUDE.md section 8)."""
-    settings = _load(GABLE_PHOTO_POLICY="no_ai", GABLE_PHOTO_ENHANCE="true")
-    assert settings.photo_enhance is True
-    assert settings.enhancement_enabled is False
-    assert settings.generation_available is False
-
-
-def test_provider_without_its_key_is_not_usable_but_still_boots() -> None:
-    settings = _load(GABLE_IMAGE_PROVIDER="openai", GABLE_PHOTO_POLICY="retrieve_only")
-    assert settings.image_provider is ImageProvider.OPENAI
-    assert settings.provider_is_usable is False
-
-
-def test_provider_with_its_key_is_usable() -> None:
+def test_no_ai_policy_overrides_the_reprocess_flag() -> None:
+    """Policy is authoritative; the flag is subordinate."""
     settings = _load(
-        GABLE_IMAGE_PROVIDER="gemini",
-        GEMINI_API_KEY="gem-abcdefgh",
-        GABLE_PHOTO_POLICY="retrieve_only",
+        GABLE_PHOTO_POLICY="no_ai",
+        GABLE_PHOTO_REPROCESS="true",
+        OPENAI_IMAGE_API_KEY="sk-abc123def456",
     )
-    assert settings.image_provider is ImageProvider.GEMINI
-    assert settings.provider_is_usable is True
-    # retrieve_only never generates, no matter how usable the provider is.
+    assert settings.photo_reprocess is True
+    assert settings.reprocessing_enabled is False
     assert settings.generation_available is False
+
+
+def test_ai_keys_are_read() -> None:
+    settings = _load(OPENAI_IMAGE_API_KEY="sk-img", ANTHROPIC_API_KEY="sk-ant")
+    assert settings.openai_image_api_key == "sk-img"
+    assert settings.anthropic_api_key == "sk-ant"
 
 
 # --- cross-field checks -----------------------------------------------------
 
 
 def test_non_https_spaces_base_is_rejected() -> None:
-    """Canva requires an external HTTPS URL for image cells (CLAUDE.md 4.2)."""
+    """Google Slides fetches inserted images over the public internet, via HTTPS."""
     with pytest.raises(ConfigError) as excinfo:
         _load(SPACES_PUBLIC_BASE="http://gable-photos.nyc3.digitaloceanspaces.com")
     assert any("https" in problem for problem in excinfo.value.problems)
