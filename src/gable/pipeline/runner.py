@@ -24,7 +24,6 @@ unattended:
 from __future__ import annotations
 
 import logging
-import re
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from sqlite3 import Connection
@@ -34,6 +33,7 @@ from gable import spend
 from gable.db import store
 from gable.listings.enrich import Facts, look_up
 from gable.listings.intake import Intake
+from gable.pipeline import audit
 from gable.pipeline.orchestrator import Outcome, after_research, agent_slots, judge, plan
 from gable.pipeline.vision import Inspection, inspect
 from gable.sheets import repository as repo
@@ -43,13 +43,6 @@ from gable.slides import manifest as template_manifest
 from gable.slides.catalog import for_category
 from gable.slides.selection import rank as rank_templates
 from gable.voice import safe
-
-#: A phone number in any of the shapes these templates use: 443.499.3839,
-#: (443) 555-0142, 410-305-9006.
-_PHONE_ON_FLYER: Final[re.Pattern[str]] = re.compile(r"\(?\d{3}\)?[\s.\-]?\d{3}[\s.\-]\d{4}")
-
-#: An email address, which on a listing flyer is always somebody's real one.
-_EMAIL_ON_FLYER: Final[re.Pattern[str]] = re.compile(r"[\w.+\-]+@[\w\-]+\.[\w.\-]+")
 
 #: Every Corner House agent is on this domain, so a roster row missing its own
 #: URL still produces a real website rather than the word "Website".
@@ -590,77 +583,55 @@ class Runner:
             pairs: The literal-to-value replacements actually sent.
 
         Returns:
-            Field names whose value is missing or corrupted, worst first. Empty
-            when every value reads back exactly.
+            Field names whose value is missing or corrupted, worst first.
 
         Raises:
             Nothing. A read failure returns no complaints rather than blocking a
             flyer on a transient Slides error; the other guards still apply.
         """
-        try:
-            text = "\n".join(self.read_slide_text(file_id))
-        except Exception:
-            logger.exception("could not read the flyer back for verification")
-            return []
+        text = self._read_back(file_id)
         if not text:
             return []
-
-        # Only values actually sent to the design. A value the template has no
-        # slot for is not expected to appear.
         sent = {value for value in pairs.values() if value.strip()}
-        missing: list[str] = []
-        for name, value in values.items():
-            candidate = value.strip()
-            if not candidate or candidate not in sent:
-                continue
-            # `headshot` is an image URL, never text on the flyer.
-            if name == "headshot":
-                continue
-            if candidate not in text:
-                missing.append(name.replace("_", " "))
-        return missing
+        return audit.values_missing_from(text, values, sent)
 
     def _foreign_contact_details(self, file_id: str, values: dict[str, str]) -> list[str]:
-        """Contact details on the flyer that this run did not put there.
+        """Contact details and sample content this run did not put on the flyer.
 
         Args:
             file_id: The filled presentation.
             values: What the run supplied.
 
         Returns:
-            A description of each stray phone number or email, worst first.
-            Empty when every one on the flyer came from this submission.
+            A description of each stray value, worst first.
 
         Raises:
-            Nothing. A read failure returns no complaints rather than blocking
-            on a transient Slides error.
+            Nothing.
         """
-        try:
-            text = "\n".join(self.read_slide_text(file_id))
-        except Exception:
-            logger.exception("could not read the flyer back for a contact check")
-            return []
+        text = self._read_back(file_id)
         if not text:
             return []
+        return audit.foreign_content_in(text, values, OFFICE_PHONE)
 
-        def digits(value: str) -> str:
-            return "".join(c for c in value if c.isdigit())
+    def _read_back(self, file_id: str) -> str:
+        """All text on the rendered flyer, or empty if it cannot be read.
 
-        supplied_phones = {digits(v) for v in values.values() if digits(v)}
-        # The brokerage's own line belongs on every flyer, whether or not this
-        # run supplied it. Flagging it was a false positive in this check, not a
-        # defect on the flyer.
-        supplied_phones.add(digits(OFFICE_PHONE))
-        supplied_emails = {v.strip().lower() for v in values.values() if "@" in v}
+        Args:
+            file_id: The filled presentation.
 
-        stray: list[str] = []
-        for found in _PHONE_ON_FLYER.findall(text):
-            if digits(found) and digits(found) not in supplied_phones:
-                stray.append(f"phone number {found} is not this listing's")
-        for found in _EMAIL_ON_FLYER.findall(text):
-            if found.strip().lower() not in supplied_emails:
-                stray.append(f"email address {found} is not this listing's")
-        return stray
+        Returns:
+            The slide text joined by newlines. Empty on any failure, which lets
+            the audit checks pass rather than blocking a flyer on a transient
+            Slides error.
+
+        Raises:
+            Nothing.
+        """
+        try:
+            return "\n".join(self.read_slide_text(file_id))
+        except Exception:
+            logger.exception("could not read the flyer back for verification")
+            return ""
 
     def _remember_thread(self, run_id: str, thread_ts: str) -> None:
         """Record which Slack thread a run is being discussed in.
