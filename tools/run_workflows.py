@@ -28,6 +28,7 @@ import sys
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
 from dotenv import load_dotenv
 from google.oauth2 import service_account
@@ -181,6 +182,27 @@ def workflow_undersized_photo(_r: Runner) -> Result:
     return res
 
 
+def _slide_text(pres: dict[str, Any]) -> list[tuple[str, str]]:
+    """Every (object_id, text) pair on the first slide.
+
+    Args:
+        pres: A `presentations.get` response.
+
+    Returns:
+        Pairs for shapes that carry non-empty text.
+
+    Raises:
+        Nothing.
+    """
+    out: list[tuple[str, str]] = []
+    for el in pres["slides"][0].get("pageElements", []):
+        runs = el.get("shape", {}).get("text", {}).get("textElements", [])
+        text = "".join(r.get("textRun", {}).get("content", "") for r in runs).strip()
+        if text:
+            out.append((el["objectId"], text))
+    return out
+
+
 def workflow_missing_fields(r: Runner) -> Result:
     """Placeholders must reach the flyer visible, never blanked."""
     res = Result("3. missing fields — placeholders must survive")
@@ -191,7 +213,7 @@ def workflow_missing_fields(r: Runner) -> Result:
             fileId=template,
             body={"name": "_wf3_missing_fields", "parents": [r.output]},
             supportsAllDrives=True,
-            fields="id",
+            fields="id,name",
         )
         .execute()
     )
@@ -200,26 +222,37 @@ def workflow_missing_fields(r: Runner) -> Result:
 
     pres = r.slides.presentations().get(presentationId=pid).execute()
     page = pres["slides"][0]["objectId"]
+    texts = _slide_text(pres)
+
+    # Discover the template's own vocabulary rather than assuming it. Designs
+    # within one category do NOT agree: some carry "[PROPERTY ADDRESS]", some
+    # bare "PROPERTY ADDRESS", some sample data like "1234 Your Street". A
+    # renderer that assumes one spelling silently fills nothing on the others.
+    addressish = [t for _, t in texts if "ADDRESS" in t.upper()]
+    res.check(bool(addressish), f"found an address field to fill (in {len(texts)} text shapes)")
+    if not addressish:
+        return res
+    target = addressish[0]
+
     reply = (
         r.slides.presentations()
         .batchUpdate(
             presentationId=pid,
-            body={"requests": replace_text("[PROPERTY ADDRESS]", "1 Test St", [page])},
+            body={"requests": replace_text(target, "1 Test St", [page])},
         )
         .execute()
     )
-    res.check(occurrences_changed(reply["replies"][0]) == 1, "the address was actually replaced")
+    changed = occurrences_changed(reply["replies"][0])
+    res.check(changed >= 1, f"the address was actually replaced (occurrencesChanged={changed})")
 
-    after = r.slides.presentations().get(presentationId=pid).execute()
-    text = " ".join(
-        "".join(
-            run.get("textRun", {}).get("content", "")
-            for run in el.get("shape", {}).get("text", {}).get("textElements", [])
-        )
-        for el in after["slides"][0]["pageElements"]
-    )
-    res.check("[PRICE]" in text, "[PRICE] survived rather than being blanked")
-    res.check("1 Test St" in text, "the supplied field did render")
+    after = _slide_text(r.slides.presentations().get(presentationId=pid).execute())
+    joined = " ".join(t for _, t in after)
+    res.check("1 Test St" in joined, "the supplied field did render")
+
+    # Whatever this design uses for price must still be on the slide: nothing
+    # supplied one, so nothing may have blanked it.
+    priceish = [t for _, t in after if "PRICE" in t.upper() or t.strip().startswith("$")]
+    res.check(bool(priceish), f"an unfilled price field survived ({priceish[:1]})")
     return res
 
 
