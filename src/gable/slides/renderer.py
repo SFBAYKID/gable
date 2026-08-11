@@ -34,6 +34,7 @@ Does not handle: creating the copy, sending the batch, or exporting. That is
 from __future__ import annotations
 
 import re
+from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any, Final
 
@@ -77,11 +78,27 @@ class PlaceholderMap:
     def from_listing(cls, listing: Listing, agent: AgentProfile | None = None) -> PlaceholderMap:
         """Build the standard placeholder set from a listing and its agent.
 
-        Empty values are included deliberately: a template placeholder whose
-        data is missing should render as blank rather than leaving `{{price}}`
-        visible on a flyer a client might see.
+        **Only non-empty values are included.** A placeholder the data cannot
+        fill is deliberately left out, so that:
+
+        1. no `replaceAllText` is emitted for it and the literal `{{price}}`
+           stays visible on the rendered slide, and
+        2. `unfilled_placeholders` reports it, because it reports names present
+           in the template but absent from this map.
+
+        Both halves matter, and an earlier version of this method broke both by
+        including empty strings. The consequence was specific and bad: a New
+        Listing has no price column on the live form, so `price_display` is
+        `""`, `replaceAllText` blanked the token, and `unfilled_placeholders`
+        returned nothing because `price` *was* in the map. The §4.7b vision pass
+        looks for a visible token, found none, and the flyer shipped with an
+        empty price box looking finished. That is ARCHITECTURE.md §4.7 and
+        AGENTS.md §4 prohibition 8 violated by construction.
+
+        An ugly visible token is the point. It is how a missing field survives
+        long enough for a human to be asked about it.
         """
-        values = {
+        candidates = {
             "address": listing.address,
             "price": listing.price_display,
             "agent_name": listing.agent_name,
@@ -93,12 +110,13 @@ class PlaceholderMap:
             "sqft": listing.sqft,
         }
         if agent is not None:
-            # The Agents tab is the authority on display name and brokerage,
-            # since the form's free-text name field is whatever was typed.
-            values["agent_name"] = agent.agent_name or listing.agent_name
-            values["brokerage_url"] = agent.brokerage_url
-            values["template_label"] = agent.template_label
-        return cls(values=values)
+            # The Salespeople tab is the authority on display name and
+            # brokerage, since the form's free-text name field is whatever was
+            # typed.
+            candidates["agent_name"] = agent.agent_name or listing.agent_name
+            candidates["brokerage_url"] = agent.brokerage_url
+            candidates["template_label"] = agent.template_label
+        return cls(values={k: v for k, v in candidates.items() if v})
 
     def token(self, name: str) -> str:
         """The literal placeholder token for a name."""
@@ -158,33 +176,68 @@ def validate_image_url(url: str) -> None:
         )
 
 
-def build_text_requests(placeholders: PlaceholderMap) -> list[Request]:
+def build_text_requests(
+    placeholders: PlaceholderMap, page_object_ids: Sequence[str] | None = None
+) -> list[Request]:
     """One `replaceAllText` request per placeholder.
 
     `matchCase: True` because the tokens are lowercase by convention and a
     case-insensitive match could collide with body copy.
+
+    Args:
+        placeholders: The values available. Only names present here are
+            replaced; a missing name deliberately leaves its token visible.
+        page_object_ids: Restrict replacement to these slides. Omitting it means
+            the request applies to **every slide in the presentation**, which is
+            only safe on a single-slide template. See `build_fill_requests`.
+
+    Returns:
+        One request per placeholder, ordered by name so output is deterministic.
+
+    Raises:
+        Nothing.
     """
+    scope: dict[str, object] = {"pageObjectIds": list(page_object_ids)} if page_object_ids else {}
     return [
         {
             "replaceAllText": {
                 "containsText": {"text": placeholders.token(name), "matchCase": True},
                 "replaceText": value,
+                **scope,
             }
         }
         for name, value in sorted(placeholders.values.items())
     ]
 
 
-def build_image_request(image_url: str, tag: str = HERO_PHOTO_TAG) -> Request:
+def build_image_request(
+    image_url: str,
+    tag: str = HERO_PHOTO_TAG,
+    *,
+    was_reprocessed: bool = True,
+    page_object_ids: Sequence[str] | None = None,
+) -> Request:
     """One `replaceAllShapesWithImage` request for the hero photo.
 
-    `CENTER_INSIDE` scales the photo to fit the shape's bounds while preserving
-    aspect ratio — a listing photo must never be stretched, and cropping a house
-    to fill a frame can cut the roofline off.
+    The replace method follows whether the photo was fitted to the frame first:
+
+    - **Reprocessed** (§4.5b already cropped it to the frame's aspect ratio) →
+      `CENTER_INSIDE`, which scales to fit without stretching.
+    - **Raw fallback** (the image model was unavailable — ARCHITECTURE.md §6
+      says never block on an AI call) → `CENTER_CROP`, which fills the frame.
+
+    That distinction is not cosmetic. `CENTER_INSIDE` on an unfitted 4:3 phone
+    photo in a 4:5 frame leaves visible bands of template background above and
+    below it, and every API call still returns 200. Cropping loses some of the
+    photo; letterboxing looks broken. A raw fallback must also be flagged to
+    Carmen — this function cannot do that, so the caller must.
 
     Args:
         image_url: A public HTTPS URL to the photo.
         tag: The shape text marking the photo's frame.
+        was_reprocessed: Whether the photo was already fitted to the frame.
+        page_object_ids: Restrict replacement to these slides. See
+            `build_text_requests`.
 
     Returns:
         A single Slides request.
@@ -193,11 +246,13 @@ def build_image_request(image_url: str, tag: str = HERO_PHOTO_TAG) -> Request:
         TemplateError: if the URL fails `validate_image_url`.
     """
     validate_image_url(image_url)
+    scope: dict[str, object] = {"pageObjectIds": list(page_object_ids)} if page_object_ids else {}
     return {
         "replaceAllShapesWithImage": {
             "imageUrl": image_url,
-            "replaceMethod": "CENTER_INSIDE",
+            "replaceMethod": "CENTER_INSIDE" if was_reprocessed else "CENTER_CROP",
             "containsText": {"text": tag, "matchCase": True},
+            **scope,
         }
     }
 
@@ -207,15 +262,17 @@ def build_fill_requests(
     agent: AgentProfile | None = None,
     hero_photo_url: str | None = None,
     hero_photo_tag: str = HERO_PHOTO_TAG,
+    *,
+    was_reprocessed: bool = True,
+    page_object_ids: Sequence[str] | None = None,
 ) -> list[Request]:
     """Build the complete `batchUpdate` request list for one flyer.
 
-    Text first, then the image. Order matters: `replaceAllShapesWithImage`
-    matches on shape text, so replacing text first would destroy the
-    `{{hero_photo}}` tag before the image request could find it — except that
-    the tag is deliberately absent from `PlaceholderMap`, so no text request
-    touches it. The ordering is kept anyway as defence against someone adding
-    `hero_photo` to the map later.
+    Text first, then the image. The ordering is **not** defence — it is only
+    safe because image tags are excluded from `PlaceholderMap`. If a tag name
+    were ever added to the map, the text pass would rewrite the tag into a URL
+    string and destroy the shape before the image pass could match it. That
+    invariant is asserted below rather than left to a comment.
 
     Args:
         listing: The normalized submission.
@@ -223,18 +280,54 @@ def build_fill_requests(
         hero_photo_url: Public HTTPS URL to the photo. `None` leaves the tag
             shape in place, which is what `needs_photo` looks like on a flyer.
         hero_photo_tag: Shape text marking the photo frame.
+        was_reprocessed: Whether the photo was fitted to the frame first. See
+            `build_image_request`.
+        page_object_ids: Restrict every replacement to these slides. Omit only
+            when the target is a single-slide template.
 
     Returns:
         Requests ready to send as a single `batchUpdate`.
 
     Raises:
-        TemplateError: if `hero_photo_url` is present but unusable.
+        TemplateError: if `hero_photo_url` is present but unusable, or if a
+            placeholder name collides with an image tag.
     """
     placeholders = PlaceholderMap.from_listing(listing, agent)
-    requests = build_text_requests(placeholders)
+    _reject_image_tag_collision(placeholders, hero_photo_tag)
+    requests = build_text_requests(placeholders, page_object_ids)
     if hero_photo_url:
-        requests.append(build_image_request(hero_photo_url, hero_photo_tag))
+        requests.append(
+            build_image_request(
+                hero_photo_url,
+                hero_photo_tag,
+                was_reprocessed=was_reprocessed,
+                page_object_ids=page_object_ids,
+            )
+        )
     return requests
+
+
+def _reject_image_tag_collision(placeholders: PlaceholderMap, *tags: str) -> None:
+    """Fail loudly if a text placeholder would clobber an image tag.
+
+    Args:
+        placeholders: The map about to drive `replaceAllText`.
+        tags: Image tags such as `{{hero_photo}}` that must survive the text
+            pass so `replaceAllShapesWithImage` can still match them.
+
+    Returns:
+        None.
+
+    Raises:
+        TemplateError: if any tag's placeholder name appears in the map.
+    """
+    for tag in tags:
+        name = tag.strip("{} ").strip()
+        if name in placeholders.values:
+            raise TemplateError(
+                f"placeholder {name!r} collides with the image tag {tag!r}: the text pass "
+                "would replace the tag before the image request could match it"
+            )
 
 
 def flyer_filename(listing: Listing) -> str:

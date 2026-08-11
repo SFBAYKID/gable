@@ -18,6 +18,7 @@ from gable.slides.renderer import (
     MAX_IMAGE_URL_BYTES,
     PlaceholderMap,
     TemplateError,
+    _reject_image_tag_collision,
     build_fill_requests,
     build_image_request,
     build_text_requests,
@@ -96,11 +97,103 @@ def test_agent_name_falls_back_to_the_form_when_the_tab_is_blank() -> None:
     assert values["agent_name"] == "Jane Doe"
 
 
-def test_missing_data_renders_blank_not_as_a_visible_token() -> None:
-    """A blank on a flyer is survivable; `{{price}}` printed on one is not."""
+def test_missing_data_leaves_a_visible_token_and_is_reported() -> None:
+    """The inverse of what this test used to assert, and the inversion is the point.
+
+    It previously locked in "empty renders blank", which ARCHITECTURE.md §4.7
+    forbids. A blank price box looks finished; a visible `{{price}}` does not,
+    and only the visible one survives long enough to be asked about.
+    """
     placeholders = PlaceholderMap.from_listing(_listing(price_display=""))
-    assert placeholders.values["price"] == ""
-    assert "price" in placeholders.values
+    assert "price" not in placeholders.values
+    # No replaceAllText is emitted, so the literal token stays on the slide...
+    assert not any(
+        r["replaceAllText"]["containsText"]["text"] == "{{price}}"
+        for r in build_text_requests(placeholders)
+    )
+    # ...and the caller is told, which is what drives `needs_info`.
+    assert "price" in unfilled_placeholders("{{address}} {{price}}", placeholders)
+
+
+def test_present_values_are_still_filled() -> None:
+    """The fix must not stop real data from rendering."""
+    placeholders = PlaceholderMap.from_listing(_listing(price_display="$450,000"))
+    assert placeholders.values["price"] == "$450,000"
+
+
+def test_new_listing_with_no_price_is_the_live_case() -> None:
+    """No live form column supplies a list price, so this is the default path."""
+    placeholders = PlaceholderMap.from_listing(_listing(price_display="", sqft="", beds=""))
+    template = "{{address}} {{price}} {{beds}} {{sqft}}"
+    assert unfilled_placeholders(template, placeholders) == {"price", "beds", "sqft"}
+
+
+# --- page scoping -----------------------------------------------------------
+
+
+def test_text_requests_are_scoped_to_the_given_pages() -> None:
+    """Unscoped, a replace hits every slide in the presentation."""
+    reqs = build_text_requests(PlaceholderMap({"price": "$1"}), ["p1"])
+    assert reqs[0]["replaceAllText"]["pageObjectIds"] == ["p1"]
+
+
+def test_image_request_is_scoped_to_the_given_pages() -> None:
+    req = build_image_request("https://x.test/a.png", page_object_ids=["p1"])
+    assert req["replaceAllShapesWithImage"]["pageObjectIds"] == ["p1"]
+
+
+def test_scope_is_omitted_when_not_given() -> None:
+    """A single-slide template does not need it, and Google rejects an empty list."""
+    assert (
+        "pageObjectIds"
+        not in build_text_requests(PlaceholderMap({"price": "$1"}))[0]["replaceAllText"]
+    )
+
+
+def test_fill_requests_scope_every_request() -> None:
+    reqs = build_fill_requests(
+        _listing(), hero_photo_url="https://x.test/a.png", page_object_ids=["p1"]
+    )
+    for r in reqs:
+        body = next(iter(r.values()))
+        assert body["pageObjectIds"] == ["p1"]
+
+
+# --- replace method follows reprocessing ------------------------------------
+
+
+def test_reprocessed_photo_fits_inside_the_frame() -> None:
+    req = build_image_request("https://x.test/a.png", was_reprocessed=True)
+    assert req["replaceAllShapesWithImage"]["replaceMethod"] == "CENTER_INSIDE"
+
+
+def test_raw_fallback_photo_crops_rather_than_letterboxes() -> None:
+    """§6 falls back to the unfitted photo on an image-model outage.
+
+    CENTER_INSIDE on an unfitted 4:3 photo in a 4:5 frame leaves visible bands
+    of background, and every API call still returns 200.
+    """
+    req = build_image_request("https://x.test/a.png", was_reprocessed=False)
+    assert req["replaceAllShapesWithImage"]["replaceMethod"] == "CENTER_CROP"
+
+
+# --- the image-tag invariant ------------------------------------------------
+
+
+def test_a_placeholder_may_not_collide_with_the_image_tag() -> None:
+    """Text runs before images, so a colliding name destroys the tag shape."""
+    listing = _listing()
+    agent = AgentProfile(
+        agent_email="a@b.com", agent_name="A", slides_template_id="t", template_label="L"
+    )
+    placeholders = PlaceholderMap.from_listing(listing, agent)
+    placeholders.values["hero_photo"] = "https://x.test/a.png"
+    with pytest.raises(TemplateError, match="collides with the image tag"):
+        _reject_image_tag_collision(placeholders, HERO_PHOTO_TAG)
+
+
+def test_the_normal_map_never_collides() -> None:
+    _reject_image_tag_collision(PlaceholderMap.from_listing(_listing()), HERO_PHOTO_TAG)
 
 
 def test_token_formatting() -> None:
