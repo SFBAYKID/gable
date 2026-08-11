@@ -16,7 +16,7 @@ Nothing was written to the Sheet.
 
 | Request type | Sheet row | Image | Verdict | What happened |
 |---|---|---|---|---|
-| Sold | 2 | Test_2.jpg 275x183 | NOT CERTIFIED | I rendered it, but agent headshot overlaps and covers the speech-tail shape from the main property photo on the right. |
+| Sold (looked at) | 2 | Test_2.jpg 275x183 | NOT CERTIFIED | I rendered it, but agent headshot overlaps and covers the speech-tail shape from the main property photo on the right. |
 | Under Contract | 6 | images copy.jpg 678x452 | REFUSED (correct) | This one is marked under contract but there is no closing price on it. Do you have that? |
 | Open House | 7 | images-1 copy.jpg 617x324 | NOT CERTIFIED | I rendered it, but top logo is cut off at the top edge. |
 | New Listing | 12 | images-1.jpg 678x452 | NOT CERTIFIED | The website is 29 characters and this design fits about 24. Shall I shorten it, or use a different design? |
@@ -47,9 +47,18 @@ future change makes them deliver, that is a regression.
   get absolute child bounds — real work, not another threshold, and the same
   blind spot that hides text inside groups from field resolution.
 
-  Until then the vision pass is the backstop, and it caught this on all three
-  runs, which is the system behaving correctly: a defect it cannot prevent, it
-  still refuses to deliver.
+  `absolute_boxes` now composes group-relative transforms so grouped artwork is
+  visible to the overlap check. It still does not change this outcome, and
+  **looking at the rendered flyer explains why the text description was
+  misleading**: the speech-tail is a small olive triangle at the photo's lower
+  left, and the portrait's corner clips its tip. It is a minor cosmetic overlap,
+  not a broken flyer.
+
+  That is worth recording carefully. The vision pass is deliberately
+  conservative, so `needs_review` spans everything from "a field is missing" to
+  "one decorative point is clipped". **Reading its verdicts without looking at
+  the flyer overstates how bad the output is.** Whether this particular overlap
+  matters is Carmen's call, not the pipeline's.
 * **Open House — the top logo is cut off at the top edge.** Not yet diagnosed.
   Either the hero frame extends above the slide and the logo is being covered, or
   the template itself crops.
@@ -93,3 +102,17 @@ does **not** prove is the Slack leg: these went through `fit_locally` directly,
 not through a real upload, download and publish. An EXIF-rotated phone original
 has also not been through the real path — `fit.py` calls `exif_transpose`, but
 that has not been exercised end to end.
+
+## The Sold flyer, assessed by looking at it
+
+Real listing photo fitted correctly from a landscape source, the agent's real
+headshot, name on one line above its title, the office number supplied by the
+fallback rule, complete address, complete price, every field populated and no
+placeholder surviving.
+
+**The only defect is the clipped decorative point described above.** This is the
+closest the pipeline has come to a deliverable flyer, and the remaining question
+is a judgement about a design flourish rather than a pipeline failure.
+
+Still not certified, because certification means Carmen looked at it. But the
+gap between this and deliverable is now one cosmetic overlap, not a list.

@@ -68,6 +68,93 @@ class HeroFrame:
         return self.width * self.height
 
 
+#: An affine transform as Slides reports it: (scaleX, shearX, translateX,
+#: shearY, scaleY, translateY).
+_Affine = tuple[float, float, float, float, float, float]
+
+_IDENTITY: Final[_Affine] = (1.0, 0.0, 0.0, 0.0, 1.0, 0.0)
+
+
+def _affine_of(element: dict[str, Any]) -> _Affine:
+    """Read one element's own transform."""
+    t = element.get("transform", {})
+    return (
+        t.get("scaleX", 1.0),
+        t.get("shearX", 0.0),
+        t.get("translateX", 0.0),
+        t.get("shearY", 0.0),
+        t.get("scaleY", 1.0),
+        t.get("translateY", 0.0),
+    )
+
+
+def _compose(parent: _Affine, child: _Affine) -> _Affine:
+    """Apply a child transform inside its parent's frame.
+
+    Args:
+        parent: The group's transform.
+        child: The child's transform, expressed relative to the group.
+
+    Returns:
+        The child's absolute transform on the slide.
+
+    Raises:
+        Nothing.
+
+    Note:
+        Standard 2x3 affine composition. A child inside an `elementGroup` reports
+        its transform relative to the group, so its raw translate is meaningless
+        on its own — which is why anything reading `pageElements` alone cannot
+        see where grouped artwork actually sits.
+    """
+    pa, pb, pc, pd, pe, pf = parent
+    ca, cb, cc, cd, ce, cf = child
+    return (
+        pa * ca + pb * cd,
+        pa * cb + pb * ce,
+        pa * cc + pb * cf + pc,
+        pd * ca + pe * cd,
+        pd * cb + pe * ce,
+        pd * cc + pe * cf + pf,
+    )
+
+
+def absolute_boxes(
+    elements: list[dict[str, Any]], parent: _Affine = _IDENTITY
+) -> list[tuple[dict[str, Any], float, float, float, float]]:
+    """Every element with its absolute slide position, groups included.
+
+    Args:
+        elements: A `pageElements` list, or a group's children.
+        parent: The enclosing group's transform.
+
+    Returns:
+        `(element, x, y, width, height)` for every leaf element, with grouped
+        children resolved to absolute coordinates.
+
+    Raises:
+        Nothing.
+
+    Note:
+        Groups themselves are descended into rather than returned: the API
+        reports a group's own size as zero, so a group is invisible to any check
+        that measures bounds. That blind spot let a face be pasted over the
+        decorative artwork it was supposed to sit beside.
+    """
+    out: list[tuple[dict[str, Any], float, float, float, float]] = []
+    for element in elements:
+        here = _compose(parent, _affine_of(element))
+        group = element.get("elementGroup")
+        if group:
+            out.extend(absolute_boxes(group.get("children", []), here))
+            continue
+        size = element.get("size", {})
+        width = size.get("width", {}).get("magnitude", 0.0) * here[0]
+        height = size.get("height", {}).get("magnitude", 0.0) * here[4]
+        out.append((element, here[2], here[5], width, height))
+    return out
+
+
 def _element_bounds(element: dict[str, Any]) -> tuple[float, float, float, float]:
     """Absolute position and rendered size of one page element.
 
@@ -299,10 +386,9 @@ def _is_overlaid(page: dict[str, Any], frame: HeroFrame) -> bool:
     """
     if frame.area <= 0:
         return False
-    for element in page.get("pageElements", []):
+    for element, x, y, width, height in absolute_boxes(page.get("pageElements", [])):
         if element.get("objectId") == frame.object_id:
             continue
-        x, y, width, height = _element_bounds(element)
         if width <= 0 or height <= 0:
             continue
         overlap_w = min(frame.x + frame.width, x + width) - max(frame.x, x)
