@@ -203,6 +203,16 @@ PATTERNS: Final[dict[str, tuple[re.Pattern[str], ...]]] = {
         re.compile(r"^\[\s*AREA NAME\s*\]\s*EDITION$", re.IGNORECASE),
     ),
     "agent_phone": (
+        # Several designs hold both numbers in one text box, as
+        # "C: 410.456.6868" and "O: 443.499.3839" on two lines. An anchored
+        # single-number rule cannot match that, so the sample cell number
+        # survived onto finished flyers even though it is in SAMPLE_CONTACTS.
+        re.compile(
+            r"^C:\s*(?:"
+            + "|".join(re.escape(v) for v in SAMPLE_CONTACTS if "@" not in v)
+            + r")\s*\n\s*O:\s*[\d().\-\s]+$",
+            re.IGNORECASE,
+        ),
         re.compile(
             r"^(?:C:\s*)?(?:"
             + "|".join(re.escape(v) for v in SAMPLE_CONTACTS if "@" not in v)

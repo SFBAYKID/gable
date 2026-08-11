@@ -633,6 +633,10 @@ class Runner:
             return "".join(c for c in value if c.isdigit())
 
         supplied_phones = {digits(v) for v in values.values() if digits(v)}
+        # The brokerage's own line belongs on every flyer, whether or not this
+        # run supplied it. Flagging it was a false positive in this check, not a
+        # defect on the flyer.
+        supplied_phones.add(digits(OFFICE_PHONE))
         supplied_emails = {v.strip().lower() for v in values.values() if "@" in v}
 
         stray: list[str] = []
