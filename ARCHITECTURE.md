@@ -489,9 +489,8 @@ distance from the supplied photo, and avoid the seam gate. Failure at any of
 those checks falls back to the locally resized original; the rendered-flyer
 vision pass remains the final delivery gate.
 
-**Needs verification:** the 0.18 composition-distance threshold has unit
-coverage but has not been calibrated against a watched live upscale. It is a
-coarse refusal layer, not visual certification.
+**Needs verification:** the 0.18 composition-distance threshold has unit coverage
+but no watched live calibration. It is a coarse refusal layer, not certification.
 
 The original Slack upload is never overwritten. SQLite records `ai_enhanced`
 only when the model result survives those checks. The paid edit is limited to
@@ -798,3 +797,4 @@ row explaining why. `CLAUDE.md` §2.7 makes this mandatory rather than polite.
 | 2026-08-11 | **Reverses the weekday-only polling window:** busy polling runs every day from 07:00 to 21:00 Central | Chase specified 7 AM Central through 7 PM Pacific, including weekends. Those endpoints are 07:00–21:00 Central because Pacific is two hours behind, and 18 of the 99 historical submissions arrived on weekends. `pipeline/schedule.py` and its DST tests already implement this; the earlier documentation was stale. |
 | 2026-08-11 | Firecrawl, conversation, and visual inspection share one **hard $50 spend guard** | `spend.guarded_call` checks the cumulative SQLite ledger before the vendor, reserves a deliberately conservative per-call estimate, and records it even when a request fails after acceptance. Crossing the ceiling prevents the call. This makes the guard fail safe when exact token usage is unavailable and stops all currently connected paid paths through one mechanism. |
 | 2026-08-11 | A small supplied hero photo is **upscaled automatically**, never rejected for resolution alone | Up to 2x stays on Pillow. Beyond that, one policy-gated GPT Image 2 edit restores resolution from the exact fitted composition, then a composition-distance and seam gate decide whether the derivative is faithful enough. The original Slack upload remains untouched, `ai_enhanced` is recorded only when the edit is used, a failed edit falls back to the original pixels, and the call shares both the one-image-call limit and $50 ceiling. |
+| 2026-08-11 | `files:read` is installed and the private Slack download path is **verified live** | A real thread upload reached Gable's dimension check at 10:24, which requires successful `files_info` metadata and bot-authorized download. This supersedes the earlier waiting-on-reinstall status. The new AI upscale and resulting flyer remain unverified live until `e09bb27` is deployed in a watched run. |

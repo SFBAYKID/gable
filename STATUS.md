@@ -6,17 +6,20 @@ Last updated 2026-08-11 by the building agent.
 bug list, the guardrails and the order of work — is in `GABLE_HANDOFF.md` on
 the Desktop. Read it before touching code.
 
-**The automatic runtime is wired in the working tree and is not deployed yet.**
+**The automatic runtime is wired on main and is not deployed yet.**
 `slackapp.runtime` constructs the real Google clients, database, `Poller`, and
 `Runner`; Socket Mode connects in the background while the poller runs on the
 main thread. `cli.py` also runs one guarded pass locally without Slack.
 
-The Slack photo handoff is built and unit-tested in the working tree. A
+The Slack photo handoff is built and unit-tested. A
 `file_share` reply is matched to its thread's paused run, downloaded, fitted,
-hosted, verified, and used to resume that same run. It is not live-tested yet:
-Chase must approve the new `files:read` scope and reinstall the Slack app. The
-production database's backfill flag must also be verified before the first
-deploy of the poller.
+hosted, verified, and used to resume that same run. **The receive and download
+portion is verified live:** at 10:24 on 2026-08-11 Gable fetched a real Slack
+upload, read its dimensions, and reached the former undersized-photo refusal.
+That proves `files:read` is installed. Commit `e09bb27` replaces that refusal
+with the guarded automatic upscale, but the new path is not deployed or visually
+verified yet. The production database's backfill flag must still be verified in
+the exact deployed database before the poller is deployed.
 
 Proven live on two real submissions, invoked manually:
 
@@ -176,9 +179,8 @@ IAM roles, and access granted purely by the two Drive shares. It has been
 exercised against the real drive: create → `batchUpdate` → `replaceAllText`
 (`occurrencesChanged: 1`) → `getThumbnail` at 1600px, cleaning up after itself.
 
-The remaining credential-related Slack change is `files:read`. The manifest can
-declare it in code, but Chase must approve the reinstall; the building agent
-will never click OAuth or copy a token.
+`files:read` is installed and verified by the real upload above. No remaining
+Slack credential change is known.
 
 ---
 
@@ -200,7 +202,7 @@ No source file is over 800 lines. `mypy` covers `src`, `tests` and `tools`.
 | `spikes/` | Findings only — `SPIKE_A.md` and `SPIKE_A_RESULT.md`. The generator and its tests were deleted once Spike A was answered. |
 | Most of `src/gable/` | Built and unit-tested: the runner, orchestrator, poller, schedule, database, sheet client, enrichment, photo fitting and hosting, the edit tools, the field manifest, the image verifier, the vision check and the house style. |
 | **The wiring between them** | **Built on main, not deployed.** The production runtime constructs `Poller` and `Runner`; the Slack-free CLI performs one guarded pass. |
-| The Slack photo handoff | **Built and unit-tested, waiting on Chase.** Requires approval and reinstall for the new `files:read` scope before a live upload test. |
+| The Slack photo handoff | **Built and partly verified live.** Slack file receive, metadata, authenticated download, and dimension reading worked on a real upload. The new AI upscale, publish, render, and final visual result still need one watched production test after deployment. |
 | `photos/enhance.py` | Built and unit-tested. A Slack hero needing more than 2x enlargement gets one guarded high-fidelity image edit, a drift and seam check, an `ai_enhanced` audit flag, and an automatic original-photo fallback. Live image-edit output is not yet visually certified. |
 | `photos/resolver.py`, `photos/sources.py`, `listings/verify.py`, `slackapp/handlers.py` | Still docstring-only placeholders. |
 
@@ -216,10 +218,10 @@ The module graph, automatic trigger, Slack photo resume, core conversational
 edits, and notes-aware template selector are built. The current priority order
 is:
 
-1. Chase approves `files:read` and reinstalls the Slack app; then run one real
-   thread upload through the full workflow and inspect the rendered flyer.
-2. Verify the backfill adoption in the exact production database before the
+1. Verify the backfill adoption in the exact production database before the
    poller is deployed.
+2. Deploy commit `e09bb27` in a watched window, upload one undersized photo in
+   its listing thread, and inspect the rendered flyer and `ai_enhanced` record.
 3. Replace the agent headshot and measure the exact hero layer for the remaining
    42 templates. The three measured templates use explicit object ids; there is
    no longer a size-based deletion guess.

@@ -83,8 +83,9 @@ moving Phase 2 forward, not working around it.
 ## Things I want to be straight with you about
 
 **The Slack app is live.** Bot authentication and Socket Mode were verified.
-The new photo handoff adds `files:read` to `slack/manifest.json`; Chase must
-approve the app update and reinstall before uploads can be tested live.
+`files:read` from `slack/manifest.json` is installed: on 2026-08-11 a real
+thread upload was fetched and measured successfully. The automatic AI upscale
+added after that test still needs a watched deployment and visual check.
 
 **The deployed droplet is the $6, 1 GB tier with 1 GB swap.** Slack uploads are
 capped at 25 MB before Pillow opens them. The full photo workflow still needs a
