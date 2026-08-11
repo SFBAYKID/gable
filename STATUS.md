@@ -2,21 +2,32 @@
 
 Last updated 2026-08-11 by the building agent.
 
-**Gable is running on the droplet and answering in Slack.** `@Gable hello` gets
-a reply from `143.110.146.87` under systemd, enabled, restarting on failure.
+**The pipeline runs end to end.** A sheet row now becomes a finished Google
+Slides flyer with a link posted to Slack, with no human step in between. Proven
+live on two real submissions:
 
-**What works end to end today:** a flyer was built from row 100 — Lolo Simmons,
-7940 Oakwood Rd — including an AI-reformatted photo, and 15 change requests were
-applied to it live through their own tools. 45 templates are labelled and filed
-in Drive. Every credential is verified.
+- **Row 100** (Lolo Simmons, Under Contract, no closing price) stopped and asked
+  *"This one is marked under contract but there is no closing price on it. Do
+  you have that?"* — and built nothing. That is the rule working.
+- **Row 11** (Kelsey Mahon, Sold, $510,000) was **delivered**: template chosen
+  from the request type, address and price from the form, and **4 beds, 2.5
+  baths and 2,282 square feet researched from the web** — the fields nobody
+  typed.
 
-**The one thing standing between this and live operation** is wiring: the
-orchestrator decides each step and nothing yet calls it in sequence against a
-real submission. Every piece it will call is built and tested on its own.
+Gable also answers in Slack from the droplet under systemd, and the backfill is
+adopted: 96 historical rows recorded as history, none built.
 
-**Before the poller ever runs against the live Sheet**, run
-`tools/adopt_backfill.py --commit` once. There are 99 historical rows and the
-poller refuses to start until they are adopted as history.
+## The one thing that is not right yet
+
+**A delivered flyer is guaranteed to be complete, not well laid out.** On the
+row 11 flyer the price read `$510,000` in the document and rendered clipped to
+`$510,00`, the address overflowed its box, and the email ran off the bottom of
+the slide. Every value was present, so the quality check passed it.
+
+The text check cannot see layout. Catching this needs the vision pass over the
+rendered thumbnail (ARCHITECTURE.md §4.7b) plus automatic text fitting — the
+same fix applied by hand to Lolo's flyer earlier. That is the next work, and it
+is the difference between a flyer that is correct and one Carmen would post.
 
 ---
 

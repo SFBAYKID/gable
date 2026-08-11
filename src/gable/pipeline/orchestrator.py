@@ -203,7 +203,16 @@ def judge(rendered_text: str, expected_values: dict[str, str], pass_number: int)
 
     Every API call can succeed while the result is wrong: a placeholder left
     visible, a value that never landed, a token that survived. Those are what
-    this checks — it cannot see the layout, which is what the vision pass is for.
+    this checks.
+
+    **It cannot see the layout, and that is a real limit rather than a
+    quibble.** Observed on a delivered flyer: the price read "$510,000" in the
+    document and rendered clipped to "$510,00" because the box was sized for a
+    shorter placeholder; the address overflowed onto the divider and the email
+    ran off the bottom of the slide. Every value was present, so this passed it.
+    Catching that needs the vision pass over the rendered thumbnail
+    (ARCHITECTURE.md §4.7b), which is not wired yet. Until it is, a delivered
+    flyer is guaranteed to be *complete*, not to be *well laid out*.
 
     Args:
         rendered_text: All text read back from the rendered slide.
