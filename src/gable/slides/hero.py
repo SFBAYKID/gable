@@ -36,9 +36,14 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Final
 
-#: A hero band spans essentially the whole slide. Below this the shape is a
-#: panel or a card, not the photo.
-_MIN_WIDTH_FRACTION: Final[float] = 0.60
+#: How much of the slide width a photo well spans. Measured across all 45
+#: designs rather than assumed: this began at 0.60 on the belief that the hero
+#: is always a full-bleed top band, and that refused 12 designs whose photo is a
+#: partial-width block instead — 45%, 51%, 54% and 57% wide, all anchored at the
+#: top. Those are photos. The frames that sit below this are headshots, which
+#: measure 21% to 34% and sit two thirds of the way down, so the gap between the
+#: two groups is wide and this sits inside it.
+_MIN_WIDTH_FRACTION: Final[float] = 0.40
 
 #: The photo is a top band, so its upper edge sits in the top half. This is what
 #: separates the photo from the large grey copy panel underneath it.

@@ -274,3 +274,24 @@ shipped: the readback caught a value that did not survive filling, the absence
 check caught three flyers carrying a phone number belonging to someone else, and
 the substring guard caught six literals embedded in longer text. None of those
 are visible to a person skimming a thumbnail.
+
+## Frame coverage after measuring the deck properly — 2026-08-11
+
+| | Was | Now |
+|---|---|---|
+| hero frame found | 33/45 | **39/45** |
+| headshot frame found | — | 9/45 |
+
+The hero rule required a photo well to span 60% of the slide width, on the
+belief that the hero is always a full-bleed top band. Twelve designs put it in a
+partial-width block instead — 45%, 51%, 54%, 57% wide, all anchored at the top.
+Those are photos. The headshot frames on the same designs measure 21% to 34% and
+sit two thirds of the way down, so the two groups are well separated and the
+threshold now sits between them at 40%.
+
+**Headshot detection at 9/45 is the next thing to look at.** Most of these
+designs show an agent photo, so the rule is too strict somewhere — most likely
+the overlap rejection, which was added to stop a face landing on decorative
+artwork and may now be rejecting frames that are merely adjacent to it. It
+should be measured against the deck the same way the hero rule just was, not
+tuned by guessing.
