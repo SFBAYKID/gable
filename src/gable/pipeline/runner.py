@@ -24,6 +24,7 @@ unattended:
 from __future__ import annotations
 
 import logging
+import re
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from sqlite3 import Connection
@@ -42,6 +43,13 @@ from gable.slides import manifest as template_manifest
 from gable.slides.catalog import for_category
 from gable.slides.selection import rank as rank_templates
 from gable.voice import safe
+
+#: A phone number in any of the shapes these templates use: 443.499.3839,
+#: (443) 555-0142, 410-305-9006.
+_PHONE_ON_FLYER: Final[re.Pattern[str]] = re.compile(r"\(?\d{3}\)?[\s.\-]?\d{3}[\s.\-]\d{4}")
+
+#: An email address, which on a listing flyer is always somebody's real one.
+_EMAIL_ON_FLYER: Final[re.Pattern[str]] = re.compile(r"[\w.+\-]+@[\w\-]+\.[\w.\-]+")
 
 #: Every Corner House agent is on this domain, so a roster row missing its own
 #: URL still produces a real website rather than the word "Website".
@@ -326,6 +334,18 @@ class Runner:
         # A wrong price on a real address is the worst thing this system can
         # produce, so this is deterministic rather than a judgement.
         wrong = self._values_not_readable_back(output_id, values, pairs)
+        if not wrong:
+            # A phone number or email on the flyer that this run did not supply
+            # belongs to the template's sample agent. A delivered flyer carried
+            # "Stacey Abbott, 410.952.6193, sabbotthomes@gmail.com" from a
+            # two-agent design's second slot and passed every check, because the
+            # readback above can only verify that supplied values appear — it
+            # has nothing to compare against for a value never supplied.
+            #
+            # Someone else's phone number and personal email on a client-facing
+            # flyer is worse than any layout defect, so this is an absence check
+            # and it is deterministic.
+            wrong = self._foreign_contact_details(output_id, values)
         if wrong:
             store.set_status(
                 self.connection,
@@ -538,6 +558,44 @@ class Runner:
             if candidate not in text:
                 missing.append(name.replace("_", " "))
         return missing
+
+    def _foreign_contact_details(self, file_id: str, values: dict[str, str]) -> list[str]:
+        """Contact details on the flyer that this run did not put there.
+
+        Args:
+            file_id: The filled presentation.
+            values: What the run supplied.
+
+        Returns:
+            A description of each stray phone number or email, worst first.
+            Empty when every one on the flyer came from this submission.
+
+        Raises:
+            Nothing. A read failure returns no complaints rather than blocking
+            on a transient Slides error.
+        """
+        try:
+            text = "\n".join(self.read_slide_text(file_id))
+        except Exception:
+            logger.exception("could not read the flyer back for a contact check")
+            return []
+        if not text:
+            return []
+
+        def digits(value: str) -> str:
+            return "".join(c for c in value if c.isdigit())
+
+        supplied_phones = {digits(v) for v in values.values() if digits(v)}
+        supplied_emails = {v.strip().lower() for v in values.values() if "@" in v}
+
+        stray: list[str] = []
+        for found in _PHONE_ON_FLYER.findall(text):
+            if digits(found) and digits(found) not in supplied_phones:
+                stray.append(f"phone number {found} is not this listing's")
+        for found in _EMAIL_ON_FLYER.findall(text):
+            if found.strip().lower() not in supplied_emails:
+                stray.append(f"email address {found} is not this listing's")
+        return stray
 
     def _name(self, intake: Intake) -> str:
         """What the finished file is called in Drive, so Carmen can scan for it."""
