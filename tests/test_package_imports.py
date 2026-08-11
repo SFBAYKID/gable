@@ -35,7 +35,7 @@ def test_package_tree_is_complete() -> None:
         "gable.photos.sources",
         "gable.photos.enhance",
         "gable.photos.store",
-        "gable.canva.bulk_export",
+        "gable.slides.renderer",
         "gable.slackapp.app",
         "gable.slackapp.blocks",
         "gable.slackapp.handlers",

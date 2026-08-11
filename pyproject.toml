@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "gable"
 version = "0.1.0"
-description = "Slack-native agent that turns listing form submissions into Canva Bulk Create files."
+description = "Slack-native agent that turns listing form submissions into finished social posts."
 readme = "README.md"
 # CLAUDE.md section 9 sets the floor. The droplet's distro Python decides the
 # real ceiling, so nothing here may use syntax newer than 3.11.
@@ -19,14 +19,12 @@ dependencies = [
     "tenacity>=8.2",                  # bounded retry + jittered backoff (5.4)
     "pydantic>=2.7",                  # row validation into models.py
     "slack-bolt>=1.18",               # Socket Mode app (ARCHITECTURE 2.2)
-    "openpyxl>=3.1",                  # Bulk Create xlsx (ARCHITECTURE 2.4)
-    "google-api-python-client>=2.130", # Sheets + Drive
+    "google-api-python-client>=2.130", # Sheets + Drive + Slides
     "google-auth>=2.29",              # service-account credentials
     "boto3>=1.34",                    # DigitalOcean Spaces is S3-compatible
     "pillow>=10.3",                   # photo normalize: JPEG, resize, EXIF strip
     "python-ulid>=2.5",               # Runs.run_id (ARCHITECTURE 3.3)
     "python-dotenv>=1.0",             # load .env once in config.py
-    "requests>=2.32",                 # canva_autofill_spike.py only
 ]
 
 [project.optional-dependencies]
@@ -34,8 +32,6 @@ dev = [
     "ruff>=0.5",
     "mypy>=1.10",
     "pytest>=8.2",
-    "types-requests",
-    "types-openpyxl",
     "boto3-stubs[s3]",
 ]
 
@@ -88,12 +84,6 @@ convention = "google"
 ban-relative-imports = "all"
 
 [tool.ruff.lint.per-file-ignores]
-# The spike's entire design is "response shapes are unverified, so walk them
-# with Any and dig()" — see its module docstring. ANN401 would force a lie.
-# D405/D416 flag its ALL-CAPS prose headers as malformed numpydoc sections;
-# they are not sections, and renaming one of five headers to satisfy a linter
-# would make the file read worse.
-"canva_autofill_spike.py" = ["ANN401", "D405", "D416"]
 # Tests are self-describing; docstrings on every assertion helper are noise.
 "tests/*" = ["D103", "D100"]
 
@@ -104,7 +94,7 @@ ban-relative-imports = "all"
 [tool.mypy]
 python_version = "3.11"
 strict = true
-files = ["src", "tests", "spikes", "canva_autofill_spike.py"]
+files = ["src", "tests"]
 warn_unreachable = true
 # A missing annotation must fail loudly rather than degrade to Any.
 disallow_any_unimported = true
@@ -127,9 +117,6 @@ ignore_missing_imports = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-# `spikes` is a repo-root package that is deliberately not installed into the
-# wheel, so tests need the repo root on sys.path to import it.
-pythonpath = ["."]
 addopts = "-q --strict-markers"
 markers = [
     "integration: touches a real external service; skipped without credentials",
