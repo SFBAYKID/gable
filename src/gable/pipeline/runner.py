@@ -450,8 +450,12 @@ class Runner:
             result.output_url = output_url
             spoken = seen.say or verdict.say or safe(f"I rendered it, but {problems[0]}")
             result.said.append(spoken)
-            self.say(spoken, None)
-            self.say(safe(f"Have a look and tell me what to change. <{output_url}|Open it>"), None)
+            posted_ts = self.say(spoken, self.origin_thread_ts or None)
+            self.say(
+                safe(f"Have a look and tell me what to change. <{output_url}|Open it>"),
+                self.origin_thread_ts or posted_ts,
+            )
+            self._remember_thread(run_id, posted_ts)
             return result
 
         # 8. Deliver.
@@ -608,6 +612,58 @@ class Runner:
             if found.strip().lower() not in supplied_emails:
                 stray.append(f"email address {found} is not this listing's")
         return stray
+
+    def _remember_thread(self, run_id: str, thread_ts: str) -> None:
+        """Record which Slack thread a run is being discussed in.
+
+        Without this Carmen cannot edit the flyer. `run_for_thread` maps her
+        reply back to the run, and only the delivered path was recording the
+        thread — so every flyer that stopped for review, which is precisely the
+        one she would want to change, answered "I could not match this thread to
+        a listing".
+
+        Args:
+            run_id: The run to attach the thread to.
+            thread_ts: The Slack timestamp the conversation is rooted at.
+
+        Raises:
+            Nothing.
+        """
+        root = self.origin_thread_ts or thread_ts
+        if not root:
+            return
+        # Re-assert the status the run already has. `set_status` writes whatever
+        # it is given, so passing an empty string here would blank the run's
+        # state while recording the thread — losing the very thing that tells
+        # the poller not to build this listing again.
+        store.set_status(
+            self.connection,
+            run_id,
+            self._status_of(run_id),
+            "thread recorded",
+            slack_thread_ts=root,
+        )
+
+    def _status_of(self, run_id: str) -> str:
+        """The status a run currently holds.
+
+        Args:
+            run_id: Which run.
+
+        Returns:
+            Its status, or `needs_review` if it cannot be read — the
+            conservative answer, since it keeps the run out of the poller.
+
+        Raises:
+            Nothing.
+        """
+        try:
+            row = self.connection.execute(
+                "SELECT status FROM runs WHERE run_id = ?", (run_id,)
+            ).fetchone()
+        except Exception:
+            return "needs_review"
+        return str(row["status"]) if row else "needs_review"
 
     def _name(self, intake: Intake) -> str:
         """What the finished file is called in Drive, so Carmen can scan for it."""
