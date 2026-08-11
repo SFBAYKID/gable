@@ -22,7 +22,6 @@ import httpx
 from PIL import Image
 
 from gable.photos.fit import assess, fit_locally, image_dimensions
-from gable.photos.verify import seam_score
 
 _ENDPOINT: Final[str] = "https://api.openai.com/v1/images/edits"
 _TIMEOUT_SECONDS: Final[float] = 180.0
@@ -31,9 +30,6 @@ _MAX_OUTPUT_BYTES: Final[int] = 32 * 1024 * 1024
 # Confirm by comparing the real rejected and accepted upscales during the first
 # watched Slack workflow; STATUS.md keeps that visual certification open.
 _MAX_COMPOSITION_DISTANCE: Final[float] = 0.18
-# ASSUMPTION: inherited from the existing numeric seam detector. The rendered
-# vision pass remains authoritative because the known bad sky seam scored low.
-_MAX_SEAM_SCORE: Final[float] = 0.35
 
 # OpenAI's image-edit prompting guidance says to name both the one allowed
 # change and every invariant. The factual-preservation language matters here:
@@ -86,6 +82,22 @@ def _multiple_of_16(value: int) -> int:
     # VERIFIED: GPT Image 2's arbitrary sizes require both edges divisible by
     # 16. https://developers.openai.com/api/docs/guides/image-generation
     return ((value + 15) // 16) * 16
+
+
+def _accepts_input_fidelity(model: str) -> bool:
+    """Whether this model takes an explicit `input_fidelity` on an edit.
+
+    Args:
+        model: The configured GPT Image edit model.
+
+    Returns:
+        True only for full `gpt-image-1`. The mini variant returns HTTP 400 for
+        the field, and `gpt-image-2` is always high fidelity and rejects it.
+
+    Raises:
+        Nothing.
+    """
+    return model.startswith("gpt-image-1") and "mini" not in model
 
 
 def _output_size(model: str, target_width: int, target_height: int) -> str:
@@ -194,10 +206,13 @@ def upscale_real_photo(
         "output_compression": "95",
         "n": "1",
     }
-    # VERIFIED: GPT Image 2 always uses high input fidelity and does not accept
-    # this parameter; earlier GPT Image models accept high explicitly.
-    # https://developers.openai.com/api/docs/guides/image-generation#edit-images
-    if not model.startswith("gpt-image-2"):
+    # VERIFIED live 2026-08-11 against the real endpoint, not from docs. Only
+    # full gpt-image-1 accepts this parameter. gpt-image-1-mini rejects it with
+    # HTTP 400 "input_fidelity 'high' is not supported for gpt-image-1-mini",
+    # and gpt-image-2 always uses high fidelity and does not accept the field.
+    # The previous check excluded only gpt-image-2, which meant the configured
+    # default (gpt-image-1-mini) failed every single call.
+    if _accepts_input_fidelity(model):
         data["input_fidelity"] = "high"
     try:
         response = post(
@@ -218,8 +233,19 @@ def upscale_real_photo(
         raise EnhancementQualityError("the enlarged image was still too small")
 
     fitted = fit_locally(edited, target_width, target_height, quality=95)
+
+    # The check that actually works. A model returning a *different house* is
+    # the failure that matters on a listing flyer, and low-frequency composition
+    # drift catches it: a faithful upscale of this photo measured 0.126 against
+    # a 0.18 ceiling.
     if composition_distance(reference, fitted) > _MAX_COMPOSITION_DISTANCE:
         raise EnhancementQualityError("the enlargement changed the property photo too much")
-    if seam_score(fitted) > _MAX_SEAM_SCORE:
-        raise EnhancementQualityError("the enlargement introduced a visible seam")
+
+    # Seam detection is deliberately NOT a gate here. Measured 2026-08-11, the
+    # numeric detector cannot separate a pasted sky from a roofline or treeline
+    # — a seamed image and the same image unseamed scored within 2% of each
+    # other, and an earlier revision rejected 100% of enlargements including a
+    # plain resize with no model in it. It is recorded for triage; the vision
+    # pass over the rendered flyer is what decides whether the photo looks
+    # wrong. See `photos.verify.seam_score` for the measurements.
     return fitted

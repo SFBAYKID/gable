@@ -84,7 +84,30 @@ def test_gpt_image_2_upscale_preserves_and_returns_exact_flyer_size() -> None:
     assert image_dimensions(uploaded) == (1080, 1350)
 
 
-def test_earlier_image_models_request_high_input_fidelity() -> None:
+def test_full_gpt_image_1_requests_high_input_fidelity() -> None:
+    post = FakePost(_jpeg(1024, 1536))
+
+    upscale_real_photo(
+        _jpeg(200, 200),
+        api_key="test-key",
+        model="gpt-image-1",
+        target_width=1080,
+        target_height=1350,
+        post=post,
+    )
+
+    assert post.data["size"] == "1024x1536"
+    assert post.data["input_fidelity"] == "high"
+
+
+def test_the_mini_model_is_never_sent_input_fidelity() -> None:
+    """The mini variant rejects the field outright.
+
+    VERIFIED live 2026-08-11 against the real endpoint: sending it returns
+    HTTP 400 `input_fidelity 'high' is not supported for gpt-image-1-mini`.
+    This test previously asserted the opposite, which is why enlargement failed
+    on every call — `gpt-image-1-mini` is the configured default.
+    """
     post = FakePost(_jpeg(1024, 1536))
 
     upscale_real_photo(
@@ -97,7 +120,7 @@ def test_earlier_image_models_request_high_input_fidelity() -> None:
     )
 
     assert post.data["size"] == "1024x1536"
-    assert post.data["input_fidelity"] == "high"
+    assert "input_fidelity" not in post.data
 
 
 def test_an_edit_that_changes_the_scene_is_rejected() -> None:

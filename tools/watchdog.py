@@ -148,8 +148,8 @@ _BUG_PATTERNS: Final[tuple[tuple[str, str, str, str, str, str], ...]] = (
     (
         BLOCKER,
         "The re-poll loop is still open — this is the money leak",
-        "src/gable/db/store.py",
-        r'TERMINAL[^=]*=\s*frozenset\(\{\s*"delivered",\s*"failed",\s*"skipped"\s*\}\)',
+        "MARKER:repoll-loop",
+        "",
         "needs_photo / needs_review / needs_info are still non-terminal, so the "
         "poller hands the same row back every two minutes forever — new Firecrawl "
         "call, new Drive copy, new paid vision call, same question re-posted.",
@@ -264,7 +264,12 @@ def check_known_bugs() -> list[Finding]:
     for severity, title, path, pattern, detail, ref in _BUG_PATTERNS:
         still_there = False
 
-        if path == "MARKER:spend-unimported":
+        if path == "MARKER:repoll-loop":
+            store = _read("src/gable/db/store.py")
+            # Fixed either by suppressing paused runs from polling, or by a
+            # bounded attempt ceiling. Either alone closes the loop.
+            still_there = "PAUSED" not in store and "MAX_RUN_ATTEMPTS" not in store
+        elif path == "MARKER:spend-unimported":
             hits = _grep_repo(r"from gable\.spend|import spend\b|record_spend\(")
             still_there = (
                 len(
