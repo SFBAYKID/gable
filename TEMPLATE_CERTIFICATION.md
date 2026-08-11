@@ -428,3 +428,35 @@ correctly.
 Recorded because the measurement is tempting and wrong, and because the same
 mistake in the other direction — trusting a count without checking what produces
 it — cost most of a session.
+
+## Attribution, complete: Gable introduces no measurable layout defect
+
+Every rendered flyer compared against the blank template it came from, by object
+id, across every geometric category that can be measured:
+
+| Category | Introduced by Gable |
+|---|---|
+| text boxes colliding with each other | **0** of 45 |
+| text pushed off the slide edge | **0** of 45 |
+| a placed headshot covering text | **0** of 23 placed |
+| a placed hero overlapping text | not a defect — the hero is sent to the back, so copy renders over it |
+
+40 flyers have nothing off the slide; the 5 that do inherited it. 26 have no text
+collisions; the 19 that do inherited them.
+
+**So every layout complaint the vision pass raised across the deck belongs to the
+designs.** That is the reframing this file has been missing: "41 stopped for
+review" reads as 41 broken flyers and is not what the evidence says.
+
+### What this does not cover, stated so it is not over-read
+
+Geometry is not quality. None of this measures:
+
+* whether the fitting pass shrank type further than a designer would accept
+* whether the right photograph was chosen
+* whether the flyer is *good*
+
+Those are open, and the last one is Carmen's by definition. What is settled is
+that Gable is not breaking the layouts it is given — it is reproducing them
+faithfully, including their defects, which is why `TEMPLATE_ISSUES.md` matters
+more than it looked at the start.
