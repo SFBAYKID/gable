@@ -337,25 +337,41 @@ def build_runner(
         return str(slack_post(text, thread) or "")
 
     def list_templates() -> list[dict[str, str]]:
-        found = (
-            drive.files()
-            .list(
-                corpora="drive",
-                driveId=settings.drive_id,
-                includeItemsFromAllDrives=True,
-                supportsAllDrives=True,
-                q=("mimeType='application/vnd.google-apps.presentation' and trashed=false"),
-                fields="files(id,name,appProperties)",
-                pageSize=200,
+        # Filter on the app property in the query rather than after the fact,
+        # and follow every page. Asking for one page of 200 presentations and
+        # filtering locally worked only while the drive held fewer than 200:
+        # every finished flyer lands in the same drive, so once about two
+        # hundred had accumulated the templates fell off the first page and
+        # Gable reported having no design filed for any category at all.
+        # Verified 2026-08-11 — 200 presentations returned, 0 templates among
+        # them, after a test run had produced that many copies.
+        templates: list[dict[str, str]] = []
+        page_token: str | None = None
+        while True:
+            response = (
+                drive.files()
+                .list(
+                    corpora="drive",
+                    driveId=settings.drive_id,
+                    includeItemsFromAllDrives=True,
+                    supportsAllDrives=True,
+                    q=(
+                        "mimeType='application/vnd.google-apps.presentation'"
+                        " and trashed=false"
+                        " and appProperties has {key='gable_role' and value='template'}"
+                    ),
+                    fields="nextPageToken,files(id,name)",
+                    pageSize=200,
+                    pageToken=page_token,
+                )
+                .execute()
             )
-            .execute()
-            .get("files", [])
-        )
-        return [
-            {"id": f["id"], "name": f["name"]}
-            for f in found
-            if (f.get("appProperties") or {}).get("gable_role") == "template"
-        ]
+            templates.extend(
+                {"id": f["id"], "name": f["name"]} for f in response.get("files", [])
+            )
+            page_token = response.get("nextPageToken")
+            if not page_token:
+                return templates
 
     def read_slide_text(file_id: str) -> list[str]:
         presentation = slides.presentations().get(presentationId=file_id).execute()
