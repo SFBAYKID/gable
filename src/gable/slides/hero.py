@@ -200,3 +200,72 @@ def find_hero_frame(
             best = candidate
 
     return best
+
+
+#: A headshot is roughly square. Wider than this and it is a banner; taller and
+#: it is a side panel.
+_HEADSHOT_ASPECT: Final[tuple[float, float]] = (0.60, 1.70)
+
+#: It is a portrait, not a hero: big enough to be a face, not the whole design.
+_HEADSHOT_MIN_WIDTH_FRACTION: Final[float] = 0.10
+_HEADSHOT_MAX_WIDTH_FRACTION: Final[float] = 0.60
+
+
+def find_headshot_frame(
+    page: dict[str, Any],
+    slide_width: float,
+    slide_height: float,
+    exclude_object_id: str = "",
+) -> HeroFrame | None:
+    """Measure where the agent's headshot goes on one slide.
+
+    The sample face is the most visible thing Gable gets wrong: a flyer went out
+    carrying one agent's name beside a different agent's photograph. The roster
+    already stores a headshot URL per agent and nothing ever used it, because
+    replacing it is an image operation and every fill was text.
+
+    Args:
+        page: A `slides[n]` entry from a presentations.get response.
+        slide_width: Slide width in EMU.
+        slide_height: Slide height in EMU.
+        exclude_object_id: The hero frame, so the photo well is not mistaken for
+            a face on designs where the hero is itself square.
+
+    Returns:
+        The frame, or None when no candidate is convincing. None means leave the
+        design alone rather than paste a face over something else.
+
+    Raises:
+        Nothing.
+    """
+    if slide_width <= 0 or slide_height <= 0:
+        return None
+
+    best: HeroFrame | None = None
+    for element in page.get("pageElements", []):
+        if "shape" not in element or "elementGroup" in element:
+            continue
+        if element.get("objectId") == exclude_object_id:
+            continue
+        if element.get("shape", {}).get("shapeType") == "TEXT_BOX":
+            continue
+        if _carries_text(element) or _is_filled(element):
+            continue
+
+        x, y, width, height = _element_bounds(element)
+        if width <= 0 or height <= 0:
+            continue
+        if not (
+            slide_width * _HEADSHOT_MIN_WIDTH_FRACTION
+            <= width
+            <= slide_width * _HEADSHOT_MAX_WIDTH_FRACTION
+        ):
+            continue
+        low, high = _HEADSHOT_ASPECT
+        if not (low <= width / height <= high):
+            continue
+
+        candidate = HeroFrame(element["objectId"], x, y, width, height)
+        if best is None or candidate.area > best.area:
+            best = candidate
+    return best

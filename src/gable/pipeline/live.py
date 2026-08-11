@@ -23,7 +23,7 @@ from gable.pipeline.vision import inspect as inspect_flyer
 from gable.slides import fitting
 from gable.slides.edits import replace_text
 from gable.slides.elements import descendants, font_size_pt, text_content
-from gable.slides.hero import find_hero_frame
+from gable.slides.hero import find_headshot_frame, find_hero_frame
 from gable.voice import is_clean
 
 logger = logging.getLogger("gable.live")
@@ -200,6 +200,88 @@ def place_hero_photo(
         return bool(replies)
     except Exception:
         logger.exception("hero photo placement failed")
+        return False
+
+
+def place_headshot(
+    slides: Any,  # noqa: ANN401 - googleapiclient resource, untyped upstream
+    file_id: str,
+    url: str,
+) -> bool:
+    """Put the agent's own face on the flyer.
+
+    A flyer shipped carrying one agent's name beside a different agent's
+    photograph. The roster has stored a headshot URL per agent all along and
+    nothing ever used it, because replacing it is an image operation and every
+    fill until now was text.
+
+    Args:
+        slides: A Slides v1 resource.
+        file_id: The copied presentation to edit.
+        url: A public image URL for this agent's headshot.
+
+    Returns:
+        True when Google accepted the replacement. False when no headshot frame
+        is recognisable or the call fails — both leave the design untouched,
+        which is better than pasting a face over something else.
+
+    Raises:
+        Nothing. A missing headshot is a flyer worth reviewing, not a crash.
+
+    Note:
+        # ASSUMPTION: the frame is replaced with a plain rectangular image. On a
+        # design whose headshot is circular this loses the round mask. Rendering
+        # one of those templates would confirm which are affected; the vision
+        # pass over the finished flyer is what would catch it today.
+    """
+    if not url:
+        return False
+    try:
+        presentation = slides.presentations().get(presentationId=file_id).execute()
+        pages = presentation.get("slides", [])
+        if not pages:
+            return False
+        page = pages[0]
+        slide_w = presentation.get("pageSize", {}).get("width", {}).get("magnitude", 0)
+        slide_h = presentation.get("pageSize", {}).get("height", {}).get("magnitude", 0)
+        hero = find_hero_frame(page, slide_w, slide_h)
+        frame = find_headshot_frame(page, slide_w, slide_h, hero.object_id if hero else "")
+        if frame is None:
+            logger.info("no headshot frame recognised; leaving the design alone")
+            return False
+        face_id = f"gableFace_{uuid.uuid4().hex}"
+        requests: list[dict[str, Any]] = [
+            {"deleteObject": {"objectId": frame.object_id}},
+            {
+                "createImage": {
+                    "objectId": face_id,
+                    "url": url,
+                    "elementProperties": {
+                        "pageObjectId": page["objectId"],
+                        "size": {
+                            "width": {"magnitude": frame.width, "unit": "EMU"},
+                            "height": {"magnitude": frame.height, "unit": "EMU"},
+                        },
+                        "transform": {
+                            "scaleX": 1,
+                            "scaleY": 1,
+                            "translateX": frame.x,
+                            "translateY": frame.y,
+                            "unit": "EMU",
+                        },
+                    },
+                }
+            },
+        ]
+        response = (
+            slides.presentations()
+            .batchUpdate(presentationId=file_id, body={"requests": requests})
+            .execute()
+        )
+        replies = response.get("replies", []) if isinstance(response, dict) else []
+        return len(replies) == len(requests)
+    except Exception:
+        logger.exception("headshot placement failed")
         return False
 
 
@@ -433,6 +515,7 @@ def build_runner(
         fill=fill,
         research=default_research(settings.firecrawl_api_key, connection),
         place_photo=place_photo,
+        place_headshot=lambda fid, url: place_headshot(slides, fid, url),
         check_photo=check_photo,
         look_at=look_at,
         read_text_boxes=read_text_boxes,

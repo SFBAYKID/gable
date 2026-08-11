@@ -47,6 +47,13 @@ from gable.voice import safe
 #: URL still produces a real website rather than the word "Website".
 DEFAULT_BROKERAGE_URL: Final[str] = "cornerhouserealty.com"
 
+#: The brokerage's main line, used when the roster has no direct number for an
+#: agent. Chase's rule: a missing agent number falls back to the main number on
+#: the site rather than stopping the run. VERIFIED 2026-08-11 by reading
+#: cornerhouserealty.com, where it is the most frequently listed number and
+#: appears on the templates themselves as the office line.
+OFFICE_PHONE: Final[str] = "443.499.3839"
+
 logger = logging.getLogger("gable.runner")
 
 #: Chase asked for two inspections: one to catch the obvious, a second to catch
@@ -103,6 +110,10 @@ class Runner:
     origin_thread_ts: str = ""
     #: Places the hero photo into a rendered flyer.
     place_photo: Callable[[str, str, str], bool] = lambda _fid, _url, _template: False
+    #: Puts the agent's own face where the sample face was. Returns False when
+    #: the design has no recognisable headshot frame, which is a flyer worth a
+    #: look rather than a failure.
+    place_headshot: Callable[[str, str], bool] = lambda _fid, _url: False
     #: Proves that the photo URL is usable for the target slot. The live
     #: builder supplies the network checker; the runner itself performs no
     #: hidden I/O.
@@ -305,6 +316,14 @@ class Runner:
             return result
 
         placed = self.place_photo(output_id, self.hero_photo_url, template_label)
+        # The sample face is the most visible thing Gable gets wrong: one agent's
+        # name beside another agent's photograph. Best effort — a design with no
+        # headshot frame is still a deliverable flyer.
+        if placed and values.get("headshot"):
+            if self.place_headshot(output_id, values["headshot"]):
+                logger.info("replaced the sample headshot for run %s", run_id)
+            else:
+                logger.info("kept the design's own headshot for run %s", run_id)
         if not placed:
             # The photo is the point of the flyer. Delivering without it, after
             # being given one, is worse than stopping.
@@ -435,7 +454,7 @@ class Runner:
             "baths": known.get("baths", ""),
             "square_feet": known.get("square_feet", ""),
             "agent_name": name or intake.agent_name,
-            "agent_phone": person.get("phone", ""),
+            "agent_phone": person.get("phone", "") or OFFICE_PHONE,
             "agent_email": intake.agent_email,
             "open_house": intake.open_house,
             # `fields.PATTERNS` recognises a website slot and this dictionary
@@ -443,6 +462,10 @@ class Runner:
             # word "Website" survived onto the flyer — which then failed its own
             # quality check. The roster already carries the URL.
             "website": person.get("brokerage_url", "") or DEFAULT_BROKERAGE_URL,
+            # Not a text replacement — `place_headshot` consumes this. Every
+            # agent's photo lives on cornerhouserealty.com and the roster
+            # mirrors it; an empty value leaves the design's own face alone.
+            "headshot": person.get("headshot_url", ""),
         }
 
     def _name(self, intake: Intake) -> str:
