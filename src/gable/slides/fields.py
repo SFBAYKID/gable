@@ -289,15 +289,23 @@ def resolve(texts: list[str], wanted: list[str] | None = None) -> Resolution:
             if not any(pattern.match(text) for pattern in patterns):
                 continue
             if name not in found:
-                found[name] = text
-            elif text != found[name]:
+                # Store the RAW text, not the normalised form. Patterns need
+                # whitespace collapsed to match "4\nBedrooms" against a
+                # single-line rule, but `replaceAllText` searches the slide
+                # verbatim — so storing "4 Bedrooms" produced a literal that is
+                # nowhere on the design, and the batch was refused for a
+                # literal that "is not on the slide". That silently blocked 12
+                # of the 45 templates, every one of them a design that wraps a
+                # label onto two lines.
+                found[name] = raw
+            elif raw != found[name]:
                 # A second literal for a slot already resolved. These designs
                 # label the same thing more than one way, and replacing only
                 # the first left "Realtor Name" and "123 ANYWHERE ST., ANY
                 # CITY" sitting on finished flyers.
                 also.setdefault(name, [])
-                if text not in also[name]:
-                    also[name].append(text)
+                if raw not in also[name]:
+                    also[name].append(raw)
             matched = True
             break
         if not matched and ("[" in text or text.isupper()):
