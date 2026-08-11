@@ -2,9 +2,50 @@
 
 Last updated 2026-08-11 by the building agent.
 
-**Handing off?** The full context — architecture, completed work, the ranked
-bug list, the guardrails and the order of work — is in `GABLE_HANDOFF.md` on
-the Desktop. Read it before touching code.
+**Handing off?** Read `TEMPLATE_CERTIFICATION.md` for what is actually proven
+and which numbers can be trusted, `TEMPLATE_ISSUES.md` for the seven defects
+that belong to Carmen, and `BRAND.md` for the fonts, colours and the fact that
+not every design in the deck is a listing flyer.
+
+## Where this actually stands, 2026-08-11 evening
+
+**Photos: proven.** A person can drop in a photo of any reasonable size or shape
+and it lands correctly. Nine source shapes from 275x183 to 6000x4000 — landscape
+through panorama, PNG included — plus a multi-megabyte EXIF-rotated portrait
+carried through the real Slack upload, download, publish and fit path. All land
+at exactly 1080x1350.
+
+**Flyers: not proven, and not provable without Carmen.** Of the 45 templates,
+**2 produce a flyer verified clean** — correct address, no stray content, no
+surviving placeholders. Two more reached "delivered" and were then refused once
+the checks caught what they carried. The rest stop for review.
+
+The remaining gate is a judgement — "a flyer Carmen would post without touching
+it" — and no measurement substitutes for it. **Nothing here has been certified,
+because certification means she looked.**
+
+### What to trust when reading progress numbers
+
+The deterministic checks are stable and moved cleanly across the session:
+
+| | Start | Now |
+|---|---|---|
+| templates that can place a hero photo | 3 | 39 |
+| templates with headshot detection | 0 | 32 |
+| blocked by the substring guard | 13 | 2 |
+| flyers verified clean | 0 | 2 |
+
+The vision-pass categories — overlap, placeholder, clipped — are **not** stable.
+Four walks of identical code against identical templates produced overlap counts
+of 6, 11, 8 and 13. Use the vision pass to find a defect worth looking at on a
+specific flyer; do not use it to measure whether a change helped.
+
+### Three guards now stop things that previously shipped
+
+Each exists because it reached a delivered flyer: a value that does not read back
+as supplied, a phone number or email belonging to somebody not on the listing,
+and sample content or a malformed price from the design itself. All three are
+deterministic and live in `pipeline/audit.py`.
 
 **The automatic runtime is wired, deployed, active, and watching the Sheet.**
 `slackapp.runtime` constructs the real Google clients, database, `Poller`, and
