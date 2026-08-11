@@ -352,3 +352,34 @@ Before treating one as a bug, render the template beside the output. That took
 two API calls and turned a suspected placement bug into a template issue already
 on Carmen's list, plus evidence that a pass I had been unsure about is earning
 its place.
+
+### 20 of 45 templates already overlap their own text
+
+Measured directly on the blank templates, before Gable fills anything: 20 have
+text elements covering more than 30% of each other, and one pushes a heading off
+the top of the slide.
+
+**Overlap is not the same as a defect, and most of these look deliberate.**
+`COMING` over `SOON`, `JUST` over `Listed`, a price inside its own label band —
+these are stacked display type, which is a style rather than a mistake. The
+measurement cannot tell the difference and neither can the vision pass.
+
+What it does establish is narrower and still useful: **on those 20 designs, an
+overlap complaint cannot be attributed to Gable without rendering the template
+beside the output.** The `Just Listed — Book a Tour` case is the worked example —
+flagged for a clipped logo that turned out to be in the design, on a flyer that
+had actually *fixed* the template's own headline collision.
+
+So the honest reading of "41 stopped for review" is that an unknown share are
+inherited. Two were checked properly. Checking the rest is a per-template
+comparison, and it is the first thing worth doing before treating any of them as
+a code defect.
+
+The list, for whoever does that:
+
+    Coming Soon (5 designs)          COMING / SOON stacked
+    Just Listed (5 designs)          JUST / Listed stacked, price in its band
+    Just Sold (2 designs)            Sold For / price
+    Meet the Agent (3 designs)       AGENT / tagline
+    Neighborhood (4 designs)         headings, plus SPOTLIGHT off the top edge
+    Under Contract (1 design)        CONTRACT / After Multiple Offers
