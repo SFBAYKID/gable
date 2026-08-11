@@ -1,59 +1,62 @@
-# Gable template certification ledger
+# Template certification ledger
 
-Last updated 2026-08-11.
+What has actually been proved, per request type. Updated as runs complete, not
+batched at the end, so a session that dies mid-way loses nothing.
 
-This ledger is deliberately conservative. A template is approved only after
-the full workflow renders it with representative data and a person inspects the
-actual image for field correctness, photo placement, clipping, overlap, and
-remaining sample content. Unit tests and a successful Slides response are not
-visual certification.
+**A template is certified only when a rendered flyer has been looked at and
+would be handed to a client.** "It rendered without an exception" is not
+certification. Nothing below is certified yet.
 
-Current result: **0 of 45 approved.** All entries remain pending.
+## Run 2026-08-11 — one real submission per request type
 
-| Slide | Category | Template | Status | Visual evidence |
-|---:|---|---|---|---|
-| 3 | Client Review | Photo Left, Quote Right | Pending | Not run |
-| 4 | Client Review | Real People Real Results | Pending | Not run |
-| 5 | Client Review | Quote with Agent Card | Pending | Not run |
-| 6 | Client Review | As Unique As You Are | Pending | Not run |
-| 7 | Client Review | What Our Clients Say — Call or DM | Pending | Not run |
-| 10 | Just Listed | Offers From, Agent Card Right | Pending | Not run |
-| 11 | Just Listed | Schedule a Private Tour | Pending | Not run |
-| 12 | Just Listed | Book a Tour, DM for Details | Pending | Not run |
-| 13 | Just Listed | Compact Stats Bar | Pending | Not run |
-| 14 | Just Listed | Boutique Service | Pending | Not run |
-| 15 | Just Listed | Bracket Placeholders (cleanest) | Pending | Hero layer measured; full render not run |
-| 16 | Just Listed | Plus Open House — Hosted By | Pending | Not run |
-| 17 | Just Listed | Plus Open House — Offered At | Pending | Hero layer measured; full render not run |
-| 19 | Just Sold | Thinking of Selling | Pending | Not run |
-| 20 | Just Sold | Sold For, Agent Card | Pending | Not run |
-| 21 | Just Sold | Let's Connect | Pending | Not run |
-| 22 | Just Rented | Per Month (mis-filed under Just Sold) | Pending | Not run |
-| 23 | Just Sold | Local Experts, Address Twice | Pending | Not run |
-| 24 | Just Sold | With Beds, Baths and SqFt | Pending | Hero layer measured; full render not run |
-| 26 | Open House | Full Details, Tour With Us | Pending | Not run |
-| 27 | Open House | Two Agents, DM Me | Pending | Not run |
-| 28 | Open House | Two Agents, Two Dates | Pending | Not run |
-| 29 | Open House | Book a Private Tour | Pending | Not run |
-| 30 | Open House | Join Us This Weekend | Pending | Not run |
-| 31 | Open House | Weekend — Come Tour With Us (Sat + Sun) | Pending | Not run |
-| 49 | Meet the Agent | Local Expert, Three Value Props | Pending | Not run |
-| 50 | Meet the Agent | Market Area and Years of Experience | Pending | Not run |
-| 51 | Meet the Agent | Fun Fact and Why Clients Love Me | Pending | Not run |
-| 52 | Meet the Agent | Let's Connect, Local Roots | Pending | Not run |
-| 54 | Meet the Agent | Find Your Next Home, Specialty | Pending | Not run |
-| 57 | Neighborhood | Coffee, Eats, Weekend, Schools, Commute | Pending | Not run |
-| 58 | Neighborhood | Living In — Vibe, At a Glance, Top Pick | Pending | Not run |
-| 59 | Neighborhood | Local Favorites — Coffee to Community | Pending | Not run |
-| 60 | Neighborhood | Explore — Three Local Favorites | Pending | Not run |
-| 61 | Neighborhood | Local Guide — Dining, Parks, Coffee | Pending | Not run |
-| 64 | Coming Soon | Exclusive Preview, Get on the List | Pending | Not run |
-| 65 | Coming Soon | Beds, Baths, SqFt, Garage | Pending | Not run |
-| 66 | Coming Soon | Fall in Love First | Pending | Not run |
-| 67 | Coming Soon | VIP Exclusive Preview | Pending | Not run |
-| 68 | Coming Soon | Be the First to Know | Pending | Not run |
-| 69 | Coming Soon | Something Great Is On the Way | Pending | Not run |
-| 71 | Under Contract | Thinking of Selling | Pending | Not run |
-| 72 | Under Contract | Sold For | Pending | Not run |
-| 73 | Under Contract | After Multiple Offers | Pending | Not run |
-| 74 | Under Contract | Agent Card | Pending | Not run |
+Every row replayed from the live sheet through the whole pipeline: research,
+template selection, fill, photo fit and publish, hero placement, headshot
+replacement, text fitting, and the vision pass. A different image each time.
+Nothing was written to the Sheet.
+
+| Request type | Sheet row | Image | Verdict | What happened |
+|---|---|---|---|---|
+| Sold | 2 | Test_2.jpg 275x183 | NOT CERTIFIED | I rendered it, but agent headshot overlaps and covers the speech-tail shape from the main property photo on the right. |
+| Under Contract | 6 | images copy.jpg 678x452 | REFUSED (correct) | This one is marked under contract but there is no closing price on it. Do you have that? |
+| Open House | 7 | images-1 copy.jpg 617x324 | NOT CERTIFIED | I rendered it, but top logo is cut off at the top edge. |
+| New Listing | 12 | images-1.jpg 678x452 | NOT CERTIFIED | The website is 29 characters and this design fits about 24. Shall I shorten it, or use a different design? |
+| New Listing with Open House | 9 | images-2.jpg 738x414 | NOT CERTIFIED | I copied the design, but one of its fields did not match exactly once. I stopped before changing any text. |
+| Price Reduction | 4 | images-3.jpg 566x353 | REFUSED (correct) | This is a price reduction, but no new price came through. What is it now? |
+
+**Every request type routed to a design and rendered. Nothing crashed. Nothing
+was delivered.**
+
+### The two refusals are correct and should not be "fixed"
+
+`Under Contract` and `Price Reduction` both stopped and asked. A sold listing
+with no closing price and a price reduction with no new price are contradictions,
+and Chase's rule is to ask rather than render a blank. **These are passes.** If a
+future change makes them deliver, that is a regression.
+
+### What the four reviews found, and what each means
+
+* **Sold — the headshot overlaps a speech-tail shape.** A defect introduced by
+  headshot replacement itself: `find_headshot_frame` chose a frame on this design
+  that sits under decorative artwork, so the face covers it. The frame finder
+  needs to prefer a candidate that nothing overlaps, or skip when the design's
+  own artwork sits on top.
+* **Open House — the top logo is cut off at the top edge.** Not yet diagnosed.
+  Either the hero frame extends above the slide and the logo is being covered, or
+  the template itself crops.
+* **New Listing — the website is 29 characters and the design fits about 24.**
+  The per-template character budget working exactly as intended: it measured the
+  overflow and asked rather than shipping clipped text.
+* **New Listing with Open House — a field did not match exactly once.** The
+  substring guard working as intended. `replaceAllText` matches substrings, so a
+  literal appearing twice would corrupt both; the run stopped instead.
+
+### Coverage still missing
+
+* Only 6 of 45 templates have been exercised, and **0 certified**.
+* `Client Review Post`, `End of Year Brag Post` and the lowercase `just listed`
+  row are untested. The first has no property at all and must not trigger a
+  photo request; the last will fail if routing is case-sensitive.
+* Image variety is inadequate: every file in the test folder is small landscape
+  jpg. No portrait, square, panorama, PNG, EXIF-rotated, or multi-megabyte
+  source has gone through the real path. See `GABLE_TEST_PROMPT.md`.
+* No conversational edit has been applied to any of these flyers.
