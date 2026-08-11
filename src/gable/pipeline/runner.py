@@ -331,19 +331,33 @@ class Runner:
         changed = self.fill(output_id, pairs)
         logger.info("run %s filled %d field(s)", run_id, changed)
         if not pairs or changed != len(pairs):
+            # Two different situations. "No pairs" means the design has nothing
+            # Gable recognises — the Client Review layouts are a client quote, a
+            # client name and stars, with no address or price because there is
+            # no property. Reporting that as a field failing to match sends
+            # whoever reads it looking for a text bug that is not there.
+            nothing_matched = not pairs
             store.set_status(
                 self.connection,
                 run_id,
                 "needs_review",
-                "the template text did not match each intended field exactly once",
+                (
+                    "this design has no fields Gable knows how to fill"
+                    if nothing_matched
+                    else "the template text did not match each intended field exactly once"
+                ),
                 output_file_id=output_id,
                 output_url=output_url,
             )
             result.status = "needs_review"
             result.output_url = output_url
             spoken = safe(
-                "I copied the design, but one of its fields did not match exactly once. "
-                "I stopped before changing any text."
+                "I do not know how to fill this design — none of its text matches "
+                "anything I recognise. It may need a kind of information I do not "
+                "collect yet."
+                if nothing_matched
+                else "I copied the design, but one of its fields did not match exactly "
+                "once. I stopped before changing any text."
             )
             result.said.append(spoken)
             self.say(spoken, None)
