@@ -33,12 +33,18 @@ def safe_replacement_requests(
     presentation: dict[str, Any],
     pairs: dict[str, str],
 ) -> list[dict[str, Any]]:
-    """Build replacements only when every literal occurs exactly once.
+    """Build replacements only when no literal is embedded in longer text.
 
     ``replaceAllText`` matches substrings. A literal such as ``Phone`` can
     therefore hit both ``Phone`` and ``Phone Number`` while Google still
     returns success. Reading the complete recursive text first turns that
     silent corruption into a refusal before any batch is sent.
+
+    A literal appearing **twice as its own text element** is a different thing
+    and is allowed. Several designs show the address or the agent name in two
+    places on purpose — one of them is called "Address Twice" — and refusing
+    those conflated a legitimate repeat with the corruption this guards against.
+    It blocked 13 of the 45 designs, which is what prompted the distinction.
 
     Args:
         presentation: Current Slides presentation payload.
@@ -46,7 +52,7 @@ def safe_replacement_requests(
 
     Returns:
         One request per pair, or an empty list when any literal is absent or
-        appears more than once.
+        appears inside longer text anywhere in the design.
 
     Raises:
         Nothing.
@@ -59,11 +65,18 @@ def safe_replacement_requests(
     ]
     requests: list[dict[str, Any]] = []
     for literal, value in pairs.items():
-        occurrences = sum(text.count(literal) for text in texts)
-        if occurrences != 1:
+        total = sum(text.count(literal) for text in texts)
+        standalone = sum(1 for text in texts if text.strip() == literal)
+        if total == 0:
+            logger.error("refused a replacement for a literal that is not on the slide")
+            return []
+        if total != standalone:
+            # Some occurrence is embedded in longer text, so replacing it would
+            # corrupt that text. This is the case the guard exists for.
             logger.error(
-                "refused an unsafe text replacement with %d occurrence(s)",
-                occurrences,
+                "refused an unsafe text replacement: %d occurrence(s), %d standalone",
+                total,
+                standalone,
             )
             return []
         requests.extend(replace_text(literal, value, page_ids, allow_short=True))
