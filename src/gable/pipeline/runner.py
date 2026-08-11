@@ -333,6 +333,7 @@ class Runner:
         #
         # A wrong price on a real address is the worst thing this system can
         # produce, so this is deterministic rather than a judgement.
+        stray: list[str] = []
         wrong = self._values_not_readable_back(output_id, values, pairs)
         if not wrong:
             # A phone number or email on the flyer that this run did not supply
@@ -345,21 +346,32 @@ class Runner:
             # Someone else's phone number and personal email on a client-facing
             # flyer is worse than any layout defect, so this is an absence check
             # and it is deterministic.
-            wrong = self._foreign_contact_details(output_id, values)
-        if wrong:
+            stray = self._foreign_contact_details(output_id, values)
+        if wrong or stray:
             store.set_status(
                 self.connection,
                 run_id,
                 "needs_review",
-                f"a filled value did not read back correctly: {wrong[0]}"[:400],
+                (
+                    f"a filled value did not read back correctly: {wrong[0]}"
+                    if wrong
+                    else f"contact details that are not this listing's: {stray[0]}"
+                )[:400],
                 output_file_id=output_id,
                 output_url=output_url,
             )
             result.status = "needs_review"
             result.output_url = output_url
+            # Two different problems, two different sentences. Reading Gable's
+            # own words in Slack caught these being spliced together into "the
+            # phone number 410.456.6868 is not this listing's on it does not
+            # match what I was given" — one message built from a template that
+            # expects a bare field name and a value that is already a sentence.
             spoken = safe(
                 f"I filled the design but the {wrong[0]} on it does not match what I was "
                 "given, so I have not sent it as finished."
+                if wrong
+                else f"I built the flyer but the {stray[0]}, so I have not sent it as finished."
             )
             result.said.append(spoken)
             self.say(spoken, None)
