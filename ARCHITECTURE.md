@@ -475,13 +475,27 @@ bottom third. Scaling it naively produces a stretched house, or a roofline
 guillotined at the top — errors that are glaring to a client and invisible to a
 script checking that the file is a valid JPEG.
 
-So this is **reprocessing, not resizing**: crop to the frame's aspect ratio while
-keeping the building intact, straighten, correct exposure, upscale if the source
-is small. `GABLE_IMAGE_MODEL` (default `gpt-image-1-mini`) does the work — the
-image model, deliberately, because this is the task worth spending capability on.
+The common path is deterministic. Pillow applies EXIF orientation, centre-crops
+to 4:5, strips metadata, and resamples to 1080 by 1350. Up to a 2x enlargement
+stays local. It is fast, free, and cannot invent a different house.
 
-Strong vision is the requirement here, not strong generation. The model has to
-*see* where the house is in the frame before it can decide where to cut.
+Only a source that would need more than 2x enlargement takes the image-edit
+path in `photos/enhance.py`. Gable first makes the exact deterministic 4:5
+composition, then sends that derivative to `GABLE_IMAGE_MODEL_HQ` for
+super-resolution with a preservation-only prompt. GPT Image 2 runs at medium
+quality and high input fidelity, returns one image, and gets no automatic retry.
+The output must still be large enough, remain within a low-frequency composition
+distance from the supplied photo, and avoid the seam gate. Failure at any of
+those checks falls back to the locally resized original; the rendered-flyer
+vision pass remains the final delivery gate.
+
+**Needs verification:** the 0.18 composition-distance threshold has unit
+coverage but has not been calibrated against a watched live upscale. It is a
+coarse refusal layer, not visual certification.
+
+The original Slack upload is never overwritten. SQLite records `ai_enhanced`
+only when the model result survives those checks. The paid edit is limited to
+one attempt per listing and reserves $0.25 under the shared $50 guard.
 
 **Reprocessing and generation stay on separate code paths.** Reprocessing
 reshapes a real photograph of the real property. Generation invents a subject: it
@@ -783,3 +797,4 @@ row explaining why. `CLAUDE.md` §2.7 makes this mandatory rather than polite.
 | 2026-08-11 | Hero placement uses an **explicit per-template raster-art object id**, never a largest-shape heuristic | A read-only inspection of the live imported files showed no ordinary image elements: photos and artwork arrive as shapes, and the largest text-free object can instead be a white panel or overlay. Three measured manifests name their exact removable hero layer. The 1080 by 1350 photo is inserted at full-slide bounds behind the surviving masks, which centres it without letterboxing. An unmeasured template or changed object id stops for review without sending a deletion request; the other 42 remain pending in `TEMPLATE_CERTIFICATION.md`. |
 | 2026-08-11 | **Reverses the weekday-only polling window:** busy polling runs every day from 07:00 to 21:00 Central | Chase specified 7 AM Central through 7 PM Pacific, including weekends. Those endpoints are 07:00–21:00 Central because Pacific is two hours behind, and 18 of the 99 historical submissions arrived on weekends. `pipeline/schedule.py` and its DST tests already implement this; the earlier documentation was stale. |
 | 2026-08-11 | Firecrawl, conversation, and visual inspection share one **hard $50 spend guard** | `spend.guarded_call` checks the cumulative SQLite ledger before the vendor, reserves a deliberately conservative per-call estimate, and records it even when a request fails after acceptance. Crossing the ceiling prevents the call. This makes the guard fail safe when exact token usage is unavailable and stops all currently connected paid paths through one mechanism. |
+| 2026-08-11 | A small supplied hero photo is **upscaled automatically**, never rejected for resolution alone | Up to 2x stays on Pillow. Beyond that, one policy-gated GPT Image 2 edit restores resolution from the exact fitted composition, then a composition-distance and seam gate decide whether the derivative is faithful enough. The original Slack upload remains untouched, `ai_enhanced` is recorded only when the edit is used, a failed edit falls back to the original pixels, and the call shares both the one-image-call limit and $50 ceiling. |

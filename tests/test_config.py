@@ -53,6 +53,7 @@ def test_defaults_match_dotenv_example() -> None:
     assert settings.photo_public_base == "http://143.110.146.87"
     assert settings.conversation_model == "gpt-5-mini"
     assert settings.vision_model == "gpt-5-mini"
+    assert settings.image_model_hq == "gpt-image-2"
     assert settings.tab_responses == "Form Responses 1"
     assert settings.tab_agents == "Sales_People"
     assert settings.db_path == Path("/opt/gable/var/gable.db")

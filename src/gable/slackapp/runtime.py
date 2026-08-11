@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import logging
 import sys
+from collections.abc import Callable
 from sqlite3 import Connection
 from typing import Any
 
@@ -17,6 +18,7 @@ from gable import spend
 from gable.config import ConfigError, Settings
 from gable.db.schema import apply_migrations, connect
 from gable.logging_setup import configure_logging
+from gable.photos.enhance import EnhancementError, upscale_real_photo
 from gable.pipeline.live import build_runner
 from gable.pipeline.poller import Poller
 from gable.pipeline.runner import Runner
@@ -35,6 +37,62 @@ GOOGLE_SCOPES: tuple[str, ...] = (
     "https://www.googleapis.com/auth/drive",
     "https://www.googleapis.com/auth/presentations",
 )
+
+UpscaleProvider = Callable[[bytes, str, str, int, int], bytes]
+
+
+def guarded_upscale_photo(
+    connection: Connection,
+    run_id: str,
+    image_bytes: bytes,
+    target_width: int,
+    target_height: int,
+    *,
+    enabled: bool,
+    max_calls: int,
+    api_key: str,
+    model: str,
+    provider: UpscaleProvider = upscale_real_photo,
+) -> bytes:
+    """Run one real-photo edit behind the budget and per-listing ceilings.
+
+    Args:
+        connection: The Slack event's database connection.
+        run_id: Existing paused flyer run.
+        image_bytes: Original human-supplied photograph.
+        target_width: Flyer width in pixels.
+        target_height: Flyer height in pixels.
+        enabled: Whether the configured photo policy permits reprocessing.
+        max_calls: Hard image-call allowance per listing.
+        api_key: Existing provider credential.
+        model: High-fidelity edit model.
+        provider: Injectable image-edit implementation.
+
+    Returns:
+        Faithful enlarged image bytes.
+
+    Raises:
+        EnhancementError: when policy or the listing call limit refuses it.
+        BudgetExceededError: when the shared $50 ceiling refuses it.
+        Exception: a provider failure, after its reservation is recorded.
+    """
+    if not enabled:
+        raise EnhancementError("automatic enlargement is disabled by the photo policy")
+    prior_calls = spend.operation_count(connection, run_id, spend.IMAGE_UPSCALE_DETAIL)
+    if prior_calls >= max_calls:
+        raise EnhancementError("this listing has already used its image-edit allowance")
+    estimate = spend.Estimate(
+        service="openai",
+        model=model,
+        usd=spend.IMAGE_EDIT_RESERVE_USD,
+        detail=spend.IMAGE_UPSCALE_DETAIL,
+    )
+    return spend.guarded_call(
+        connection,
+        estimate,
+        lambda: provider(image_bytes, api_key, model, target_width, target_height),
+        run_id=run_id,
+    )
 
 
 def build_components(settings: Settings) -> RuntimeComponents:
@@ -103,6 +161,26 @@ def build_components(settings: Settings) -> RuntimeComponents:
             hero_photo_url=photo_url,
         )
 
+    def upscale_photo(
+        event_connection: Connection,
+        run_id: str,
+        image_bytes: bytes,
+        target_width: int,
+        target_height: int,
+    ) -> bytes:
+        """Use the one permitted high-fidelity edit behind both hard guards."""
+        return guarded_upscale_photo(
+            event_connection,
+            run_id,
+            image_bytes,
+            target_width,
+            target_height,
+            enabled=settings.reprocessing_enabled,
+            max_calls=settings.max_image_calls_per_listing,
+            api_key=settings.openai_image_api_key,
+            model=settings.image_model_hq,
+        )
+
     photo_handoff = PhotoHandoff(
         db_path=settings.db_path,
         bot_token=settings.slack_bot_token,
@@ -112,6 +190,7 @@ def build_components(settings: Settings) -> RuntimeComponents:
         public_root=settings.photo_public_root,
         public_base=settings.photo_public_base,
         runner_for=runner_for_photo,
+        upscale=upscale_photo,
     )
 
     def execute_action(decision: Decision, thread_ts: str) -> str:

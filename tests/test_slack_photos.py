@@ -4,17 +4,22 @@ from __future__ import annotations
 
 import io
 import sqlite3
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
+import pytest
 from PIL import Image
 
+from gable import spend
 from gable.db import store
 from gable.db.schema import apply_migrations, connect
 from gable.listings.intake import Intake
+from gable.photos.enhance import EnhancementError
 from gable.pipeline.runner import RunResult
 from gable.sheets import repository as repo
 from gable.slackapp.photos import PhotoHandoff
+from gable.slackapp.runtime import guarded_upscale_photo
 
 CHANNEL = "C0BP597644B"
 THREAD = "1723000000.100"
@@ -94,7 +99,12 @@ class FakeRunner:
         return RunResult(run_id=run_id, status="delivered")
 
 
-def _handoff(path: Path, seen: list[str], image: bytes | None = None) -> PhotoHandoff:
+def _handoff(
+    path: Path,
+    seen: list[str],
+    image: bytes | None = None,
+    upscale: Callable[[sqlite3.Connection, str, bytes, int, int], bytes] | None = None,
+) -> PhotoHandoff:
     supplied = image if image is not None else _jpeg()
 
     def runner_for(connection: sqlite3.Connection, url: str, thread: str) -> FakeRunner:
@@ -111,6 +121,7 @@ def _handoff(path: Path, seen: list[str], image: bytes | None = None) -> PhotoHa
         public_root=path.parent / "photos",
         public_base="http://198.51.100.7",
         runner_for=runner_for,
+        upscale=upscale,
         download=lambda _url, _token, _limit: supplied,
         publish=lambda _root, _base, fitted: PUBLIC_URL if fitted else "",
         verify=lambda _url: (True, "image/jpeg"),
@@ -135,16 +146,16 @@ def test_one_thread_image_resumes_the_same_run_without_a_new_attempt(tmp_path: P
 
     said = _handoff(path, seen).handle(_event(), FakeSlackClient())
 
-    assert said == "I fitted the photo and finished the flyer."
+    assert said == "I resized and fitted the photo and finished the flyer."
     assert seen == ["response-1", run_id]
     connection = connect(path)
     assert store.run_attempt_count(connection, "response-1") == 1
     run = store.latest_run(connection, "response-1")
     assert run is not None and run.status == "delivered"
     photo = connection.execute(
-        "SELECT photo_url, photo_source FROM runs WHERE run_id = ?", (run_id,)
+        "SELECT photo_url, photo_source, ai_enhanced FROM runs WHERE run_id = ?", (run_id,)
     ).fetchone()
-    assert tuple(photo) == (PUBLIC_URL, "carmen")
+    assert tuple(photo) == (PUBLIC_URL, "carmen", 0)
     connection.close()
 
 
@@ -193,13 +204,140 @@ def test_a_non_image_upload_leaves_the_run_paused(tmp_path: Path) -> None:
     connection.close()
 
 
-def test_a_tiny_upload_is_not_softened_and_used_anyway(tmp_path: Path) -> None:
+def test_a_tiny_upload_is_upscaled_automatically_and_resumes_the_run(tmp_path: Path) -> None:
     path = tmp_path / "gable.db"
-    _paused_database(path)
+    run_id = _paused_database(path)
+    seen: list[str] = []
+    calls: list[tuple[str, int, int]] = []
 
-    said = _handoff(path, [], _jpeg(200, 200)).handle(_event(), FakeSlackClient())
+    def upscale(
+        _connection: sqlite3.Connection,
+        received_run_id: str,
+        _image: bytes,
+        width: int,
+        height: int,
+    ) -> bytes:
+        calls.append((received_run_id, width, height))
+        return _jpeg(width, height)
 
-    assert "too small" in said
+    said = _handoff(path, seen, _jpeg(200, 200), upscale).handle(_event(), FakeSlackClient())
+
+    assert said == "I sharpened, enlarged, and fitted the photo and finished the flyer."
+    assert calls == [(run_id, 1080, 1350)]
+    assert seen == ["response-1", run_id]
+    connection = connect(path)
+    row = connection.execute("SELECT ai_enhanced FROM runs WHERE run_id = ?", (run_id,)).fetchone()
+    assert row["ai_enhanced"] == 1
+    connection.close()
+
+
+def test_a_failed_ai_upscale_uses_the_original_without_asking_again(tmp_path: Path) -> None:
+    path = tmp_path / "gable.db"
+    run_id = _paused_database(path)
+    seen: list[str] = []
+
+    def fail(
+        _connection: sqlite3.Connection,
+        _run_id: str,
+        _image: bytes,
+        _width: int,
+        _height: int,
+    ) -> bytes:
+        msg = "fixed test failure"
+        raise RuntimeError(msg)
+
+    said = _handoff(path, seen, _jpeg(200, 200), fail).handle(_event(), FakeSlackClient())
+
+    assert said == "I resized and fitted the photo and finished the flyer."
+    assert seen == ["response-1", run_id]
+    connection = connect(path)
+    row = connection.execute("SELECT ai_enhanced FROM runs WHERE run_id = ?", (run_id,)).fetchone()
+    assert row["ai_enhanced"] == 0
+    connection.close()
+
+
+def test_a_listing_can_never_buy_a_second_upscale(tmp_path: Path) -> None:
+    path = tmp_path / "gable.db"
+    run_id = _paused_database(path)
+    connection = connect(path)
+    calls: list[str] = []
+
+    def provider(
+        image: bytes,
+        api_key: str,
+        model: str,
+        width: int,
+        height: int,
+    ) -> bytes:
+        calls.append(f"{api_key}:{model}:{width}x{height}")
+        return image
+
+    first = guarded_upscale_photo(
+        connection,
+        run_id,
+        _jpeg(200, 200),
+        1080,
+        1350,
+        enabled=True,
+        max_calls=1,
+        api_key="test-key",
+        model="gpt-image-2",
+        provider=provider,
+    )
+    with pytest.raises(EnhancementError, match="already used"):
+        guarded_upscale_photo(
+            connection,
+            run_id,
+            _jpeg(200, 200),
+            1080,
+            1350,
+            enabled=True,
+            max_calls=1,
+            api_key="test-key",
+            model="gpt-image-2",
+            provider=provider,
+        )
+
+    assert first
+    assert calls == ["test-key:gpt-image-2:1080x1350"]
+    assert spend.operation_count(connection, run_id, spend.IMAGE_UPSCALE_DETAIL) == 1
+    connection.close()
+
+
+def test_a_disabled_photo_policy_spends_nothing(tmp_path: Path) -> None:
+    path = tmp_path / "gable.db"
+    run_id = _paused_database(path)
+    connection = connect(path)
+    called = False
+
+    def provider(
+        image: bytes,
+        _api_key: str,
+        _model: str,
+        _width: int,
+        _height: int,
+    ) -> bytes:
+        nonlocal called
+        called = True
+        return image
+
+    with pytest.raises(EnhancementError, match="disabled by the photo policy"):
+        guarded_upscale_photo(
+            connection,
+            run_id,
+            _jpeg(200, 200),
+            1080,
+            1350,
+            enabled=False,
+            max_calls=1,
+            api_key="",
+            model="gpt-image-2",
+            provider=provider,
+        )
+
+    assert called is False
+    assert spend.operation_count(connection, run_id, spend.IMAGE_UPSCALE_DETAIL) == 0
+    connection.close()
 
 
 def test_a_public_host_failure_keeps_the_run_paused(tmp_path: Path) -> None:

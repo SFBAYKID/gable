@@ -27,7 +27,7 @@ from typing import Final
 
 #: Bumped whenever a migration is added. `apply_migrations` uses it to decide
 #: what still needs running.
-SCHEMA_VERSION: Final[int] = 1
+SCHEMA_VERSION: Final[int] = 2
 
 #: Each migration is (version, sql). They run in order and only once. Never edit
 #: one that has shipped — add another, the same rule as the decision log.
@@ -147,6 +147,14 @@ MIGRATIONS: Final[tuple[tuple[int, str], ...]] = (
         );
 
         CREATE INDEX IF NOT EXISTS idx_spend_run ON spend (run_id);
+        """,
+    ),
+    (
+        2,
+        """
+        -- A real photo enlarged by an image model is not synthetic, but the
+        -- distinction must survive the Slack handoff and later audit.
+        ALTER TABLE runs ADD COLUMN ai_enhanced INTEGER NOT NULL DEFAULT 0;
         """,
     ),
 )

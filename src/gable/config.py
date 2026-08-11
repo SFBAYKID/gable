@@ -164,6 +164,7 @@ class Settings:
     conversation_model: str
     vision_model: str
     image_model: str
+    image_model_hq: str
     anthropic_api_key: str
     anthropic_model: str
 
@@ -320,6 +321,7 @@ class Settings:
             conversation_model=reader.str_value("GABLE_CONVERSATION_MODEL", "gpt-5-mini"),
             vision_model=reader.str_value("GABLE_VISION_MODEL", "gpt-5-mini"),
             image_model=reader.str_value("GABLE_IMAGE_MODEL", "gpt-image-2"),
+            image_model_hq=reader.str_value("GABLE_IMAGE_MODEL_HQ", "gpt-image-2"),
             anthropic_api_key=reader.secret("ANTHROPIC_API_KEY", False),
             anthropic_model=reader.str_value("GABLE_ANTHROPIC_MODEL", "claude-opus-5"),
             log_level=reader.str_value("LOG_LEVEL", "INFO").upper(),

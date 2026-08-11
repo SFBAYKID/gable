@@ -288,6 +288,7 @@ def set_status(
         "photo_url",
         "photo_source",
         "ai_generated",
+        "ai_enhanced",
         "slack_thread_ts",
         "failure_reason",
     }

@@ -199,9 +199,10 @@ No source file is over 800 lines. `mypy` covers `src`, `tests` and `tools`.
 | `deploy/gable.service` + `PROVISION.md` | **Run.** Droplet provisioned and verified; swap active. |
 | `spikes/` | Findings only — `SPIKE_A.md` and `SPIKE_A_RESULT.md`. The generator and its tests were deleted once Spike A was answered. |
 | Most of `src/gable/` | Built and unit-tested: the runner, orchestrator, poller, schedule, database, sheet client, enrichment, photo fitting and hosting, the edit tools, the field manifest, the image verifier, the vision check and the house style. |
-| **The wiring between them** | **Built in the working tree, not deployed.** The production runtime constructs `Poller` and `Runner`; the Slack-free CLI performs one guarded pass. |
+| **The wiring between them** | **Built on main, not deployed.** The production runtime constructs `Poller` and `Runner`; the Slack-free CLI performs one guarded pass. |
 | The Slack photo handoff | **Built and unit-tested, waiting on Chase.** Requires approval and reinstall for the new `files:read` scope before a live upload test. |
-| `photos/enhance.py`, `photos/resolver.py`, `photos/sources.py`, `listings/verify.py`, `slackapp/handlers.py` | Still docstring-only placeholders. |
+| `photos/enhance.py` | Built and unit-tested. A Slack hero needing more than 2x enlargement gets one guarded high-fidelity image edit, a drift and seam check, an `ai_enhanced` audit flag, and an automatic original-photo fallback. Live image-edit output is not yet visually certified. |
+| `photos/resolver.py`, `photos/sources.py`, `listings/verify.py`, `slackapp/handlers.py` | Still docstring-only placeholders. |
 
 `normalize.py`'s `ColumnMap` can be re-pointed at the real headers above without
 touching logic — that was built before the sheet was seen, and it happens to

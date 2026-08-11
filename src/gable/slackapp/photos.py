@@ -2,9 +2,10 @@
 
 Slack's private URL is only a transport. The upload is downloaded with the bot
 token, checked before any authorization header can leave Slack's own hosts,
-fitted deterministically to the 1080 by 1350 hero frame, published into the
-droplet's nginx directory, verified anonymously, and attached to the same
-paused database run. No new run or retry is opened.
+fitted to the 1080 by 1350 hero frame, published into the droplet's nginx
+directory, verified anonymously, and attached to the same paused database run.
+A genuinely undersized source gets one guarded high-fidelity edit and otherwise
+falls back to the untouched original pixels. No new run or retry is opened.
 """
 
 from __future__ import annotations
@@ -42,6 +43,9 @@ class ResumesRun(Protocol):
     def resume(self, submission: repo.Submission, run_id: str) -> RunResult:
         """Continue one existing run."""
         ...
+
+
+UpscalesPhoto = Callable[[Connection, str, bytes, int, int], bytes]
 
 
 def download_private_image(
@@ -120,6 +124,7 @@ class PhotoHandoff:
     public_root: Path
     public_base: str
     runner_for: Callable[[Connection, str, str], ResumesRun]
+    upscale: UpscalesPhoto | None = None
     download: Callable[[str, str, int], bytes] = download_private_image
     publish: Callable[[Path, str, bytes], str] = publish_local
     verify: Callable[[str], tuple[bool, str]] = verify_public
@@ -186,11 +191,24 @@ class PhotoHandoff:
                     self.target_width,
                     self.target_height,
                 )
-                if assessment.needs_model:
-                    return (
-                        "That image is too small to stay sharp in the hero space. "
-                        "Please send a larger version."
-                    )
+                ai_enhanced = False
+                needed_enlargement = assessment.needs_model
+                if needed_enlargement and self.upscale is not None:
+                    try:
+                        image_bytes = self.upscale(
+                            connection,
+                            run.run_id,
+                            image_bytes,
+                            self.target_width,
+                            self.target_height,
+                        )
+                        ai_enhanced = True
+                    except Exception:
+                        # Keep Carmen's original and continue with the local
+                        # high-quality resize. The final flyer vision pass is
+                        # still the delivery gate; a failed model call must not
+                        # turn into a demand that she find the same photo again.
+                        logger.exception("automatic photo enlargement fell back to the original")
                 fitted = fit_locally(image_bytes, self.target_width, self.target_height)
                 public_url = self.publish(self.public_root, self.public_base, fitted)
                 usable, _detail = self.verify(public_url)
@@ -213,15 +231,19 @@ class PhotoHandoff:
                 "Carmen supplied a fitted and verified hero photo",
                 photo_url=public_url,
                 photo_source="carmen",
+                ai_enhanced=int(ai_enhanced),
             )
             runner = self.runner_for(connection, public_url, thread_ts)
             result = runner.resume(_submission(stored), run.run_id)
+            action = "sharpened, enlarged, and fitted" if ai_enhanced else "resized and fitted"
             if result.status == "delivered":
-                return "I fitted the photo and finished the flyer."
+                return f"I {action} the photo and finished the flyer."
             if result.status == "needs_review":
-                return "I fitted the photo and resumed the flyer, but it still needs review."
+                return f"I {action} the photo and resumed the flyer, but it still needs review."
             if result.needs_a_human:
-                return "I fitted the photo. The flyer is waiting on the other detail I asked for."
-            return "I fitted the photo, but I could not finish the flyer. I stopped there."
+                return (
+                    f"I {action} the photo. The flyer is waiting on the other detail I asked for."
+                )
+            return f"I {action} the photo, but I could not finish the flyer. I stopped there."
         finally:
             connection.close()

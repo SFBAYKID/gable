@@ -96,6 +96,31 @@ Every example below obeys this. If one ever does not, the example is the bug.
      [ Use this photo ]  [ Upload one ]  [ Skip listing ]
 ```
 
+### 2.2a A supplied photo is small
+
+Resolution alone is not a reason to send Carmen back for another file. Gable
+keeps the Slack upload untouched, makes a separate fitted derivative, and
+resumes the same run automatically.
+
+- Up to a 2x enlargement is handled locally.
+- Beyond 2x, one policy-gated image edit restores resolution while preserving
+  the exact property and composition. It is recorded as AI-enhanced, never as
+  AI-generated.
+- The edit gets one attempt per listing and shares the $50 spend ceiling.
+- If the edit fails its fidelity check or the provider is unavailable, Gable
+  falls back to a local resize of the original. The normal render inspection is
+  still the delivery gate.
+- Gable never asks for a larger version merely because the upload is small.
+
+On a successful enhanced path, the edited progress message is precise:
+
+```
+I sharpened, enlarged, and fitted the photo and finished the flyer.
+```
+
+On the local path it says “resized and fitted”; it never claims AI enhancement
+when the model result was not used.
+
 ### 2.3 AI-generated photo — when policy permits it
 
 ```
@@ -346,7 +371,8 @@ be explained from that log is a bug.
 
 - Max `GABLE_MAX_BATCH` (default 25) listings per cycle.
 - Max 1 Firecrawl call per unique `brokerage_url` per 24 hours.
-- Max 1 image-generation call per listing, ever. Never in a retry loop.
+- Max 1 image-model call per listing, whether generation or real-photo
+  upscaling. A paid image edit is never retried automatically.
 - Never retry a failing listing more than 3 times. Enforced by
   `db.store.start_run`; paused states resume the same run and do not consume a
   new attempt.

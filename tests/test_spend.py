@@ -43,6 +43,24 @@ def test_guarded_call_records_a_vendor_failure(db: sqlite3.Connection) -> None:
     assert spend.total_spent(db) == pytest.approx(0.01)
 
 
+def test_operation_count_includes_failed_paid_attempts(db: sqlite3.Connection) -> None:
+    estimate = spend.Estimate(
+        "openai",
+        "gpt-image-2",
+        spend.IMAGE_EDIT_RESERVE_USD,
+        spend.IMAGE_UPSCALE_DETAIL,
+    )
+
+    def fail() -> bytes:
+        raise RuntimeError("provider accepted the edit before failing")
+
+    with pytest.raises(RuntimeError):
+        spend.guarded_call(db, estimate, fail, run_id="run-1")
+
+    assert spend.operation_count(db, "run-1", spend.IMAGE_UPSCALE_DETAIL) == 1
+    assert spend.operation_count(db, "run-2", spend.IMAGE_UPSCALE_DETAIL) == 0
+
+
 def test_guarded_call_never_invokes_vendor_at_the_ceiling(db: sqlite3.Connection) -> None:
     spend.record(
         db,

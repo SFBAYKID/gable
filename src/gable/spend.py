@@ -36,6 +36,14 @@ FIRECRAWL_PER_SEARCH: Final[float] = 0.01
 #: cost plus the normal prompt, so the guard stops early rather than late.
 CONVERSATION_RESERVE_USD: Final[float] = 0.01
 VISION_RESERVE_USD: Final[float] = 0.01
+#: One medium-quality GPT Image 2 edit plus its high-fidelity input.
+#: VERIFIED 2026-08-11: the official image-generation guide prices the standard
+#: portrait output below this reservation. The extra headroom deliberately
+#: covers input-image tokens and pricing drift without understating the ledger.
+IMAGE_EDIT_RESERVE_USD: Final[float] = 0.25
+
+#: Exact ledger detail used to enforce the one-upscale-per-listing limit.
+IMAGE_UPSCALE_DETAIL: Final[str] = "conservative real-photo upscale reservation"
 
 #: The ceiling Chase set. Reaching it stops the run rather than warning.
 CEILING_USD: Final[float] = 50.0
@@ -99,6 +107,27 @@ def total_spent(connection: sqlite3.Connection) -> float:
         "SELECT COALESCE(SUM(units), 0) AS total FROM spend WHERE unit_kind = 'usd'"
     ).fetchone()
     return float(row["total"] if row else 0.0)
+
+
+def operation_count(connection: sqlite3.Connection, run_id: str, detail: str) -> int:
+    """Count reserved paid operations of one kind for a flyer run.
+
+    Args:
+        connection: Database holding the spend ledger.
+        run_id: Flyer run identity.
+        detail: Exact operation marker stored in the spend note.
+
+    Returns:
+        Number of matching reservations, including failed vendor calls.
+
+    Raises:
+        sqlite3.Error: on a query failure.
+    """
+    row = connection.execute(
+        "SELECT COUNT(*) AS calls FROM spend WHERE run_id = ? AND note = ?",
+        (run_id, detail),
+    ).fetchone()
+    return int(row["calls"] if row else 0)
 
 
 def record(connection: sqlite3.Connection, estimate: Estimate, run_id: str = "") -> None:

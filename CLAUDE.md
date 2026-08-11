@@ -341,7 +341,7 @@ gable/
 │   │   ├── fit.py               # decides whether a model is needed at all
 │   │   ├── resolver.py          # the cascade, policy enforcement
 │   │   ├── sources.py           # form / drive / web source adapters
-│   │   ├── enhance.py           # generative upscale of a REAL photo only
+│   │   ├── enhance.py           # guarded high-fidelity upscale of a REAL photo only
 │   │   └── store.py             # publish to the droplet over http
 │   ├── slides/
 │   │   ├── renderer.py          # pure batchUpdate builder for a fill
