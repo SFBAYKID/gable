@@ -20,6 +20,8 @@ from pathlib import Path
 from sqlite3 import Connection
 from typing import Any, Final, Protocol
 
+from PIL import Image
+
 from gable.db import store
 from gable.db.schema import connect
 from gable.photos.fit import assess, fit_locally, image_dimensions
@@ -98,6 +100,23 @@ def download_private_image(
     if not downloaded:
         msg = "the uploaded image was empty"
         raise PhotoHandoffError(msg)
+
+    # Slack can serve a file before it has finished processing it, and what
+    # comes back then is not an image. Caught live on 2026-08-11 during a real
+    # upload: three files in the same run downloaded as valid JPEG and the
+    # fourth returned bytes Pillow could not identify.
+    #
+    # Without this the bad bytes travel to `fit_locally`, which raises deep in
+    # the render path, hits the runner's outer exception boundary and reaches
+    # Carmen as "Something went wrong while I was building this one" — with the
+    # real cause nowhere in the message. Failing here says what actually
+    # happened and what she can do about it.
+    try:
+        with Image.open(io.BytesIO(downloaded)) as probe:
+            probe.verify()
+    except Exception as exc:
+        msg = "that upload did not arrive as a readable image"
+        raise PhotoHandoffError(msg) from exc
     return downloaded
 
 

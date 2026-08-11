@@ -366,9 +366,7 @@ def build_runner(
                 )
                 .execute()
             )
-            templates.extend(
-                {"id": f["id"], "name": f["name"]} for f in response.get("files", [])
-            )
+            templates.extend({"id": f["id"], "name": f["name"]} for f in response.get("files", []))
             page_token = response.get("nextPageToken")
             if not page_token:
                 return templates
