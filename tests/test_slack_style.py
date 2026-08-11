@@ -402,3 +402,42 @@ def test_button_labels_do_not_invite_emoji_expansion() -> None:
         for el in block.get("elements") or []:
             if isinstance(el, dict) and el.get("type") == "button":
                 assert el["text"]["emoji"] is False
+
+
+# --- what actually arrives in an event ---------------------------------------
+
+
+def test_a_mention_is_stripped_to_what_the_person_typed() -> None:
+    from gable.slackapp.app import clean_mention_text
+
+    assert clean_mention_text("<@U0BP624RK5H> hello") == "hello"
+
+
+def test_a_mention_with_a_display_name_is_stripped_too() -> None:
+    """Slack writes `<@U123|Gable>` when a message is read back."""
+    from gable.slackapp.app import clean_mention_text
+
+    assert clean_mention_text("<@U0BP624RK5H|Gable> hello") == "hello"
+
+
+def test_a_client_footer_is_not_part_of_the_question() -> None:
+    """Some clients append a footer. Feeding it to the model is noise."""
+    from gable.slackapp.app import clean_mention_text
+
+    assert clean_mention_text("<@U123ABC> hello\n*Sent using* Claude") == "hello"
+
+
+def test_an_empty_mention_yields_an_empty_string() -> None:
+    from gable.slackapp.app import clean_mention_text
+
+    assert clean_mention_text("<@U123ABC>") == ""
+    assert clean_mention_text("") == ""
+
+
+def test_a_reply_that_breaks_the_rules_never_reaches_slack() -> None:
+    """The last gate. A model told not to use emoji mostly will not."""
+    from gable.slackapp.app import FALLBACK, safe_reply
+
+    assert safe_reply("All set.") == "All set."
+    assert "sparkles" not in safe_reply(":sparkles: All set.")
+    assert safe_reply("<HttpError 400 unrecoverable>") == FALLBACK
