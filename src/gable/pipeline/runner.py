@@ -62,11 +62,12 @@ DEFAULT_BROKERAGE_URL: Final[str] = "cornerhouserealty.com"
 #: appears on the templates themselves as the office line.
 OFFICE_PHONE: Final[str] = "443.499.3839"
 
-#: The brokerage's own handle, so a design's stock "@reallygreatsite" does not
-#: point a client-facing flyer at somebody else's account.
-# ASSUMPTION: this is the brokerage handle. Confirm against the real account
-# before the first flyer using a social slot goes out.
-DEFAULT_SOCIAL_HANDLE: Final[str] = "@cornerhouserealty"
+#: Deliberately empty. The designs ship with "@reallygreatsite", which is filler
+#: from whoever built them and belongs to nobody here. Chase was asked and chose
+#: to leave it rather than have a handle invented, so the slot stays unfilled
+#: and surfaces as a question — which is the rule for anything Gable does not
+#: actually know.
+DEFAULT_SOCIAL_HANDLE: Final[str] = ""
 
 logger = logging.getLogger("gable.runner")
 
