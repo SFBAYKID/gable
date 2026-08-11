@@ -150,13 +150,13 @@ def test_beds_baths_and_sqft_are_researched_not_asked() -> None:
     facts = missing_public_facts(_intake())
     assert "beds" in facts
     assert "baths" in facts
-    assert "square footage" in facts
+    assert "square_feet" in facts
 
 
 def test_a_known_fact_is_not_researched_twice() -> None:
     facts = missing_public_facts(_intake(), known={"beds": "4", "baths": "3"})
     assert "beds" not in facts
-    assert "square footage" in facts
+    assert "square_feet" in facts
 
 
 def test_a_supplied_price_is_not_researched() -> None:

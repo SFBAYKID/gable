@@ -62,7 +62,10 @@ REQUEST_TYPE_TO_CATEGORY: Final[dict[str, str]] = {
 
 #: Facts that are a matter of public record for any address, and so must be
 #: looked up rather than asked about.
-PUBLIC_FACTS: Final[tuple[str, ...]] = ("beds", "baths", "square footage", "price")
+#: Keys match `enrich.Facts.as_dict()` exactly. They disagreed once — this said
+#: "square footage" while Facts said "square_feet" — so a fact that had already
+#: been looked up was never recognised and got researched again every time.
+PUBLIC_FACTS: Final[tuple[str, ...]] = ("beds", "baths", "square_feet", "price")
 
 
 @dataclass(frozen=True, slots=True)
@@ -193,6 +196,97 @@ def missing_public_facts(intake: Intake, known: dict[str, str] | None = None) ->
     return [fact for fact in PUBLIC_FACTS if fact not in have]
 
 
+#: Words that suggest an address is not really an address. The form's address
+#: column has been used for a Google review link and for two addresses at once.
+_NOT_AN_ADDRESS: Final[re.Pattern[str]] = re.compile(r"https?://|google review", re.IGNORECASE)
+
+#: US state abbreviations. Corner House works the Mid-Atlantic, but listing the
+#: lot costs nothing and avoids a surprise the first time someone sells in a
+#: state nobody thought to include.
+_STATES: Final[tuple[str, ...]] = (
+    "AL",
+    "AK",
+    "AZ",
+    "AR",
+    "CA",
+    "CO",
+    "CT",
+    "DE",
+    "DC",
+    "FL",
+    "GA",
+    "HI",
+    "ID",
+    "IL",
+    "IN",
+    "IA",
+    "KS",
+    "KY",
+    "LA",
+    "ME",
+    "MD",
+    "MA",
+    "MI",
+    "MN",
+    "MS",
+    "MO",
+    "MT",
+    "NE",
+    "NV",
+    "NH",
+    "NJ",
+    "NM",
+    "NY",
+    "NC",
+    "ND",
+    "OH",
+    "OK",
+    "OR",
+    "PA",
+    "RI",
+    "SC",
+    "SD",
+    "TN",
+    "TX",
+    "UT",
+    "VT",
+    "VA",
+    "WA",
+    "WV",
+    "WI",
+    "WY",
+)
+
+
+def address_looks_usable(address: str) -> bool:
+    """Whether an address is worth sending to a lookup service.
+
+    A street number and a few words are not enough: the live sheet contains
+    "SRES Listing 29 Maple" in the address column, which passes that test and is
+    not an address. Requiring a state or a ZIP separates the two, because every
+    real US address carries one and the accidental values do not.
+
+    Args:
+        address: The value from column L.
+
+    Returns:
+        False when it is a URL, has no street number, or names no state or ZIP.
+        A bad lookup wastes a paid call and comes back with confident nonsense
+        about a property that does not exist.
+
+    Raises:
+        Nothing.
+    """
+    stripped = address.strip()
+    if len(stripped) < 8 or _NOT_AN_ADDRESS.search(stripped):
+        return False
+    if not re.search(r"\d", stripped):
+        return False
+    has_zip = bool(re.search(r"\b\d{5}(?:-\d{4})?\b", stripped))
+    has_state = bool(re.search(r"\b(?:" + "|".join(_STATES) + r")\b", stripped, re.IGNORECASE))
+    return has_zip or has_state
+
+
 def incoherences(intake: Intake) -> list[Question]:
     """Contradictions worth asking about, in the words Gable will use.
 
@@ -216,6 +310,16 @@ def incoherences(intake: Intake) -> list[Question]:
                 "address",
                 "This request came through without a property address, so I cannot "
                 "look anything up or build the flyer. What is the address?",
+                only_a_human_knows=True,
+            )
+        )
+
+    elif not address_looks_usable(intake.address):
+        asks.append(
+            Question(
+                "address",
+                f"I cannot make sense of the address on this one — it reads "
+                f"{intake.address.strip()!r}. What is the property address?",
                 only_a_human_knows=True,
             )
         )
@@ -327,94 +431,3 @@ def needs_two_agents(intake: Intake) -> bool:
         Nothing.
     """
     return len({name.lower() for name in named_agents(intake).values()}) > 1
-
-
-#: Words that suggest an address is not really an address. The form's address
-#: column has been used for a Google review link and for two addresses at once.
-_NOT_AN_ADDRESS: Final[re.Pattern[str]] = re.compile(r"https?://|google review", re.IGNORECASE)
-
-#: US state abbreviations. Corner House works the Mid-Atlantic, but listing the
-#: lot costs nothing and avoids a surprise the first time someone sells in a
-#: state nobody thought to include.
-_STATES: Final[tuple[str, ...]] = (
-    "AL",
-    "AK",
-    "AZ",
-    "AR",
-    "CA",
-    "CO",
-    "CT",
-    "DE",
-    "DC",
-    "FL",
-    "GA",
-    "HI",
-    "ID",
-    "IL",
-    "IN",
-    "IA",
-    "KS",
-    "KY",
-    "LA",
-    "ME",
-    "MD",
-    "MA",
-    "MI",
-    "MN",
-    "MS",
-    "MO",
-    "MT",
-    "NE",
-    "NV",
-    "NH",
-    "NJ",
-    "NM",
-    "NY",
-    "NC",
-    "ND",
-    "OH",
-    "OK",
-    "OR",
-    "PA",
-    "RI",
-    "SC",
-    "SD",
-    "TN",
-    "TX",
-    "UT",
-    "VT",
-    "VA",
-    "WA",
-    "WV",
-    "WI",
-    "WY",
-)
-
-
-def address_looks_usable(address: str) -> bool:
-    """Whether an address is worth sending to a lookup service.
-
-    A street number and a few words are not enough: the live sheet contains
-    "SRES Listing 29 Maple" in the address column, which passes that test and is
-    not an address. Requiring a state or a ZIP separates the two, because every
-    real US address carries one and the accidental values do not.
-
-    Args:
-        address: The value from column L.
-
-    Returns:
-        False when it is a URL, has no street number, or names no state or ZIP.
-        A bad lookup wastes a paid call and comes back with confident nonsense
-        about a property that does not exist.
-
-    Raises:
-        Nothing.
-    """
-    stripped = address.strip()
-    if len(stripped) < 8 or _NOT_AN_ADDRESS.search(stripped):
-        return False
-    if not re.search(r"\d", stripped):
-        return False
-    has_zip = bool(re.search(r"\b\d{5}(?:-\d{4})?\b", stripped))
-    has_state = bool(re.search(r"\b(?:" + "|".join(_STATES) + r")\b", stripped, re.IGNORECASE))
-    return has_zip or has_state

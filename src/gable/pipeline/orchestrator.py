@@ -1,24 +1,272 @@
-"""Runs one listing through every stage, and one batch through the poll cycle.
+"""One listing, from a sheet row to a link in Slack.
 
-Stage order follows ARCHITECTURE.md section 4: poll, normalize, verify, resolve
-photo, look up template, export, deliver. Each per-listing run is wrapped so an
-exception marks that row failed and the loop continues — one listing failing
-must never stop the batch (ARCHITECTURE.md 6).
+The flow Chase specified, in order:
 
-Hard ceilings live here, in code and not in a comment (AGENTS.md 7):
-`GABLE_MAX_BATCH` listings per cycle, `GABLE_MAX_RETRIES` attempts per listing,
-and `GABLE_MAX_IMAGE_CALLS_PER_LISTING` image-generation calls ever.
+1. read the row and identify the agent
+2. work out the request type, and from it the template category
+3. gather columns L through T
+4. research anything public that is missing — beds, baths, square footage, price
+5. ask about anything contradictory, and about the hero photo
+6. build the flyer
+7. check it twice
+8. post the link
 
-`needs_photo` and `needs_template` are paused, not failed. They wait for Carmen
-indefinitely and are re-checked on `/gable run` (AGENTS.md 6).
-
-Assumes: every state transition writes to `Runs` with a timestamp. A listing
-whose state cannot be explained from that log is a bug.
-
-Does not handle: Slack. It returns results; the caller delivers them, which is
-what lets `cli.py` run the whole pipeline with Slack absent.
-
-PHASE 0 PLACEHOLDER — no implementation yet. Spike A gates Phase 1.
+**What this module does and does not do.** It decides; it does not perform. Every
+step returns a `Step` describing what happened and what should happen next, and
+the caller does the I/O. That is what makes the whole sequence testable without
+Google, Slack or a paid call — and what keeps a wrong decision from becoming a
+wrong action.
 """
 
 from __future__ import annotations
+
+from dataclasses import dataclass, field
+from enum import StrEnum
+from typing import Final
+
+from gable.listings.enrich import Facts, fill_gaps
+from gable.listings.intake import (
+    Intake,
+    Question,
+    address_looks_usable,
+    incoherences,
+    missing_public_facts,
+    named_agents,
+    needs_two_agents,
+)
+from gable.slides.catalog import for_category
+
+#: How many times a render is inspected before delivery. Chase asked for two:
+#: one to catch the obvious, a second to catch what the first pass moved.
+QUALITY_PASSES: Final[int] = 2
+
+
+class Outcome(StrEnum):
+    """What should happen next with a listing."""
+
+    RESEARCH = "research"
+    ASK = "ask"
+    BUILD = "build"
+    DELIVER = "deliver"
+    PAUSE = "pause"
+    SKIP = "skip"
+
+
+@dataclass(frozen=True, slots=True)
+class Step:
+    """One decision, and why."""
+
+    outcome: Outcome
+    #: What Gable says, if this step involves speaking. Already plain English.
+    say: str = ""
+    #: Facts still to look up.
+    research: list[str] = field(default_factory=list)
+    #: Questions for Carmen, in the order they should be asked.
+    questions: list[Question] = field(default_factory=list)
+    #: Template category, once known.
+    category: str = ""
+    #: Anything worth recording against the run.
+    detail: str = ""
+
+
+def plan(intake: Intake, known_facts: dict[str, str] | None = None) -> Step:
+    """Decide what to do with a submission before any work is done.
+
+    Args:
+        intake: The parsed row.
+        known_facts: Facts already cached for this address.
+
+    Returns:
+        The next `Step`. `ASK` takes precedence over `RESEARCH`, because a
+        contradiction makes research pointless — there is no sense looking up a
+        property whose address is a Google review link.
+
+    Raises:
+        Nothing.
+    """
+    problems = incoherences(intake)
+    if problems:
+        return Step(
+            outcome=Outcome.ASK,
+            questions=problems,
+            say=problems[0].ask,
+            category=intake.category,
+            detail=f"{len(problems)} thing(s) do not add up",
+        )
+
+    if not intake.category:
+        return Step(
+            outcome=Outcome.SKIP,
+            say=(
+                f"I do not have a design for a {intake.request_type.lower()} post, "
+                "so I have left this one alone."
+            ),
+            detail="no template category for this request type",
+        )
+
+    if not for_category(intake.category):
+        return Step(
+            outcome=Outcome.SKIP,
+            say=f"I know this is a {intake.category} post but I have no designs filed for it yet.",
+            detail=f"category {intake.category} has no templates",
+        )
+
+    outstanding = missing_public_facts(intake, known_facts)
+    if outstanding and address_looks_usable(intake.address):
+        return Step(
+            outcome=Outcome.RESEARCH,
+            research=outstanding,
+            category=intake.category,
+            detail=f"looking up {', '.join(outstanding)}",
+        )
+
+    return Step(
+        outcome=Outcome.BUILD,
+        category=intake.category,
+        detail="everything needed is in hand",
+    )
+
+
+def after_research(intake: Intake, found: Facts, known: dict[str, str]) -> Step:
+    """Decide what to do once a lookup has come back.
+
+    Args:
+        intake: The parsed row.
+        found: What research turned up.
+        known: What was already known.
+
+    Returns:
+        `BUILD` when enough is in hand, or `ASK` when research could not settle
+        something a flyer genuinely needs.
+
+    Raises:
+        Nothing.
+    """
+    merged, looked_up = fill_gaps(known, found)
+    still_missing = [name for name in ("beds", "baths", "square_feet") if not merged.get(name)]
+
+    if found.caveats:
+        # A number that looks wrong is worse than a blank, so it gets a question
+        # rather than being quietly used.
+        return Step(
+            outcome=Outcome.ASK,
+            questions=[
+                Question("researched facts", f"{found.caveats[0]}. Can you confirm it?", True)
+            ],
+            say=f"{found.caveats[0].capitalize()}. Can you confirm it before I build this?",
+            category=intake.category,
+            detail="research returned an implausible value",
+        )
+
+    if still_missing and not intake.price:
+        readable = ", ".join(name.replace("_", " ") for name in still_missing)
+        return Step(
+            outcome=Outcome.ASK,
+            questions=[
+                Question("facts", f"I could not find the {readable}. Do you have them?", True)
+            ],
+            say=f"I could not find the {readable} for this one. Do you have them?",
+            category=intake.category,
+            detail=f"research did not settle {readable}",
+        )
+
+    said = ""
+    if looked_up:
+        said = f"I looked up the {', '.join(looked_up)} from the address."
+    return Step(
+        outcome=Outcome.BUILD,
+        say=said,
+        category=intake.category,
+        detail=f"researched {', '.join(looked_up)}" if looked_up else "nothing new needed",
+    )
+
+
+@dataclass(frozen=True, slots=True)
+class QualityVerdict:
+    """What an inspection pass concluded about a rendered flyer."""
+
+    passed: bool
+    pass_number: int
+    problems: list[str] = field(default_factory=list)
+
+    @property
+    def say(self) -> str:
+        """What Gable tells Carmen about this pass."""
+        if self.passed:
+            return ""
+        first = self.problems[0] if self.problems else "something looks off"
+        return f"I rendered it, but {first}"
+
+
+def judge(rendered_text: str, expected_values: dict[str, str], pass_number: int) -> QualityVerdict:
+    """Inspect a rendered flyer for the failures that are silent.
+
+    Every API call can succeed while the result is wrong: a placeholder left
+    visible, a value that never landed, a token that survived. Those are what
+    this checks — it cannot see the layout, which is what the vision pass is for.
+
+    Args:
+        rendered_text: All text read back from the rendered slide.
+        expected_values: What should appear, by field name.
+        pass_number: Which inspection this is, 1 or 2.
+
+    Returns:
+        A verdict. Chase asked for two passes; the second runs after any repair
+        the first prompted, and catches what the repair moved.
+
+    Raises:
+        Nothing.
+    """
+    problems: list[str] = []
+
+    leftovers = [
+        fragment
+        for fragment in ("[", "{{", "PROPERTY ADDRESS", "AGENT NAME", "[PRICE]")
+        if fragment in rendered_text
+    ]
+    if leftovers:
+        problems.append("some of the template's own placeholder text is still showing")
+
+    for name, value in expected_values.items():
+        if value and value not in rendered_text:
+            readable = name.replace("_", " ")
+            problems.append(f"the {readable} did not make it onto the flyer")
+
+    return QualityVerdict(passed=not problems, pass_number=pass_number, problems=problems)
+
+
+def agent_slots(intake: Intake) -> Step:
+    """Work out whether this listing needs a one- or two-agent design.
+
+    Args:
+        intake: The parsed row.
+
+    Returns:
+        A `BUILD` step naming the design shape, or `ASK` when two agents are
+        named but their roles are ambiguous.
+
+    Raises:
+        Nothing.
+    """
+    roles = named_agents(intake)
+    if not needs_two_agents(intake):
+        return Step(outcome=Outcome.BUILD, detail="one agent", category=intake.category)
+
+    listing_agent = roles.get("listing", "")
+    hosting_agent = roles.get("hosting", "")
+    if listing_agent and hosting_agent:
+        return Step(
+            outcome=Outcome.BUILD,
+            category=intake.category,
+            detail=f"two agents: {listing_agent} listing, {hosting_agent} hosting",
+        )
+    return Step(
+        outcome=Outcome.ASK,
+        questions=[Question("agents", "Which of them is the listing agent?", True)],
+        say=(
+            f"This one names {' and '.join(sorted(set(roles.values())))}. "
+            "Which of them is the listing agent?"
+        ),
+        category=intake.category,
+        detail="two agents named, roles unclear",
+    )
