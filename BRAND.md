@@ -49,6 +49,37 @@ misalignments are in the source design, so they cannot be fixed by re-exporting
 alone and they will come back if the export is repeated before Carmen fixes
 them.
 
+## The deck is not all listing flyers
+
+Pages 30 to 33 of the master design are **content marketing**, not listings:
+
+* *In Your Corner — First Time Buyer Edition*, an FAQ
+* *Seller Reality Check — Pricing High Is Not A Strategy*
+* *Buyer Myth — You Need 20 Percent Down*
+* *Market Update*, with median sold price, days on market, list-to-sale ratio
+  and inventory
+
+None of them has a property, an address or a price. **Nothing in the listing
+form can produce one.** They are posts Carmen writes from market data, and they
+are outside what Gable does today.
+
+Worth knowing before anyone counts "45 templates" as the target. Some of the
+designs are not reachable from a form submission at all, and building toward
+them would be building the wrong thing.
+
+*(A keyword pass over the extracted text put 55 of 69 pages in "neither", which
+is not a real classification — most pages render their type as vectors, so the
+text extractor cannot see it. The four above were read by looking at them. Do
+not trust a text-based count of this deck.)*
+
+## Some designs already use safe placeholders
+
+The Market Update page uses `(555) 123-4567`, `yourwebsite.com` and
+`Your Office Name` — obviously fake, so an unfilled slot is visibly unfilled.
+Other designs use real agents' real numbers for the same purpose, which is issue
+7 in `TEMPLATE_ISSUES.md`. The safe convention already exists in Carmen's own
+work; it is just not applied everywhere.
+
 ## Still needed
 
 A PDF export of all 69 pages, to see each design **filled in correctly**. The
