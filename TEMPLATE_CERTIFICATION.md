@@ -331,3 +331,24 @@ mood.
 
 This is the same error as the seam detector and as reading `needs_review` as
 "broken": treating a number as evidence without checking what produces it.
+
+## Some vision-pass complaints are the design, not the render
+
+`Just Listed — Book a Tour, DM for Details` was flagged for the logo being
+clipped at the top edge. Rendering the **pristine template** beside the finished
+flyer settles it: the design places the photo starting at the logo's baseline,
+so "Realty" sits on the photograph in the template too. Gable reproduced the
+layout faithfully. It is `TEMPLATE_ISSUES.md` item 3, the low-contrast logo, and
+it is Carmen's.
+
+The comparison also showed the opposite. In the pristine template the headline
+**"JUST LISTED" overlaps "PROPERTY ADDRESS"** — the words collide. On Gable's
+flyer they do not, because the fitting pass shrank the headline to fit its box.
+**The rendered flyer is cleaner than the design it came from.**
+
+Both directions matter when reading a verdict. The vision pass reports what it
+sees on the flyer and cannot know whether a defect was inherited or introduced.
+Before treating one as a bug, render the template beside the output. That took
+two API calls and turned a suspected placement bug into a template issue already
+on Carmen's list, plus evidence that a pass I had been unsure about is earning
+its place.
