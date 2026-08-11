@@ -28,7 +28,7 @@ element Carmen meant. Resolving "the price" to an object id is
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Final
 
 from gable.slides.edit_common import (
     MAX_FONT_PT,
@@ -47,11 +47,13 @@ from gable.slides.geometry import (
 )
 
 __all__ = [
+    "MIN_FIND_LENGTH",
     "NAMED_COLOURS",
     "EditError",
     "Request",
     "delete_element",
     "move_element",
+    "occurrences_changed",
     "parse_colour",
     "replace_image",
     "replace_text",
@@ -527,8 +529,18 @@ def set_transparency(object_id: str, alpha: float) -> list[Request]:
 # --- content ----------------------------------------------------------------
 
 
+#: A literal shorter than this matches too much. Correcting a bed count from
+#: "3" to "4" would otherwise rewrite "(443) 854-8554" into "(444) 854-8554"
+#: and "2,300 sqft" into "2,400 sqft", silently, with a 200 response.
+MIN_FIND_LENGTH: Final[int] = 4
+
+
 def replace_text(
-    find: str, replace: str, page_object_ids: list[str] | None = None
+    find: str,
+    replace: str,
+    page_object_ids: list[str] | None = None,
+    *,
+    allow_short: bool = False,
 ) -> list[Request]:
     """Swap one literal string for another.
 
@@ -537,20 +549,37 @@ def replace_text(
     This is how a field correction happens after render: the old value is on the
     slide as literal text, so it is matched literally rather than by token.
 
+    **`replaceAllText` matches substrings, everywhere.** That is the danger. A
+    short literal hits far more than intended, and because the API answers 200
+    either way, nothing downstream notices. The caller must read
+    `occurrencesChanged` from the reply and tell Carmen when it was not what she
+    meant — this function cannot see the document and cannot do that for you.
+
     Args:
         find: The exact text currently on the slide.
         replace: What it becomes. May be empty, to remove text.
         page_object_ids: Restrict to these slides. Omitting it means every slide
             in the presentation — safe on a one-slide post, not otherwise.
+        allow_short: Permit a literal under `MIN_FIND_LENGTH`. Only set this
+            when the caller has confirmed the match is unique, e.g. by having
+            read the slide's text first.
 
     Returns:
         One `replaceAllText` request.
 
     Raises:
-        EditError: if `find` is empty, which would match unpredictably.
+        EditError: if `find` is empty, or is short enough to match promiscuously
+            and `allow_short` was not set.
     """
     if not find:
         msg = "replace_text needs something to find; an empty match is unsafe"
+        raise EditError(msg)
+    if len(find) < MIN_FIND_LENGTH and not allow_short:
+        msg = (
+            f"{find!r} is too short to match safely — replaceAllText matches substrings, "
+            f"so it would also hit it inside phone numbers, prices and addresses. Pass the "
+            f"whole current value, or set allow_short=True once you have checked it is unique."
+        )
         raise EditError(msg)
     body: dict[str, Any] = {
         "containsText": {"text": find, "matchCase": True},
@@ -559,6 +588,25 @@ def replace_text(
     if page_object_ids:
         body["pageObjectIds"] = list(page_object_ids)
     return [{"replaceAllText": body}]
+
+
+def occurrences_changed(reply: dict[str, Any]) -> int:
+    """Read how many replacements a `replaceAllText` reply actually made.
+
+    Nothing else in this codebase reads it, which means Gable currently cannot
+    tell "applied" from "matched nothing" — and AGENTS.md §5 forbids implying
+    the former when the latter happened.
+
+    Args:
+        reply: One entry from `batchUpdate`'s `replies` list.
+
+    Returns:
+        The count, or 0 if this reply was not a text replacement.
+
+    Raises:
+        Nothing.
+    """
+    return int(reply.get("replaceAllText", {}).get("occurrencesChanged", 0))
 
 
 def replace_image(object_id: str, image_url: str) -> list[Request]:

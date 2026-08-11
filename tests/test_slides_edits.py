@@ -18,6 +18,7 @@ from gable.slides.edits import (
     EditError,
     delete_element,
     move_element,
+    occurrences_changed,
     parse_colour,
     replace_image,
     replace_text,
@@ -393,12 +394,12 @@ def test_replace_text_fixes_a_wrong_phone_number() -> None:
 
 
 def test_replace_text_can_be_scoped_to_a_page() -> None:
-    _, body = _only(replace_text("a", "b", page_object_ids=["p1"]))
+    _, body = _only(replace_text("[PRICE]", "$450,000", page_object_ids=["p1"]))
     assert body["pageObjectIds"] == ["p1"]
 
 
 def test_replace_text_omits_scope_when_not_given() -> None:
-    _, body = _only(replace_text("a", "b"))
+    _, body = _only(replace_text("[PRICE]", "$450,000"))
     assert "pageObjectIds" not in body
 
 
@@ -453,3 +454,40 @@ def test_every_targeted_tool_refuses_an_empty_object_id(
     """An empty target becomes an opaque Google error three layers away."""
     with pytest.raises(EditError, match="object_id is required"):
         call()
+
+
+# --- the substring trap -----------------------------------------------------
+
+
+@pytest.mark.parametrize("short", ["3", "4", "MD", "St"])
+def test_a_short_literal_is_refused_because_it_matches_too_much(short: str) -> None:
+    """Correcting a bed count 3 -> 4 would rewrite (443) into (444).
+
+    replaceAllText matches substrings and answers 200 either way, so nothing
+    downstream would notice the phone number had changed.
+    """
+    with pytest.raises(EditError, match="too short to match safely"):
+        replace_text(short, "9")
+
+
+def test_a_short_literal_is_allowed_once_the_caller_has_checked() -> None:
+    _, body = _only(replace_text("3", "4", allow_short=True))
+    assert body["replaceText"] == "4"
+
+
+def test_a_whole_value_is_the_safe_way_to_correct_a_field() -> None:
+    _, body = _only(replace_text("[ 4 BEDS ]", "[ 3 BEDS ]"))
+    assert body["containsText"]["text"] == "[ 4 BEDS ]"
+
+
+def test_occurrences_changed_reads_the_reply() -> None:
+    """Nothing else read this, so Gable could not tell applied from no-op."""
+    assert occurrences_changed({"replaceAllText": {"occurrencesChanged": 3}}) == 3
+
+
+def test_occurrences_changed_is_zero_when_nothing_matched() -> None:
+    assert occurrences_changed({"replaceAllText": {}}) == 0
+
+
+def test_occurrences_changed_ignores_a_reply_of_another_kind() -> None:
+    assert occurrences_changed({"createImage": {"objectId": "x"}}) == 0
