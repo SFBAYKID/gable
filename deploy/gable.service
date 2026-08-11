@@ -29,10 +29,10 @@ User=gable
 Group=gable
 WorkingDirectory=/opt/gable
 
-# ASSUMPTION: the daemon entry point is `python -m gable.slackapp.app`, the
-# Socket Mode bootstrap named in CLAUDE.md section 6. That module is a Phase 0
-# placeholder and has no __main__ yet. Confirmed when app.py lands; if the
-# entry point ends up elsewhere, this line changes with it in the same commit.
+# VERIFIED: `python -m gable.slackapp.app` is the entry point. app.py has a
+# __main__ and main() returns a non-zero exit code on a configuration problem,
+# so a missing token stops the unit rather than leaving a healthy-looking
+# process that answers nobody.
 ExecStart=/opt/gable/.venv/bin/python -m gable.slackapp.app
 
 # .env is chmod 600, owned by gable, and never in git (CLAUDE.md section 3).
