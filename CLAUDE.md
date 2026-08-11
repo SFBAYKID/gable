@@ -320,6 +320,7 @@ gable/
 ├── spikes/                      # findings only; the spike tooling is deleted
 ├── tools/
 │   ├── check_connections.py     # prove every .env credential works, live
+│   ├── adopt_backfill.py        # mark existing rows as history, build none
 │   └── run_workflows.py         # four end-to-end runs against live services
 ├── src/gable/
 │   ├── config.py                # frozen settings dataclass, env parsing
@@ -328,7 +329,12 @@ gable/
 │   ├── sheets/
 │   │   ├── client.py            # Google Sheets API wrapper
 │   │   └── repository.py        # tab reads/writes, idempotency
+│   ├── db/
+│   │   ├── schema.py            # tables and migrations (SQLite)
+│   │   └── store.py             # submissions, runs, facts, spend
 │   ├── listings/
+│   │   ├── intake.py            # the eleven columns that matter
+│   │   ├── enrich.py            # look up beds, baths, square footage
 │   │   ├── normalize.py         # raw row -> Listing, validation
 │   │   └── verify.py            # Firecrawl agent-detail verification
 │   ├── photos/
@@ -344,13 +350,15 @@ gable/
 │   │   ├── edit_common.py       # shared colours, guards, request type
 │   │   └── catalog.py           # the 45 templates, labelled
 │   ├── slackapp/
-│   │   ├── app.py               # Socket Mode bootstrap
+│   │   ├── app.py               # Socket Mode listener
+│   │   ├── brain.py             # reads intent, picks a tool, asks when unsure
 │   │   ├── blocks.py            # Block Kit builders
 │   │   ├── style.py             # the house style, enforced
 │   │   └── handlers.py          # commands, actions, mentions
 │   ├── pipeline/
 │   │   ├── schedule.py          # when to poll: busy hours vs quiet
-│   │   └── orchestrator.py      # end-to-end run for one listing
+│   │   ├── poller.py            # the watch loop, and the backfill refusal
+│   │   └── orchestrator.py      # decides each step; performs none of them
 │   └── cli.py                   # local invocation without Slack
 └── tests/
 ```
@@ -372,17 +380,21 @@ the droplet provisioned and serving photos.
 
 ### Phase 1 — the pipeline, end to end
 
-Sheet watcher → normalize → identify the agent → ask Carmen for the photo → fit
-it → render a Slides copy → check the render → post the link. Carmen edits in
-Slides or replies in the thread.
+Sheet watcher → normalize → identify the agent → research what is public → ask
+what is not → render a Slides copy → check it twice → post the link.
 
-Built so far: the renderer, the edit tools, photo fitting and hosting, the
-template catalogue, the poll schedule, the house style. Not yet wired: the
-Sheets client, the `Runs` tab, the poller, and the orchestrator that joins them.
+**Built and tested:** the renderer, the edit tools, photo fitting and hosting,
+the template catalogue, the poll schedule, the house style, the Slack listener,
+the database, the read-only sheet client, the backfill guard, enrichment, and
+the orchestrator's decisions.
 
-**Before the poller ever runs against the live Sheet it needs a backfill guard.**
-There are 99 historical rows and no `Runs` tab; a first run without one would
-render all of them.
+**Not yet joined up:** the orchestrator decides but nothing calls it in sequence
+against a live submission. That wiring is the remaining work, and it is
+deliberately last — every piece it will call is already tested on its own.
+
+**Before the poller runs against the live Sheet**, `tools/adopt_backfill.py`
+must be run once. There are 99 historical rows and `Poller.ready()` refuses
+until they are adopted.
 
 ### Phase 2 — only once Phase 1 has run for a week on real listings
 

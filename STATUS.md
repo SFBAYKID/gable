@@ -1,14 +1,22 @@
 # Gable — status, and what's needed from Chase
 
-Last updated 2026-08-10 by the building agent.
+Last updated 2026-08-11 by the building agent.
 
-**Every credential is live and verified. Phase 1 is unblocked.** The Canva dead
-end is resolved — Gable renders in Google Slides now (D1 below) — and as of
-2026-08-10 the Google service account exists, holds access, and has driven the
-full render path end to end against the real shared drive.
+**Gable is running on the droplet and answering in Slack.** `@Gable hello` gets
+a reply from `143.110.146.87` under systemd, enabled, restarting on failure.
 
-What remains is not a credential. It is **one template and one design decision**
-(§4). This file is the whole picture in one page.
+**What works end to end today:** a flyer was built from row 100 — Lolo Simmons,
+7940 Oakwood Rd — including an AI-reformatted photo, and 15 change requests were
+applied to it live through their own tools. 45 templates are labelled and filed
+in Drive. Every credential is verified.
+
+**The one thing standing between this and live operation** is wiring: the
+orchestrator decides each step and nothing yet calls it in sequence against a
+real submission. Every piece it will call is built and tested on its own.
+
+**Before the poller ever runs against the live Sheet**, run
+`tools/adopt_backfill.py --commit` once. There are 99 historical rows and the
+poller refuses to start until they are adopted as history.
 
 ---
 
