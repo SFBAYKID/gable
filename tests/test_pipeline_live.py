@@ -176,9 +176,7 @@ def test_a_template_nobody_measured_by_hand_still_places_its_photo() -> None:
     """
     slides = FakeSlides()
 
-    assert (
-        place_hero_photo(slides, "deck-1", "https://images.example/house.jpg", "Unknown") is True
-    )
+    assert place_hero_photo(slides, "deck-1", "https://images.example/house.jpg", "Unknown") is True
     assert slides.body["requests"][0]["deleteObject"]["objectId"] == "p1_i3"
 
 
