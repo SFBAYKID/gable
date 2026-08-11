@@ -412,3 +412,19 @@ that had *fixed* the template's own headline collision.
 **So a vision-pass overlap complaint should be treated as a template issue until
 shown otherwise**, and `TEMPLATE_ISSUES.md` is where it goes. Spending time
 hunting a placement bug behind one of these is spending it on Carmen's design.
+
+## Placed images: headshots are clean, and hero overlap is not a defect
+
+Across the rendered flyers: **23 headshots placed, none covering any text.** The
+2% overlap tolerance added when headshot detection was widened is holding, and
+that was the change most likely to have caused damage.
+
+34 heroes were placed and 11 geometrically overlap text. **That is not a
+defect.** The hero is sent to the back of the z-order, so the copy renders on
+top of the photograph, which is what these designs are. Reading that overlap as
+occlusion would have produced eleven bug reports about the layout working
+correctly.
+
+Recorded because the measurement is tempting and wrong, and because the same
+mistake in the other direction — trusting a count without checking what produces
+it — cost most of a session.
