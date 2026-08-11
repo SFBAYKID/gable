@@ -222,3 +222,108 @@ def test_slacks_own_mailto_link_is_not_a_violation() -> None:
 def test_a_genuine_raw_error_in_angle_brackets_is_still_caught() -> None:
     """The relaxation must not open the door the rule exists to close."""
     assert not is_clean("failed — <HttpError 400 when requesting the API>")
+
+
+# --- nothing Gable can build may break the rules ----------------------------
+
+
+def test_no_block_kit_builder_emits_an_emoji() -> None:
+    """blocks.py predates the guide and was full of them.
+
+    Reads the module source rather than calling every builder, so a new one
+    added later is covered without anyone remembering to test it.
+    """
+    import re
+    from pathlib import Path
+
+    import gable.slackapp.blocks as blocks_module
+
+    source = Path(blocks_module.__file__).read_text(encoding="utf-8")
+    emoji = re.compile("[\U0001f300-\U0001faff\U00002600-\U000027bf\U0001f1e6-\U0001f1ff]")
+    found = emoji.findall(source)
+    assert not found, f"blocks.py still contains emoji: {found}"
+
+
+def test_no_source_file_outside_the_style_module_contains_an_emoji() -> None:
+    """The rule is repo-wide, not just for one file."""
+    import re
+    from pathlib import Path
+
+    emoji = re.compile("[\U0001f300-\U0001faff\U00002600-\U000027bf\U0001f1e6-\U0001f1ff]")
+    root = Path(__file__).resolve().parent.parent / "src" / "gable"
+    offenders: list[str] = []
+    for path in root.rglob("*.py"):
+        if path.name == "style.py":
+            continue  # it defines the patterns, so it necessarily mentions them
+        if emoji.search(path.read_text(encoding="utf-8")):
+            offenders.append(str(path.relative_to(root)))
+    assert not offenders, f"emoji found in: {offenders}"
+
+
+def test_every_block_builder_renders_a_clean_message() -> None:
+    """Source-level checks miss code spans and bracketed placeholders.
+
+    This one calls each builder and runs the rules over the actual strings a
+    reader would see. It caught two backtick spans that the emoji scan did not:
+    the tab name in the unknown-agent card, and the run id in the failure card.
+    """
+    from datetime import UTC, datetime
+
+    from gable.models import AgentProfile, Listing, PhotoResult, PhotoSource
+    from gable.slackapp import blocks
+
+    listing = Listing(
+        response_row_id="r1",
+        submitted_at=datetime(2026, 8, 11, tzinfo=UTC),
+        agent_email="lolo@cornerhouserealty.com",
+        agent_name="Lolo Simmons",
+        address="7940 Oakwood Rd, Glen Burnie, MD 21061",
+        price_display="",
+        agent_phone="(443) 854-8554",
+    )
+    agent = AgentProfile(
+        agent_email="lolo@cornerhouserealty.com",
+        agent_name="Lolo Simmons",
+        template_label="Just Listed",
+    )
+    supplied = PhotoResult(
+        source=PhotoSource.CARMEN, url="http://198.51.100.7/a.jpg", confidence=1.0
+    )
+    generated = PhotoResult(
+        source=PhotoSource.GENERATED,
+        url="http://198.51.100.7/b.jpg",
+        confidence=1.0,
+        ai_generated=True,
+    )
+
+    def rendered(built: list[dict]) -> list[str]:  # type: ignore[type-arg]
+        out: list[str] = []
+        for block in built:
+            text = block.get("text", {})
+            if isinstance(text, dict) and text.get("text"):
+                out.append(str(text["text"]))
+            for f in block.get("fields") or []:
+                if f.get("text"):
+                    out.append(str(f["text"]))
+            for el in block.get("elements") or []:
+                inner = el.get("text")
+                if isinstance(inner, dict) and inner.get("text"):
+                    out.append(str(inner["text"]))
+                elif isinstance(inner, str):
+                    out.append(inner)
+        return out
+
+    cases = {
+        "listing_ready": blocks.listing_ready_blocks(listing, agent, supplied, "run1"),
+        "needs_photo": blocks.needs_photo_blocks(listing, ("Drive folder",), None, 0.75, "run1"),
+        "ai_generated": blocks.ai_generated_blocks(listing, generated, "run1"),
+        "unknown_agent": blocks.unknown_agent_blocks(listing, ("Just Listed",), "run1"),
+        "batch": blocks.batch_delivered_blocks(("123 Anywhere St", "456 Oak Ave"), 1),
+        "failure": blocks.failure_blocks(listing.address, "Google refused that edit", "run1"),
+    }
+    problems: list[str] = []
+    for name, built in cases.items():
+        for text in rendered(built):
+            for problem in violations(text):
+                problems.append(f"{name}: {text[:60]!r} — {problem}")
+    assert not problems, "\n".join(problems)

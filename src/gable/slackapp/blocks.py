@@ -45,7 +45,7 @@ ACTION_PICK_TEMPLATE: Final[str] = "gable_pick_template"
 #: value of GABLE_PHOTO_POLICY. If a synthetic image reaches a flyer, the record
 #: of that must be impossible to miss.
 AI_WARNING_HEADLINE: Final[str] = (
-    "⚠️ THIS IMAGE IS AI-GENERATED. It is not a photograph of this property."
+    "*This image is AI-generated.* It is not a photograph of this property."
 )
 AI_WARNING_BODY: Final[str] = (
     "Do not use this on a public listing without confirming it is acceptable."
@@ -121,8 +121,8 @@ def describe_photo(photo: PhotoResult | None) -> str:
         return "None found"
     phrase = _SOURCE_PHRASES.get(photo.source, photo.source.value)
     if photo.source.is_synthetic:
-        return f"🤖 {phrase}"
-    marker = "✅" if photo.source.is_human_supplied else "🔎"
+        return f"AI-generated — {phrase}"
+    marker = "Supplied" if photo.source.is_human_supplied else "Found"
     if photo.confidence >= 1.0 or photo.source.is_human_supplied:
         detail = phrase
     else:
@@ -161,11 +161,11 @@ def listing_ready_blocks(
     """
     template = agent.display_template if agent else "(no template mapped)"
     summary: Block = _text(
-        f"🏠  *{listing.address or '_address missing_'}*\n"
-        f"*Agent*  {_agent_line(listing)}\n"
-        f"*Template*  {template}\n"
-        f"*Photo*  {describe_photo(photo)}\n"
-        f"*Price*  {listing.price_display or '_price missing_'}"
+        f"*{listing.address or 'Address missing'}*\n"
+        f"Agent  {_agent_line(listing)}\n"
+        f"Template  {template}\n"
+        f"Photo  {describe_photo(photo)}\n"
+        f"Price  {listing.price_display or 'not on the request form'}"
     )
     accessory = _photo_accessory(photo, listing.address)
     if accessory:
@@ -209,7 +209,7 @@ def needs_photo_blocks(
         Block Kit blocks ready to post.
     """
     lines = [
-        f"⚠️  *{listing.address or '_address missing_'}*",
+        f"*{listing.address or 'Address missing'}* — needs a photo",
         "No photo on the form submission.",
     ]
     if searched:
@@ -260,7 +260,7 @@ def ai_generated_blocks(listing: Listing, photo: PhotoResult, run_id: str) -> li
         raise ValueError("ai_generated_blocks called with a photo not flagged ai_generated")
 
     summary: Block = _text(
-        f"🤖  *{listing.address or '_address missing_'}*\n"
+        f"*{listing.address or 'Address missing'}*\n"
         f"*{AI_WARNING_HEADLINE}*\n\n"
         "No real photo was found after checking the form, Drive, the brokerage "
         "site, and the web. Under the current policy I generated one.\n\n"
@@ -296,10 +296,10 @@ def unknown_agent_blocks(
         Block Kit blocks ready to post.
     """
     summary = _text(
-        f"❓  *{listing.address or '_address missing_'}* — submitted by "
-        f"{listing.agent_email or '_unknown sender_'}\n"
+        f"*{listing.address or 'Address missing'}* — submitted by "
+        f"{listing.agent_email or 'an unknown sender'}\n"
         "I don't have a template mapped for this agent.\n\n"
-        "Add a row to the `Agents` tab, or tell me which template to use."
+        "Add a row to the Sales_People tab, or tell me which template to use."
     )
     buttons = [
         # The label is the payload: handlers need to know which template was
@@ -335,7 +335,7 @@ def batch_delivered_blocks(
     count = len(ready_addresses)
     noun = "post" if count == 1 else "posts"
     blocks: list[Block] = [
-        _text(f"📦  *{count} {noun} ready*"),
+        _text(f"*{count} {noun} ready*"),
         _text(
             "Each one is a Google Slides file — open the link on its message to "
             "tweak it yourself, or reply in that thread and I'll redo it."
@@ -363,6 +363,9 @@ def failure_blocks(address: str, reason: str, run_id: str) -> list[Block]:
         Block Kit blocks ready to post.
     """
     return [
-        _text(f"❌  *{address or '_address missing_'}*\n{reason or 'no reason recorded'}"),
-        _context(f"`{run_id}` · retry with `/gable retry {run_id}`"),
+        _text(
+            f"*{address or 'Address missing'}* — I couldn't finish this one.\n"
+            f"{reason or 'I do not have a reason recorded, which is itself a bug.'}"
+        ),
+        _context(f"Run {run_id} · retry with /gable retry {run_id}"),
     ]

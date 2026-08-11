@@ -390,7 +390,7 @@ falls straight through to "ask".
 
 Gable asks in the thread and waits:
 
-> 🏠 **New listing — Lolo Simmons, 123 Main St**
+> **New listing — Lolo Simmons, 123 Main St**
 > Template 1. Which photo do you want as the hero?
 
 Status is `needs_photo`. A photo a human supplies is **final** — never
