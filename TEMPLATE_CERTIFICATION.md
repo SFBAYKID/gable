@@ -97,11 +97,27 @@ land at exactly 1080x1350, filling the frame, none seamed.
 | PNG 1600x1200 | fits |
 | Huge 6000x4000 | fits |
 
-This is the fitting half of "a photo of any reasonable size or shape". What it
-does **not** prove is the Slack leg: these went through `fit_locally` directly,
-not through a real upload, download and publish. An EXIF-rotated phone original
-has also not been through the real path — `fit.py` calls `exif_transpose`, but
-that has not been exercised end to end.
+## The Slack leg — proved 2026-08-11
+
+The gap named above is now closed. A real photo went the whole way:
+
+| Step | Result |
+|---|---|
+| Source | 3024x4032 portrait, **EXIF orientation 6**, 1.0 MB — a phone held sideways |
+| Uploaded to Slack | Monarch Bot Playground (`C0BP597644B`), not the production channel |
+| `files_info` | returned `url_private_download` |
+| `download_private_image` | 1.0 MB, **byte-identical** to what was uploaded |
+| EXIF handling | applied — the stored 3024x4032 reads back as 4032x3024 upright |
+| `fit_locally` | exactly 1080x1350 |
+| `publish` to the droplet | succeeded |
+| `verify_public` | 200, `image/jpeg` |
+
+So the complete photo path — a person dropping a file in Slack through to a URL
+Slides can fetch — is proved, on a multi-megabyte EXIF-rotated portrait, which
+is the case most likely to break.
+
+**This posted one message and one file into the playground channel.** That is
+the channel designated for testing; nothing was sent to production.
 
 ## The Sold flyer, assessed by looking at it
 
