@@ -191,3 +191,47 @@ per-template job.
 `Coming Soon — Something Great Is On the Way` and
 `Open House — Two Agents, Two Dates` raised rather than returning a status. Not
 yet diagnosed.
+
+## Re-walk with the readback guard — 2026-08-11
+
+| Outcome | Before | After |
+|---|---|---|
+| delivered | 2 | 1 |
+| needs_review | 41 | 44 |
+| failed | 2 | 0 |
+
+The two failures are gone and the delivery count dropped, which is the guard
+working: fewer flyers pass, and the one that does was checked.
+
+`Open House — Two Agents, Two Dates` delivered with the **correct** price
+(`$685,000`) and address, the supplied photo placed, and the agent's real
+headshot. Verified by reading the slide text and by looking at it.
+
+### The guard's blind spot, found by looking at the flyer it passed
+
+That same delivered flyer carries **`Stacey Abbott`, `410.952.6193`,
+`sabbotthomes@gmail.com`** — sample data from the template's second agent slot.
+The open-house dates are the template's too (August 8 and 9), not the submitted
+time.
+
+The readback guard cannot catch this. It verifies that **supplied values
+appear**; it has nothing to compare against for a value that was never supplied.
+On a two-agent design where only one agent is known, the other agent's sample
+identity survives intact and looks entirely real.
+
+**This is the same severity as the wrong price.** A flyer going out with a
+stranger's phone number and personal email on it is worse than a layout defect,
+and it passed every check.
+
+**What would catch it:** the same list that already powers
+`fields.SAMPLE_AGENT_NAMES`, extended to sample phone numbers, emails and dates,
+asserted as an absence check after filling — no known sample value may remain on
+a delivered flyer. Two-agent designs additionally need either a second agent
+from the submission or a refusal, because a design with a slot Gable cannot fill
+is not a design Gable can finish.
+
+### Where certification actually stands
+
+**0 of 45 certified.** One template delivers with correct supplied values and
+still carries another person's contact details. Certification remains Carmen's
+judgement and she has not seen any of these.
