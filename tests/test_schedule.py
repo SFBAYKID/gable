@@ -31,13 +31,13 @@ def _central(year: int, month: int, day: int, hour: int, minute: int = 0) -> dat
 # --- the window -------------------------------------------------------------
 
 
-@pytest.mark.parametrize("hour", [7, 8, 12, 16])
+@pytest.mark.parametrize("hour", [7, 8, 12, 16, 18, 20])
 def test_weekday_working_hours_are_busy(hour: int) -> None:
     # 2026-08-10 is a Monday.
     assert is_business_hours(_central(2026, 8, 10, hour)) is True
 
 
-@pytest.mark.parametrize("hour", [0, 3, 6, 17, 18, 23])
+@pytest.mark.parametrize("hour", [0, 3, 6, 21, 22, 23])
 def test_weekday_off_hours_are_quiet(hour: int) -> None:
     assert is_business_hours(_central(2026, 8, 10, hour)) is False
 
@@ -47,10 +47,17 @@ def test_window_opens_exactly_at_seven() -> None:
     assert is_business_hours(_central(2026, 8, 10, 6, 59)) is False
 
 
-def test_window_closes_exactly_at_five() -> None:
-    """Half-open: 17:00:00 is already quiet."""
-    assert is_business_hours(_central(2026, 8, 10, 16, 59)) is True
-    assert is_business_hours(_central(2026, 8, 10, 17, 0)) is False
+def test_window_closes_at_seven_pacific() -> None:
+    """19:00 Pacific is 21:00 Central. Half-open, so 21:00:00 is already quiet."""
+    assert is_business_hours(_central(2026, 8, 10, 20, 59)) is True
+    assert is_business_hours(_central(2026, 8, 10, 21, 0)) is False
+
+
+def test_seven_pm_pacific_is_the_boundary_in_its_own_zone() -> None:
+    """Stated in Pacific, since that is how Chase specified it."""
+    pacific = ZoneInfo("America/Los_Angeles")
+    assert is_business_hours(datetime(2026, 8, 10, 18, 59, tzinfo=pacific)) is True
+    assert is_business_hours(datetime(2026, 8, 10, 19, 0, tzinfo=pacific)) is False
 
 
 def test_a_request_at_four_fifty_eight_friday_is_still_busy() -> None:
@@ -62,8 +69,9 @@ def test_a_request_at_four_fifty_eight_friday_is_still_busy() -> None:
 
 
 @pytest.mark.parametrize("day", [15, 16])  # Saturday, Sunday
-def test_weekends_are_quiet_even_at_noon(day: int) -> None:
-    assert is_business_hours(_central(2026, 8, day, 12)) is False
+def test_weekends_are_busy_too(day: int) -> None:
+    """The schedule names hours, not weekdays, and agents submit at weekends."""
+    assert is_business_hours(_central(2026, 8, day, 12)) is True
 
 
 def test_monday_morning_is_busy_again() -> None:
@@ -83,26 +91,17 @@ def test_naive_input_is_treated_as_utc() -> None:
     assert is_business_hours(datetime(2026, 8, 10, 15, 0)) is True
 
 
-def test_midnight_utc_is_the_previous_evening_in_central() -> None:
-    """00:00 UTC Tuesday is 19:00 Monday Central: quiet, and still a weekday."""
-    assert is_business_hours(datetime(2026, 8, 11, 0, 0, tzinfo=UTC)) is False
+def test_midnight_utc_is_still_the_working_evening_in_central() -> None:
+    """00:00 UTC Tuesday is 19:00 Monday Central — inside the widened window.
 
-
-def test_saturday_utc_can_be_friday_afternoon_in_central() -> None:
-    """The weekday check must run on the CONVERTED instant, not the input.
-
-    2026-08-15 01:00 UTC is Saturday in UTC and 20:00 Friday in Central. Both
-    readings agree on quiet here, so the sharper case is the reverse below.
+    Under the old 07:00-17:00 rule this was quiet. Widening to 19:00 Pacific
+    moved it, which is exactly the kind of change a boundary test should catch.
     """
-    assert is_business_hours(datetime(2026, 8, 15, 1, 0, tzinfo=UTC)) is False
+    assert is_business_hours(datetime(2026, 8, 11, 0, 0, tzinfo=UTC)) is True
 
 
-def test_monday_early_utc_is_still_sunday_in_central() -> None:
-    """A UTC-only weekday check would get this one wrong.
-
-    04:00 UTC Monday is 23:00 Sunday Central: a weekday in UTC, and correctly
-    the weekend once converted.
-    """
+def test_late_utc_is_still_the_previous_evening_in_central() -> None:
+    """04:00 UTC Monday is 23:00 Sunday Central — outside the window."""
     assert is_business_hours(datetime(2026, 8, 17, 4, 0, tzinfo=UTC)) is False
 
 
@@ -138,7 +137,7 @@ def test_interval_switches_with_the_window() -> None:
 def test_custom_intervals_are_honored() -> None:
     schedule = PollSchedule(busy_interval_seconds=60, quiet_interval_seconds=900)
     assert schedule.interval_seconds(_central(2026, 8, 10, 9)) == 60
-    assert schedule.interval_seconds(_central(2026, 8, 15, 9)) == 900
+    assert schedule.interval_seconds(_central(2026, 8, 15, 23)) == 900
 
 
 @pytest.mark.parametrize(
@@ -167,11 +166,11 @@ def test_describe_names_the_window_and_the_rate() -> None:
 
 def test_describe_says_when_it_is_quiet() -> None:
     schedule = PollSchedule()
-    assert schedule.describe(_central(2026, 8, 15, 9)) == "every 10m (outside business hours)"
+    assert schedule.describe(_central(2026, 8, 15, 23)) == "every 10m (outside business hours)"
 
 
 def test_describe_falls_back_to_seconds_when_minutes_would_be_fractional() -> None:
     """`90s` reads better than `1.5m`."""
     schedule = PollSchedule(busy_interval_seconds=90, quiet_interval_seconds=45)
     assert "90s" in schedule.describe(_central(2026, 8, 10, 9))
-    assert "45s" in schedule.describe(_central(2026, 8, 15, 9))
+    assert "45s" in schedule.describe(_central(2026, 8, 15, 23))

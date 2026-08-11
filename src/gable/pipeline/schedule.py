@@ -3,8 +3,14 @@
 Requests arrive during the working day, so Gable polls fast while Carmen and the
 agents are working and slowly the rest of the time (ARCHITECTURE.md 2.6):
 
-    Mon-Fri, 07:00-17:00 US Central   ->  every 2 minutes
-    everything else                   ->  every 10 minutes
+    07:00 US Central to 19:00 US Pacific  ->  every 2 minutes
+    everything else                       ->  every 10 minutes
+
+Chase specified those two zones, not one. 19:00 Pacific is 21:00 Central, so the
+busy window is 07:00-21:00 Central — fourteen hours, not the ten an earlier
+version implemented. It is stated in Central here because comparing one instant
+against one zone is simpler to reason about than two, and the conversion is
+fixed: both zones observe US daylight saving on the same dates.
 
 Everything here is pure. The caller supplies the instant; nothing in this module
 reads a clock, which is what makes the daylight-saving behaviour testable rather
@@ -27,10 +33,8 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 OPERATING_TIMEZONE_NAME: Final[str] = "America/Chicago"
 
 BUSINESS_START: Final[time] = time(7, 0)
-BUSINESS_END: Final[time] = time(17, 0)
-
-# Monday is 0 in datetime.weekday(); Saturday and Sunday are 5 and 6.
-_FIRST_WEEKEND_DAY: Final[int] = 5
+#: 19:00 US Pacific expressed in Central, which is where the comparison runs.
+BUSINESS_END: Final[time] = time(21, 0)
 
 BUSY_INTERVAL_SECONDS: Final[int] = 120
 QUIET_INTERVAL_SECONDS: Final[int] = 600
@@ -67,8 +71,12 @@ def is_business_hours(moment: datetime, zone: tzinfo | None = None) -> bool:
         zone: The zone defining the window. Defaults to `operating_timezone()`.
 
     Returns:
-        True on Mon-Fri between 07:00 and 17:00 in `zone`. The window is
-        half-open: 07:00:00 is inside it, 17:00:00 is not.
+        True between 07:00 and 21:00 in `zone`, every day. The window is
+        half-open: 07:00:00 is inside it, 21:00:00 is not.
+
+        Weekends are deliberately included. Chase's schedule names hours, not
+        weekdays, and agents do submit at weekends — 18 of the 99 rows on the
+        live sheet are Saturday or Sunday.
 
     Raises:
         Nothing.
@@ -78,10 +86,7 @@ def is_business_hours(moment: datetime, zone: tzinfo | None = None) -> bool:
 
     local = moment.astimezone(zone if zone is not None else operating_timezone())
 
-    if local.weekday() >= _FIRST_WEEKEND_DAY:
-        return False
-
-    # Half-open so that a schedule flipping to quiet at exactly 17:00 does not
+    # Half-open so that a schedule flipping to quiet at exactly 21:00 does not
     # depend on whether the clock ticked before or after the comparison.
     return BUSINESS_START <= local.time() < BUSINESS_END
 

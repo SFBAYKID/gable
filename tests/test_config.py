@@ -190,10 +190,11 @@ def test_poll_schedule_maps_the_quiet_variable_to_the_quiet_rate() -> None:
     schedule = settings.poll_schedule
     assert schedule.quiet_interval_seconds == 900
     assert schedule.busy_interval_seconds == 60
-    # Monday 09:00 Central.
+    # Monday 09:00 Central — inside the window.
     assert schedule.interval_seconds(datetime(2026, 8, 10, 14, 0, tzinfo=UTC)) == 60
-    # Sunday 09:00 Central.
-    assert schedule.interval_seconds(datetime(2026, 8, 16, 14, 0, tzinfo=UTC)) == 900
+    # Monday 04:00 Central — before it opens. The window now runs to 19:00
+    # Pacific and covers weekends, so a quiet hour has to be an early one.
+    assert schedule.interval_seconds(datetime(2026, 8, 10, 9, 0, tzinfo=UTC)) == 900
 
 
 def test_batch_ceiling_is_enforced() -> None:
