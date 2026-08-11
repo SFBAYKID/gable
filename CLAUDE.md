@@ -503,7 +503,16 @@ A task is complete only when all of these are true:
 - Commit `.env` or a service-account JSON.
 - Delete or overwrite rows in the Google Sheet. Gable **appends** to `Runs` and
   reads everything else. It never mutates form responses.
-- Send a Slack message to any channel other than `C0BP597644B` without asking.
+- **Post anything to `C0BP597644B` while testing.** That is **#calvo, the
+  production channel**, where Carmen and real staff are. All testing goes to
+  **`C0B02721MNK` (monarch-bot-playground)** and nowhere else.
+
+  This line previously read "never send a Slack message to any channel other
+  than `C0BP597644B`", which named the production channel as the only approved
+  one and contradicted `AGENTS.md` §2. An agent followed it and posted a test
+  photo into #calvo on 2026-08-11. Check the channel id against this line and
+  `AGENTS.md` before any Slack write, and never hardcode one from memory.
+- Send a Slack message to any channel other than those two without asking.
 - Send email, or message a real-estate agent directly. Gable talks to Carmen and
   to Chase. It does not talk to clients.
 - Publish, share, or export a finished design. Gable renders a Slides file into
