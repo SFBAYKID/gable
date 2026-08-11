@@ -21,9 +21,9 @@ from gable.pipeline.runner import Runner, default_research, template_picker
 from gable.pipeline.vision import Inspection
 from gable.pipeline.vision import inspect as inspect_flyer
 from gable.slides import fitting
-from gable.slides import manifest as template_manifest
 from gable.slides.edits import replace_text
 from gable.slides.elements import descendants, font_size_pt, text_content
+from gable.slides.hero import find_hero_frame
 from gable.voice import is_clean
 
 logger = logging.getLogger("gable.live")
@@ -76,14 +76,16 @@ def place_hero_photo(
     url: str,
     template_label: str,
 ) -> bool:
-    """Replace a measured hero layer and verify the API accepted it.
+    """Replace the measured hero frame and verify the API accepted it.
 
     Args:
         slides: A Slides v1 resource.
         file_id: The copied presentation to edit.
         url: A public image URL already verified by the runner.
-        template_label: Exact catalogue filename used to find measured layer
-            metadata.
+        template_label: Catalogue filename. Kept for logging and for the
+            caller's signature; the frame itself is now measured from the
+            presentation rather than looked up by name, because a stored id
+            goes stale the moment a template is re-exported.
 
     Returns:
         True only when Google reports a reply for every placement request.
@@ -107,10 +109,17 @@ def place_hero_photo(
             logger.error("hero photo placement found no usable slide size")
             return False
 
-        target_id = template_manifest.manifest_for(template_label).hero_object_id
-        if not target_id:
-            logger.error("hero photo placement has no measured layer for this template")
+        # Measure the frame rather than looking up a hand-read object id. Only
+        # three of the 45 designs ever had one recorded, and one of those three
+        # was wrong — `Just Listed — Plus Open House — Offered At` named a band
+        # inside the photo instead of the photo. See `slides/hero.py` for how
+        # the templates are actually built and why an image-element search finds
+        # nothing on 44 of them.
+        frame = find_hero_frame(page, slide_w, slide_h)
+        if frame is None:
+            logger.error("hero photo placement could not find a photo frame in %s", template_label)
             return False
+        target_id = frame.object_id
         matches = [
             element
             for element in page.get("pageElements", [])
@@ -129,15 +138,20 @@ def place_hero_photo(
                     "url": url,
                     "elementProperties": {
                         "pageObjectId": page["objectId"],
+                        # The frame's own bounds, not the whole slide. Sizing to
+                        # the slide letterboxed a landscape photo into a
+                        # portrait design and painted over the layout.
                         "size": {
-                            "width": {"magnitude": slide_w, "unit": "EMU"},
-                            "height": {"magnitude": slide_h, "unit": "EMU"},
+                            "width": {"magnitude": frame.width, "unit": "EMU"},
+                            "height": {"magnitude": frame.height, "unit": "EMU"},
                         },
+                        # ABSOLUTE, and position restated explicitly: RELATIVE
+                        # multiplies translation as well as scale (§4.3).
                         "transform": {
                             "scaleX": 1,
                             "scaleY": 1,
-                            "translateX": 0,
-                            "translateY": 0,
+                            "translateX": frame.x,
+                            "translateY": frame.y,
                             "unit": "EMU",
                         },
                     },

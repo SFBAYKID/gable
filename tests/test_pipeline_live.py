@@ -125,9 +125,12 @@ def test_hero_photo_success_is_based_on_the_slides_reply() -> None:
     hero_id = requests[1]["createImage"]["objectId"]
     assert hero_id.startswith("gableHero_")
     assert requests[0]["deleteObject"]["objectId"] == "p1_i3"
+    # The photo takes the frame's own bounds, not the whole slide. Sizing to the
+    # slide letterboxed a landscape photo inside a portrait design and painted
+    # over the layout underneath it.
     assert requests[1]["createImage"]["elementProperties"]["size"] == {
-        "width": {"magnitude": 10_000_000, "unit": "EMU"},
-        "height": {"magnitude": 12_500_000, "unit": "EMU"},
+        "width": {"magnitude": 8_000_000, "unit": "EMU"},
+        "height": {"magnitude": 6_000_000, "unit": "EMU"},
     }
     assert requests[1]["createImage"]["elementProperties"]["transform"] == {
         "scaleX": 1,
@@ -163,13 +166,20 @@ def test_hero_photo_rejects_an_incomplete_api_reply() -> None:
     )
 
 
-def test_hero_photo_refuses_an_unmeasured_template_without_deleting_anything() -> None:
+def test_a_template_nobody_measured_by_hand_still_places_its_photo() -> None:
+    """The frame is measured from the design, so an unlisted name is fine.
+
+    Only three of the 45 templates ever had a hand-read object id recorded, and
+    one of those three was wrong. Requiring the name to be known meant 42
+    designs refused to deliver. Measuring the frame removes the lookup, so a
+    template the catalogue has never seen still works.
+    """
     slides = FakeSlides()
 
     assert (
-        place_hero_photo(slides, "deck-1", "https://images.example/house.jpg", "Unknown") is False
+        place_hero_photo(slides, "deck-1", "https://images.example/house.jpg", "Unknown") is True
     )
-    assert slides.body == {}
+    assert slides.body["requests"][0]["deleteObject"]["objectId"] == "p1_i3"
 
 
 def test_hero_photo_refuses_when_the_measured_layer_is_absent() -> None:
