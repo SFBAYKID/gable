@@ -173,6 +173,7 @@ def build_runner(
     slack_post: Any,  # noqa: ANN401
     *,
     hero_photo_url: str = "",
+    origin_thread_ts: str = "",
 ) -> Runner:
     """Assemble a `Runner` that talks to the real services.
 
@@ -184,6 +185,7 @@ def build_runner(
         slack_post: A callable taking `(text, thread_ts)` and returning the
             thread timestamp it landed in.
         hero_photo_url: A fitted, published photo when resuming a paused run.
+        origin_thread_ts: Root Slack thread that a resumed run must preserve.
 
     Returns:
         A ready `Runner`.
@@ -387,6 +389,7 @@ def build_runner(
         apply=apply,
         thumbnail=thumbnail,
         hero_photo_url=hero_photo_url,
+        origin_thread_ts=origin_thread_ts,
     )
 
 

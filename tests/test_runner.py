@@ -166,6 +166,22 @@ def test_a_complete_listing_is_built_and_delivered(db: sqlite3.Connection) -> No
     assert any("Open the flyer" in said for said in rec.said)
 
 
+def test_a_resumed_delivery_preserves_the_root_thread_timestamp(
+    db: sqlite3.Connection,
+) -> None:
+    submission = _submission(rid="rid-delivered-thread")
+    _record(db, submission)
+    runner = _runner(db, Recorder())
+    runner.origin_thread_ts = "1786468156.701419"
+
+    result = runner.run(submission)
+
+    row = db.execute(
+        "SELECT slack_thread_ts FROM runs WHERE run_id = ?", (result.run_id,)
+    ).fetchone()
+    assert row["slack_thread_ts"] == "1786468156.701419"
+
+
 def test_researched_facts_reach_the_flyer(db: sqlite3.Connection) -> None:
     """Beds, baths and square footage are looked up, not asked for."""
     submission = _submission()
@@ -210,6 +226,23 @@ def test_sold_with_no_closing_price_stops_and_asks(db: sqlite3.Connection) -> No
     assert result.needs_a_human is True
     assert rec.copied is False, "nothing should be built while a question is open"
     assert "closing price" in rec.said[0].lower()
+
+
+def test_a_resumed_question_preserves_the_root_thread_timestamp(
+    db: sqlite3.Connection,
+) -> None:
+    submission = _submission(request_type="Sold", rid="rid-question-thread")
+    _record(db, submission)
+    runner = _runner(db, Recorder())
+    runner.origin_thread_ts = "1786468156.701419"
+
+    result = runner.run(submission)
+
+    row = db.execute(
+        "SELECT slack_thread_ts FROM runs WHERE run_id = ?", (result.run_id,)
+    ).fetchone()
+    assert result.status == "needs_info"
+    assert row["slack_thread_ts"] == "1786468156.701419"
 
 
 def test_an_unusable_address_stops_and_asks(db: sqlite3.Connection) -> None:

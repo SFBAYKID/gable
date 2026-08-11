@@ -159,6 +159,7 @@ def build_components(settings: Settings) -> RuntimeComponents:
             event_slides,
             post_in_origin_thread,
             hero_photo_url=photo_url,
+            origin_thread_ts=thread_ts,
         )
 
     def upscale_photo(

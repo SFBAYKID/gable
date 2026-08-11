@@ -94,6 +94,9 @@ class Runner:
     #: The hero photo for this listing, already fitted and published, or "" if
     #: none has been supplied yet.
     hero_photo_url: str = ""
+    #: Root Slack thread for a resumed run. Replies return their own timestamp,
+    #: but the run must keep this root so the next human response still maps.
+    origin_thread_ts: str = ""
     #: Places the hero photo into a rendered flyer.
     place_photo: Callable[[str, str, str], bool] = lambda _fid, _url, _template: False
     #: Proves that the photo URL is usable for the target slot. The live
@@ -379,14 +382,15 @@ class Runner:
         result.output_url = output_url
         message = safe(f"Your flyer is ready. <{output_url}|Open the flyer>")
         result.said.append(message)
-        thread = self.say(message, None)
-        if thread:
+        posted_ts = self.say(message, self.origin_thread_ts or None)
+        thread_root = self.origin_thread_ts or posted_ts
+        if thread_root:
             store.set_status(
                 self.connection,
                 run_id,
                 "delivered",
                 "thread recorded",
-                slack_thread_ts=thread,
+                slack_thread_ts=thread_root,
             )
         return result
 
@@ -400,8 +404,15 @@ class Runner:
     ) -> RunResult:
         """Stop the run and put a question in Slack."""
         asked = safe(question or "I need one more thing before I can build this.")
-        thread = self.say(asked, None)
-        store.set_status(self.connection, run_id, status, asked[:200], slack_thread_ts=thread or "")
+        posted_ts = self.say(asked, self.origin_thread_ts or None)
+        thread_root = self.origin_thread_ts or posted_ts
+        store.set_status(
+            self.connection,
+            run_id,
+            status,
+            asked[:200],
+            slack_thread_ts=thread_root,
+        )
         result.status = status
         result.said.append(asked)
         result.questions = [asked, *[q.ask for q in questions[1:]]]
