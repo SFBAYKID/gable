@@ -151,6 +151,18 @@ def manifest_for(template_name: str) -> Manifest:
 #: format is pinned and a missing ZIP fails validation rather than rendering.
 ADDRESS_SHAPE: Final[re.Pattern[str]] = re.compile(r"^.+,\s*.+,\s*[A-Z]{2}\s+\d{5}(?:-\d{4})?$")
 
+# ASSUMPTION: If an address already ends in a state and ZIP and the preceding
+# text contains a recognized street suffix followed by words, those final words
+# are the city. A larger sample of real form submissions would confirm whether
+# the suffix list needs expanding; this deliberately refuses ambiguous strings.
+_MISSING_CITY_COMMA: Final[re.Pattern[str]] = re.compile(
+    r"^(?P<street>.+\b(?:ALLEY|ANNEX|ARCADE|AVENUE|AVE|BEND|BOULEVARD|BLVD|"
+    r"CIRCLE|CIR|COURT|CT|DRIVE|DR|EXPRESSWAY|HIGHWAY|HWY|LANE|LN|PARKWAY|"
+    r"PKWY|PLACE|PL|PLAZA|ROAD|RD|SQUARE|SQ|STREET|ST|TERRACE|TER|TRAIL|"
+    r"TRL|WAY))\s+(?P<city>[A-Z][A-Z .'-]+),\s*(?P<state>[A-Z]{2}\s+\d{5}(?:-\d{4})?)$",
+    re.IGNORECASE,
+)
+
 
 def normalise_address(address: str) -> str:
     """Put an address into the canonical shape where possible.
@@ -170,6 +182,13 @@ def normalise_address(address: str) -> str:
     tidy = re.sub(r"\s*,\s*", ", ", tidy)
     # "Baltimore MD 21228" -> "Baltimore, MD 21228"
     tidy = re.sub(r"(?<![,])\s+([A-Z]{2})\s+(\d{5})", r", \1 \2", tidy)
+    if not ADDRESS_SHAPE.match(tidy):
+        missing_comma = _MISSING_CITY_COMMA.match(tidy)
+        if missing_comma is not None:
+            tidy = (
+                f"{missing_comma.group('street')}, {missing_comma.group('city')}, "
+                f"{missing_comma.group('state')}"
+            )
     return tidy.strip(" ,")
 
 
@@ -230,8 +249,8 @@ def validate(manifest: Manifest, values: dict[str, str]) -> list[Problem]:
             problems.append(
                 Problem(
                     slot.name,
-                    f"The address reads {value!r}, which is missing a state or ZIP. "
-                    "What is the full address?",
+                    f"The address reads {value!r}, and I could not separate the street, "
+                    "city, state and ZIP confidently. What is the full address?",
                 )
             )
 
