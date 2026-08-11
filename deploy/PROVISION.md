@@ -218,3 +218,51 @@ Scoped to exactly that one command — not a blanket NOPASSWD.
 5. Where you put the service-account JSON, so I can fix `ProtectHome` if needed.
 6. `systemctl status gable` after step 8. "enabled, inactive (dead)" is correct
    at this stage and is what I expect to see.
+
+
+---
+
+## Deployed 2026-08-11 — the Slack listener is live
+
+Recorded because the next person needs the real steps, not the intended ones.
+
+**Access.** The droplet pulls from GitHub with a **read-only deploy key**
+(`/root/.ssh/gable_deploy`, registered on the repo as "gable droplet
+(read-only)"). Read-only is deliberate: the droplet never needs to push, and a
+compromised box should not be able to rewrite the repo. `/root/.ssh/config`
+pins that key to `github.com`.
+
+**Layout.**
+
+    /opt/gable/                  the repo, owned by gable:gable
+    /opt/gable/.venv/            the virtualenv
+    /opt/gable/.env              mode 600, gable:gable
+    /opt/gable/secrets/          the service-account key, mode 600
+
+**The one thing that differs from the local checkout.** `.env` is copied with
+`GOOGLE_SERVICE_ACCOUNT_FILE` rewritten to `/opt/gable/secrets/...`. Everything
+else is identical, so a variable that works locally works here.
+
+**Deploying an update:**
+
+    ssh root@143.110.146.87 'cd /opt/gable && git pull --ff-only \
+      && install -m 644 deploy/gable.service /etc/systemd/system/gable.service \
+      && systemctl daemon-reload && systemctl restart gable'
+
+`git` needs `safe.directory` set for `/opt/gable`, because root pulls into a
+tree owned by `gable`. It is configured; a fresh box will need it again.
+
+**Two things worth knowing.**
+
+- `journalctl -u gable` shows warnings from *earlier boots*. A
+  `StartLimitIntervalSec in section 'Service'` warning appeared after a deploy
+  that had already fixed it — the entry was historical. Use
+  `journalctl -u gable --since "1 minute ago"` when checking a restart, and
+  `systemd-analyze verify` for the file itself.
+- Bolt auto-enables an OAuth installation store when `SLACK_CLIENT_ID` and
+  `SLACK_CLIENT_SECRET` are present, and then ignores the bot token. `app.py`
+  hides those two before constructing the app. Do not "helpfully" remove that.
+
+**Verified after deploy:** `systemctl is-active` active, `is-enabled` enabled,
+a clean start with no unknown keys, 33 MB resident on a 1 GB box, and the local
+copy stopped so exactly one listener holds the Socket Mode connection.
