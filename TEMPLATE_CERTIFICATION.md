@@ -132,3 +132,62 @@ is a judgement about a design flourish rather than a pipeline failure.
 
 Still not certified, because certification means Carmen looked at it. But the
 gap between this and deliverable is now one cosmetic overlap, not a list.
+
+## All 45 templates walked — 2026-08-11
+
+Every template forced through the pipeline with a valid Sold submission and a
+real photo. Not a sampling: all 45.
+
+| Outcome | Count |
+|---|---|
+| delivered | 2 |
+| needs_review | 41 |
+| failed | 2 |
+
+### "Delivered" does not mean correct, and this is the finding that matters
+
+`Open House — Two Agents, DM Me` was **delivered** — it passed every check
+including the vision pass, and Gable said "Your flyer is ready."
+
+Looking at it:
+
+* The price reads **`$460,0000`** — four zeros. The submission supplied
+  `$685,000`. The flyer carries a **malformed, wrong price on a real address**,
+  which is the single worst failure this system can produce.
+* The hero photo is **the template's own sample house**, not the supplied
+  photo. It was never replaced, and it sits letterboxed with white margins.
+
+Everything else about it is genuinely good — both agents' real headshots, real
+names and numbers, correct address, clean type. That is exactly what makes it
+dangerous: it looks finished.
+
+**So the delivered count is not a measure of success.** Two flyers passed the
+gate and at least one of them is wrong. The vision pass reads layout, and a
+plausible-looking wrong number is not a layout problem. Nothing currently checks
+that a value on the flyer equals the value that went in.
+
+**The fix is a readback check**, not more vision prompting: after filling, read
+the slide text and assert every value the run supplied appears exactly as
+supplied. That would have caught this deterministically, and it is the same
+class of guard as the substring check that already refuses a literal matching
+more than once.
+
+### The 41 reviews cluster into five causes
+
+| Count | Cause |
+|---|---|
+| 13 | a literal did not match exactly once — the substring guard refusing |
+| 9 | placeholder text survived (TIME, CITY STATE, NEIGHBORHOOD NAME) |
+| 8 | element overlap |
+| 6 | no photo frame found — the 12 templates hero measurement cannot resolve |
+| 3 | other |
+| 2 | clipped at an edge |
+
+Fixing the first two causes would move roughly half the deck. Neither is a
+per-template job.
+
+### 2 failed outright
+
+`Coming Soon — Something Great Is On the Way` and
+`Open House — Two Agents, Two Dates` raised rather than returning a status. Not
+yet diagnosed.
