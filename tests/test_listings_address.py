@@ -101,3 +101,22 @@ def test_empty_input_comes_back_empty() -> None:
     """A blank address is the submission's problem to report, not a crash."""
     assert tidy("") == ""
     assert tidy("   ") == ""
+
+
+def test_a_unit_stays_with_the_street_and_the_city_still_gets_its_comma() -> None:
+    """A condo address stopped a run that had everything else it needed.
+
+    "23 pierside ave unit 118 Baltimore Md 21230" tidied to a single comma,
+    which is not "street, city, ST ZIP", so the flyer's address check refused it
+    and asked Carmen to retype an address she had already supplied correctly.
+    """
+    assert tidy("23 pierside ave unit 118 Baltimore Md 21230") == (
+        "23 Pierside Ave Unit 118, Baltimore, MD 21230"
+    )
+    assert tidy("100 main st #d baltimore md 21201") == "100 Main St #d, Baltimore, MD 21201"
+    assert tidy("100 main st # d baltimore md 21201") == "100 Main St # d, Baltimore, MD 21201"
+
+
+def test_a_unit_with_no_city_after_it_is_left_alone() -> None:
+    """Nothing follows the unit, so there is no city to separate."""
+    assert tidy("100 Main St Unit 5") == "100 Main St Unit 5"

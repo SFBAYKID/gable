@@ -241,11 +241,24 @@ def tidy(address: str) -> str:
         for index, token in enumerate(parts):
             if token.lower() in STREET_TYPES:
                 last_street_type = index
-        # Only if something follows it, and that something is not a unit.
         if 0 <= last_street_type < len(parts) - 1:
-            following = parts[last_street_type + 1].strip(",.").lower()
-            if following not in UNIT_MARKERS and not following.startswith("#"):
-                parts[last_street_type] += ","
+            boundary = last_street_type
+            following = parts[boundary + 1].strip(",.").lower()
+            # A unit is part of the street, not the start of the city, so the
+            # split moves past it: "Ave Unit 118 Baltimore" divides after 118.
+            # This used to refuse to divide at all, which left every condo
+            # address without its city comma — "23 Pierside Ave Unit 118
+            # Baltimore, MD 21230" then failed the flyer's address check and
+            # stopped a run that had everything else it needed.
+            if following in UNIT_MARKERS:
+                # The marker and the identifier after it: "Unit 118", "# D".
+                boundary += 2
+            elif following.startswith("#"):
+                # Marker and identifier in one token: "#D".
+                boundary += 1
+            # Still only if something follows, which is the city.
+            if boundary < len(parts) - 1:
+                parts[boundary] += ","
                 text = " ".join(parts)
 
     # A state code should be preceded by a comma and followed by the postcode
