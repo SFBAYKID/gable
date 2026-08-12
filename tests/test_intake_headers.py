@@ -7,8 +7,12 @@ header text proves the matcher works on a tab nobody has.
 
 from __future__ import annotations
 
+import tempfile
+from pathlib import Path
+
 import pytest
 
+from gable.db.schema import apply_migrations, connect
 from gable.listings.intake import (
     DEFAULT_COLUMNS,
     columns_from_header,
@@ -169,3 +173,56 @@ def test_a_row_read_by_hand_has_the_same_identity_as_a_polled_one() -> None:
     polled = repo.read_submissions(_Sheet(), "Testing_1")
     assert [s.response_row_id for s in polled] == [by_hand.response_row_id]
     assert polled[0].sheet_row == by_hand.sheet_row == 78
+
+
+# --- the roster ------------------------------------------------------------
+
+ROSTER_HEADER: list[str] = [
+    "Email",
+    "First Name",
+    "Last Name",
+    "Phone",
+    "Headshot URL",
+    "Brokerage URL",
+]
+ROSTER_ROW: list[str] = [
+    "eric@cornerhouserealty.com",
+    "Eric",
+    "Jacobs",
+    "443.682.1767",
+    "https://example.invalid/eric.jpg",
+    "https://cornerhouserealty.com/eric-jacobs/",
+]
+
+
+def test_the_roster_header_is_found_wherever_it_sits() -> None:
+    """It has already moved from row 2 to row 1 once."""
+    assert repo.find_roster_header([ROSTER_HEADER, ROSTER_ROW])[0] == 0
+    assert repo.find_roster_header([[], ROSTER_HEADER, ROSTER_ROW])[0] == 1
+
+
+def test_a_roster_read_from_the_wrong_row_is_refused_not_silently_empty() -> None:
+    """Storing nobody looked identical to having nobody, for a whole day.
+
+    Reading the roster from row 2 made Andy Jang's details the column names, so
+    every lookup missed and the flyer printed the office number and the design's
+    own stock face on a real agent's post.
+    """
+    with pytest.raises(SheetError):
+        repo.find_roster_header([ROSTER_ROW])
+
+
+def test_every_person_after_the_header_is_stored() -> None:
+    connection = connect(Path(tempfile.mkdtemp()) / "roster.db")
+    apply_migrations(connection)
+
+    class _Sheet:
+        def read(self, _range: str) -> list[list[str]]:
+            return [ROSTER_HEADER, ROSTER_ROW]
+
+    assert repo.sync_salespeople(_Sheet(), connection, "Sales_People") == 1
+    found = repo.find_salesperson(connection, "eric@cornerhouserealty.com")
+    assert found["first_name"] == "Eric"
+    assert found["last_name"] == "Jacobs"
+    assert found["phone"] == "443.682.1767"
+    assert found["headshot_url"] == "https://example.invalid/eric.jpg"

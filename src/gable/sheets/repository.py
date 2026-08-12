@@ -21,6 +21,7 @@ from typing import Final
 
 from gable.db import store
 from gable.listings.intake import Intake, columns_from_header, from_row, maps_a_response_row
+from gable.listings.normalize import fold_header
 from gable.sheets.client import ReadsRanges, SheetError
 
 #: The full width of the intake form. Reading the whole row keeps the content
@@ -34,8 +35,14 @@ RESPONSES_RANGE: Final[str] = "A1:Z"
 #: the first few rows is a tab this code has not been shown.
 MAX_HEADER_SCAN: Final[int] = 5
 
-#: The roster tab's header is on row 2; row 1 is blank on the live sheet.
-SALESPEOPLE_RANGE: Final[str] = "A2:G200"
+#: Read from row 1 and find the header, rather than assuming which row it is.
+#: It has already moved once: this said "A2:G200" because the header sat on row
+#: 2 under a blank row, and when the roster was rebuilt with the header on row 1
+#: the sync read Andy Jang's details as its column names, matched none of them,
+#: and stored **nobody** — silently, because a roster of zero looks the same as
+#: a roster nobody asked about until a flyer prints the office number and the
+#: design's own stock face on a real agent's post. Which it did, on 2026-08-12.
+SALESPEOPLE_RANGE: Final[str] = "A1:G200"
 
 
 @dataclass(frozen=True, slots=True)
@@ -255,6 +262,29 @@ def new_submissions(connection: Connection, submissions: list[Submission]) -> li
     return pending
 
 
+def find_roster_header(rows: list[list[str]]) -> tuple[int, list[str]]:
+    """Locate the roster's header row and return its folded column names.
+
+    Args:
+        rows: The roster tab's rows, from row 1.
+
+    Returns:
+        `(index, names)` — where the header sits, and its cells folded for
+        matching.
+
+    Raises:
+        SheetError: when no row in the first few names an email column. A
+            roster nobody can read is reported, because storing zero people
+            silently is what put the office phone on an agent's flyer.
+    """
+    for index, row in enumerate(rows[:MAX_HEADER_SCAN]):
+        folded = [fold_header(cell) for cell in row]
+        if "email" in folded:
+            return index, folded
+    msg = "the roster tab has no header row naming an email column"
+    raise SheetError(msg)
+
+
 def sync_salespeople(client: ReadsRanges, connection: Connection, tab: str) -> int:
     """Mirror the roster tab into the database.
 
@@ -273,7 +303,7 @@ def sync_salespeople(client: ReadsRanges, connection: Connection, tab: str) -> i
     rows = client.read(f"'{tab}'!{SALESPEOPLE_RANGE}")
     if not rows:
         return 0
-    header = [cell.strip().lower() for cell in rows[0]]
+    header_index, header = find_roster_header(rows)
 
     def column(row: list[str], name: str) -> str:
         try:
@@ -285,7 +315,7 @@ def sync_salespeople(client: ReadsRanges, connection: Connection, tab: str) -> i
         return row[index].strip() if len(row) > index else ""
 
     stored = 0
-    for row in rows[1:]:
+    for row in rows[header_index + 1 :]:
         email = column(row, "email").lower()
         if not email:
             continue
