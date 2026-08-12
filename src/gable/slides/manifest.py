@@ -23,6 +23,8 @@ import re
 from dataclasses import dataclass
 from typing import Final
 
+from gable.listings.address import tidy as tidy_address
+
 #: Field kinds, which decide how a value is checked.
 TEXT: Final[str] = "text"
 MONEY: Final[str] = "money"
@@ -178,18 +180,24 @@ def normalise_address(address: str) -> str:
     Raises:
         Nothing.
     """
-    tidy = " ".join(address.split())
-    tidy = re.sub(r"\s*,\s*", ", ", tidy)
-    # "Baltimore MD 21228" -> "Baltimore, MD 21228"
-    tidy = re.sub(r"(?<![,])\s+([A-Z]{2})\s+(\d{5})", r", \1 \2", tidy)
-    if not ADDRESS_SHAPE.match(tidy):
-        missing_comma = _MISSING_CITY_COMMA.match(tidy)
+    # `listings.address.tidy` is the address rule set, and this used to hold a
+    # weaker second copy of it. The copies drifted, as copies do: this one only
+    # recognised an upper-case state, so a real submission ending "Baltimore Md
+    # 21230" never gained its comma and the flyer check asked the agent to
+    # retype an address they had already given correctly. The remaining steps
+    # below run only on what `tidy` deliberately leaves alone.
+    text = tidy_address(address)
+    if not ADDRESS_SHAPE.match(text):
+        text = re.sub(r"\s*,\s*", ", ", text)
+        # "Baltimore MD 21228" -> "Baltimore, MD 21228"
+        text = re.sub(r"(?<![,])\s+([A-Z]{2})\s+(\d{5})", r", \1 \2", text)
+        missing_comma = _MISSING_CITY_COMMA.match(text)
         if missing_comma is not None:
-            tidy = (
+            text = (
                 f"{missing_comma.group('street')}, {missing_comma.group('city')}, "
                 f"{missing_comma.group('state')}"
             )
-    return tidy.strip(" ,")
+    return text.strip(" ,")
 
 
 @dataclass(frozen=True, slots=True)

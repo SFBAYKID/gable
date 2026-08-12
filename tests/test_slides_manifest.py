@@ -6,9 +6,16 @@ from gable.slides.manifest import ADDRESS_SHAPE, PHONE, Field, Manifest, normali
 
 
 def test_a_form_address_missing_only_the_city_comma_is_canonicalized() -> None:
+    """The comma is added, and the shouting is turned down.
+
+    This used to assert the address kept the agent's ALL CAPS, because
+    canonicalization here was a second copy of the address rules that only
+    punctuated. It now delegates to `listings.address.tidy`, which cases as well
+    — and this text is set at 44pt across a flyer a client reads.
+    """
     address = normalise_address("7631 OLD COLUMBIA ROAD LAUREL, MD 20723")
 
-    assert address == "7631 OLD COLUMBIA ROAD, LAUREL, MD 20723"
+    assert address == "7631 Old Columbia Road, Laurel, MD 20723"
     assert ADDRESS_SHAPE.fullmatch(address)
 
 
