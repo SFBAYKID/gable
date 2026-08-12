@@ -488,11 +488,18 @@ is policy-gated, off by default, and always disclosed — an image model cannot
 know what 123 Main St looks like, and a wrong house on marketing for a real
 address is not a stylistic choice.
 
-### 4.6 Look up template (`slides/selection.py` + `slides/routing.py`)
+### 4.6 Look up template (`slides/selection.py`)
 
-The request type gives the category; the notes fields choose the design within
-it; `routing.py` resolves that to a Drive file. No design, or a genuine tie,
-pauses the listing as `needs_template` and asks in Slack.
+**One folder, and the file's name is the form's word.** Templates live only in
+`Templates / Generic Templates`, and a design is named exactly what the form
+calls that request type — a submission saying `Sold` uses a file called `Sold`.
+Nothing is ranked, inferred from notes, or chosen between. No file with that
+name pauses the listing as `needs_template` and says which name is missing.
+
+The form's list, which is therefore also the list of template names: New
+Listing, Open House, New Listing with Open House, Sold, Under Contract, Client
+Review Post, Price Reduction, End of Year Brag Post, Video Editing Request,
+Postcard Order.
 
 ### 4.7 Render (`slides/renderer.py` + `slides/client.py`)
 
@@ -783,3 +790,5 @@ Append to this table. Do not rewrite history — if a decision reverses, add a n
 | 2026-08-12 | Responses columns are located by **header text**, and a tab with no recognisable header is refused | Fixed positions are only ever true of one tab. `Testing_1` splits the agent's name into `First Name` and `Second Name`, shifting every column from D rightward by one and heading row 2 under a blank row; read positionally its row 78 yields the service-guidelines paragraph as the request type, "Instagram Story" as the property address, and no price — all of which look like data downstream. `intake.columns_from_header` maps by name, `repository.find_header` locates the header row, and `maps_a_response_row` refuses a tab that names none of the email, request type and address rather than guessing. Also corrects §3.1, which described nine columns from a pre-API browser reading, and removes the `Templates` and `Runs` tab designs that D3 replaced with SQLite. |
 | 2026-08-12 | The picker takes the best design **that has been imported**, unless the submission named the missing one | Only the top-ranked candidate was ever looked for in Drive, so Just Sold — which has eleven eligible designs and one imported — reported having none filed at all, in front of a customer. `rank` already drops functional mismatches rather than demoting them, so everything it returns is usable and the order is preference; an absent candidate is now skipped and the next taken, with the fallback logged. This does **not** reverse the earlier "missing exact Drive file becomes needs_template" row, it narrows it: a design that won on a cue was explicitly asked for in the notes, and substituting another answers a different question than the agent asked, so a missing cue-matched design still stops and asks. |
 | 2026-08-12 | **Reverses the posted-message indicator:** every user response uses Slack's native purple thread status | Chase identified the posted animation as a regression from the native purple treatment that had visibly worked. Slack's current method reference and March 2026 scope update explicitly support channel apps through `chat:write`, including auto-opening the reply thread. The prior single live call that returned `ok` without visible output was not enough evidence to remove the product behavior. Mentions, follow-ups, edits, and photo work now share one timed status; after six seconds it reports the actual stage, and every exit clears it. |
+| 2026-08-12 | **Template choice is a naming rule, not a selector.** One folder; the file's name is the form's request type | Chase set this with Carmen directly, and it replaces the scored catalogue. Templates live only in `Templates / Generic Templates`, and each is named exactly what the form calls that request type — `Sold` on the form uses a file called `Sold`. The picker matches on that name, tolerating only case and stray spacing, and refuses on a duplicate name rather than choosing. Two things drove it: Carmen maintains the designs, and a convention she can verify by looking at a folder is one she can keep correct, whereas a ranking that reads her notes is not; and the previous lookup found any presentation in the drive carrying a `gable_role` property regardless of folder, so seven of the eleven it offered were filed inside Kelsey Mahon's own folder and any agent's listing could have been rendered onto another agent's design. `slides/catalog.py`, `rank`, `purpose_for` and `slides/routing.py`'s agent-override rule no longer decide anything; they are kept, unwired, pending a decision on deleting them. |
+| 2026-08-12 | The form splits the agent's name into `First Name` and `Second Name` | Chase's request to the customer, so the sheet is easier to parse than a single `Name of Agent` free-text field. Already supported: `intake.columns_from_header` reads either shape, and joins the pair when there is no single name column. |

@@ -11,7 +11,7 @@ from __future__ import annotations
 import logging
 import uuid
 from sqlite3 import Connection
-from typing import Any
+from typing import Any, Final
 
 from gable import spend
 from gable.config import Settings
@@ -28,6 +28,11 @@ from gable.slides.selection import template_picker
 from gable.voice import is_clean
 
 logger = logging.getLogger("gable.live")
+
+#: The one folder a template may come from, as a child of the configured
+#: Templates folder. Carmen adds a design by dropping it in here and naming it
+#: exactly what the form calls that request type.
+GENERIC_TEMPLATES_FOLDER: Final[str] = "Generic Templates"
 
 
 def safe_replacement_requests(
@@ -337,15 +342,54 @@ def build_runner(
             return ""
         return str(slack_post(text, thread) or "")
 
+    def generic_templates_folder_id() -> str:
+        """Find the one folder templates are allowed to come from.
+
+        Resolved by name under the configured Templates folder rather than
+        configured separately, so Carmen adding a design is a drag into a
+        folder and nothing else.
+        """
+        response = (
+            drive.files()
+            .list(
+                corpora="drive",
+                driveId=settings.drive_id,
+                includeItemsFromAllDrives=True,
+                supportsAllDrives=True,
+                q=(
+                    f"'{settings.drive_templates_folder_id}' in parents"
+                    " and mimeType='application/vnd.google-apps.folder'"
+                    f" and name='{GENERIC_TEMPLATES_FOLDER}'"
+                    " and trashed=false"
+                ),
+                fields="files(id,name)",
+                pageSize=10,
+            )
+            .execute()
+        )
+        folders = response.get("files", [])
+        if not folders:
+            logger.error("the %s folder is missing from the drive", GENERIC_TEMPLATES_FOLDER)
+            return ""
+        return str(folders[0]["id"])
+
     def list_templates() -> list[dict[str, str]]:
-        # Filter on the app property in the query rather than after the fact,
-        # and follow every page. Asking for one page of 200 presentations and
-        # filtering locally worked only while the drive held fewer than 200:
-        # every finished flyer lands in the same drive, so once about two
-        # hundred had accumulated the templates fell off the first page and
-        # Gable reported having no design filed for any category at all.
-        # Verified 2026-08-11 — 200 presentations returned, 0 templates among
-        # them, after a test run had produced that many copies.
+        # Templates come from one folder and nowhere else.
+        #
+        # This used to find any presentation in the drive carrying a
+        # `gable_role=template` property, which ignored where the file lived.
+        # On 2026-08-12 that pool held eleven files, seven of them inside
+        # Kelsey Mahon's own folder, so any agent's listing could be rendered
+        # onto a design filed as another agent's — the exact thing one design
+        # meaning one file is supposed to prevent.
+        #
+        # Every page is followed. One page of 200 worked only while the drive
+        # held fewer than 200 presentations, and every finished flyer lands in
+        # the same drive; once about two hundred accumulated the templates fell
+        # off the first page and Gable reported having no design for anything.
+        folder_id = generic_templates_folder_id()
+        if not folder_id:
+            return []
         templates: list[dict[str, str]] = []
         page_token: str | None = None
         while True:
@@ -357,9 +401,9 @@ def build_runner(
                     includeItemsFromAllDrives=True,
                     supportsAllDrives=True,
                     q=(
-                        "mimeType='application/vnd.google-apps.presentation'"
+                        f"'{folder_id}' in parents"
+                        " and mimeType='application/vnd.google-apps.presentation'"
                         " and trashed=false"
-                        " and appProperties has {key='gable_role' and value='template'}"
                     ),
                     fields="nextPageToken,files(id,name)",
                     pageSize=200,

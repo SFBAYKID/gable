@@ -85,30 +85,36 @@ def test_a_dual_agent_request_never_falls_back_to_a_single_agent_design() -> Non
     assert rank("Just Listed", intake) == ()
 
 
-def test_picker_requires_the_exact_best_template_to_exist_in_drive() -> None:
-    intake = _intake(extra_notes="Please emphasize scheduling a private tour.")
-    picker = template_picker(
-        lambda: [
-            {
-                "id": "fallback",
-                "name": "Just Listed — Bracket Placeholders (cleanest)",
-            }
-        ]
-    )
-    assert picker("Just Listed", intake) == ("", "")
+def test_the_template_named_for_the_request_type_is_the_one_used() -> None:
+    """The contract Chase set with Carmen: the form's word is the file's name."""
+    picker = template_picker(lambda: [{"id": "sold-file", "name": "Sold"}])
+    assert picker("Just Sold", _intake(request_type="Sold")) == ("sold-file", "Sold")
 
 
-def test_picker_returns_the_notes_selected_drive_file() -> None:
-    intake = _intake(extra_notes="Please emphasize scheduling a private tour.")
-    picker = template_picker(
-        lambda: [
-            {
-                "id": "tour-template",
-                "name": "Just Listed — Schedule a Private Tour",
-            }
-        ]
-    )
-    assert picker("Just Listed", intake) == (
-        "tour-template",
-        "Just Listed — Schedule a Private Tour",
-    )
+def test_matching_survives_casing_and_stray_spacing() -> None:
+    """Carmen names files by hand; "sold " and "Sold" are the same design."""
+    picker = template_picker(lambda: [{"id": "sold-file", "name": " sold "}])
+    assert picker("", _intake(request_type="Sold"))[0] == "sold-file"
+
+
+def test_a_request_type_with_no_template_named_for_it_asks() -> None:
+    """Nothing close is picked. There is one rule and it either matches or not."""
+    picker = template_picker(lambda: [{"id": "sold-file", "name": "Sold"}])
+    assert picker("", _intake(request_type="Open House")) == ("", "")
+
+
+def test_a_catalogue_style_name_no_longer_matches() -> None:
+    """The scored catalogue is gone; "Just Sold — Thinking of Selling" is not "Sold"."""
+    picker = template_picker(lambda: [{"id": "old", "name": "Just Sold — Thinking of Selling"}])
+    assert picker("Just Sold", _intake(request_type="Sold")) == ("", "")
+
+
+def test_two_templates_with_the_same_name_are_refused() -> None:
+    """A filing mistake must not render a real flyer off a coin flip."""
+    picker = template_picker(lambda: [{"id": "one", "name": "Sold"}, {"id": "two", "name": "Sold"}])
+    assert picker("", _intake(request_type="Sold")) == ("", "")
+
+
+def test_a_submission_with_no_request_type_asks() -> None:
+    picker = template_picker(lambda: [{"id": "sold-file", "name": "Sold"}])
+    assert picker("", _intake(request_type="")) == ("", "")

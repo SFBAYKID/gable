@@ -226,9 +226,11 @@ record of what was rejected:
 **Resolved from this:** concrete Slides I/O is implemented in
 `pipeline/live.py`, and the shared drive contains the 45 imported templates.
 
-**D2 — RESOLVED.** The catalogue covers the supported social categories. Form
-notes and request context decide the correct design within a category; building
-that richer selector is current work.
+**D2 — RESOLVED, then replaced on 2026-08-12.** Template choice is a naming
+rule, not a selector: one folder, and the file is named exactly what the form
+calls the request type. The scored catalogue and its notes-reading ranking are
+superseded — see the decision log, and `slides/catalog.py` for the 45-entry
+inventory that no longer routes anything.
 
 **D3 — RESOLVED.** Derived state lives in SQLite. Gable reads form responses,
 mirrors the salesperson roster, and never modifies the response tab.

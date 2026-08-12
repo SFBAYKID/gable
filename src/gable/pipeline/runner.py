@@ -289,9 +289,17 @@ class Runner:
         # 6. Build.
         template_id, template_label = self.pick_template(step.category, intake)
         if not template_id:
+            # Name the file it is looking for, not the category it mapped to.
+            # A design is added by putting it in Generic Templates and calling
+            # it exactly what the form calls this request, so the useful
+            # sentence says which name is missing rather than asking Carmen to
+            # nominate one.
+            wanted = intake.request_type.strip() or "this request type"
             return self._ask(
                 run_id,
-                f"I do not have a {step.category} design filed yet. Which should I use?",
+                f"I do not have a design named {wanted} in the Generic Templates "
+                "folder, so I have not built anything. Add one with that exact "
+                "name and I will use it.",
                 [],
                 result,
                 status="needs_template",
