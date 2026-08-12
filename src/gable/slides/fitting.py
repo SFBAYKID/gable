@@ -23,7 +23,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Final
 
-from gable.slides.edit_common import MAX_FONT_PT, MIN_FONT_PT, Request
+from gable.slides.edit_common import MAX_FONT_PT, Request
 from gable.slides.edits import set_font_size
 
 #: EMU per point. Slides reports geometry in EMU and type in points.
@@ -131,6 +131,28 @@ class Fit:
         """True when the text is currently wider than its box."""
         return self.fitted_pt < self.current_pt
 
+    #: Font weight, carried through so `widen_to` matches what was measured.
+    weight: int = 400
+
+    @property
+    def widen_to(self) -> float:
+        """How wide this box would need to be for its text at a readable size.
+
+        Returns:
+            The required width in points, or 0.0 when the text already fits.
+
+        Note:
+            Reported only. An attempt to act on this by scaling the box with
+            `applyMode: RELATIVE` moved an email address 2.5 inches off the right
+            edge of the slide, because RELATIVE multiplies the existing
+            translation as well as the scale — the trap recorded in CLAUDE.md
+            4.3, which the code that broke it quoted while breaking it. Widening
+            a box safely needs the element's current transform and an ABSOLUTE
+            request; until that exists this stays a measurement.
+        """
+        needed = estimate_width_pt(self.text, self.fitted_pt, self.weight)
+        return needed if needed > self.box_width_pt else 0.0
+
     @property
     def too_small_to_read(self) -> bool:
         """True when fitting it would make it unreadable.
@@ -175,13 +197,23 @@ def fit_for(
     box_width_pt = (box_width_emu / EMU_PER_POINT) * max(1, lines) * SAFETY
     needed = estimate_width_pt(text, current_pt, weight)
     if needed <= box_width_pt:
-        return Fit(object_id, text, current_pt, box_width_pt, current_pt)
+        return Fit(object_id, text, current_pt, box_width_pt, current_pt, weight)
 
     # Width scales linearly with font size, so the ratio gives the answer
     # directly rather than by searching.
     scaled = current_pt * (box_width_pt / needed)
-    fitted = max(MIN_FONT_PT, min(MAX_FONT_PT, round(scaled, 1)))
-    return Fit(object_id, text, current_pt, box_width_pt, fitted)
+    # Never below readable. The floor used to be MIN_FONT_PT, which is 1.0, and
+    # a rendered flyer put an email address at 3.0pt and a phone number at 6.8pt
+    # — legible in the API, invisible on the flyer. Chase's feedback on the first
+    # reviewed flyer was exactly this: the number and email are too small.
+    #
+    # The design sized those boxes for the words "Phone" and "Email". A real
+    # phone number and a real email are several times longer, so honouring the
+    # box means destroying the type. Keeping the type readable and reporting the
+    # box as too narrow is the honest trade, and `widen_to` says how much room
+    # the text actually needs.
+    fitted = max(MIN_READABLE_PT, min(MAX_FONT_PT, round(scaled, 1)))
+    return Fit(object_id, text, current_pt, box_width_pt, fitted, weight)
 
 
 def requests_for(fits: list[Fit]) -> list[Request]:
