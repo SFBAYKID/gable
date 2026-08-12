@@ -407,7 +407,9 @@ def test_a_template_without_a_field_does_not_fail_the_check(db: sqlite3.Connecti
 # --- text fitting and the vision pass ---------------------------------------
 
 
-def test_text_that_overflows_is_shrunk_before_delivery(db: sqlite3.Connection) -> None:
+def test_a_supplied_value_that_overflows_is_shrunk_before_delivery(
+    db: sqlite3.Connection,
+) -> None:
     """Slides cannot autofit over the API, so a long value clips silently.
 
     This is what shipped a price reading $510,000 as $510,00.
@@ -421,19 +423,54 @@ def test_text_that_overflows_is_shrunk_before_delivery(db: sqlite3.Connection) -
     rec = Recorder()
     runner = _runner(db, rec)
     runner.read_text_boxes = lambda _fid: [
-        # A price box far too narrow for its text, in real units.
-        fitting.TextBox("p1_price", "$510,000", 52.9, 187.5 * fitting.EMU_PER_POINT)
+        # The address this run supplied, in a box far too narrow for it.
+        fitting.TextBox(
+            "p1_address",
+            "7940 Oakwood Rd, Glen Burnie, MD 21061",
+            52.9,
+            187.5 * fitting.EMU_PER_POINT,
+        )
     ]
     runner.apply = lambda _fid, reqs: applied.extend(reqs)
     runner.run(submission)
 
-    assert applied, "an overflowing box must be refitted"
+    assert applied, "an overflowing supplied value must be refitted"
     sizes = [
         float(r["updateTextStyle"]["style"]["fontSize"]["magnitude"])
         for r in applied
         if "updateTextStyle" in r
     ]
     assert sizes and sizes[0] < 52.9
+
+
+def test_the_template_s_own_copy_is_never_refitted(db: sqlite3.Connection) -> None:
+    """Static headline type belongs to Carmen and must survive untouched.
+
+    Fitting every box on the slide is what shrank "Just" from 140.8pt to 89.9pt
+    and "Listed" from 109.4pt to 80.7pt on the flyer reviewed 2026-08-11. No
+    submission supplies those words, so no run has any business resizing them —
+    and the visible result was the two words drifting apart with the address
+    and price left riding high in boxes built for larger text.
+    """
+    from gable.slides import fitting
+
+    submission = _submission(rid="rid-static")
+    _record(db, submission)
+
+    applied: list[dict[str, Any]] = []
+    rec = Recorder()
+    runner = _runner(db, rec)
+    runner.read_text_boxes = lambda _fid: [
+        # Headline copy that overflows on the estimator but is not this run's
+        # data. It must be left exactly as the template draws it.
+        fitting.TextBox("p1_just", "Just", 140.8, 20.0 * fitting.EMU_PER_POINT),
+        fitting.TextBox("p1_listed", "Listed", 109.4, 20.0 * fitting.EMU_PER_POINT),
+    ]
+    runner.apply = lambda _fid, reqs: applied.extend(reqs)
+    runner.run(submission)
+
+    resized = [r for r in applied if "updateTextStyle" in r]
+    assert resized == [], "the template's own copy must not be resized"
 
 
 def test_a_box_that_already_fits_costs_no_calls(db: sqlite3.Connection) -> None:

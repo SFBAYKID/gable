@@ -20,6 +20,7 @@ estimate to stop the clipping, and it costs nothing.
 
 from __future__ import annotations
 
+from collections.abc import Collection
 from dataclasses import dataclass
 from typing import Final
 
@@ -237,22 +238,38 @@ def requests_for(fits: list[Fit]) -> list[Request]:
     return out
 
 
-def plan_fits(elements: list[TextBox]) -> list[Fit]:
-    """Work out what every text box on a slide needs.
+def plan_fits(elements: list[TextBox], dynamic: Collection[str] | None = None) -> list[Fit]:
+    """Work out what the text boxes carrying *this run's data* need.
 
     Args:
         elements: One `TextBox` per text shape on the slide.
+        dynamic: The values this run inserted. When given, only boxes holding
+            one of them are considered; every other box is the template's own
+            copy and is left exactly as Carmen drew it. When None, every box is
+            considered — the old behaviour, kept only for callers that have no
+            way to say what they filled.
 
     Returns:
-        A `Fit` per element, in the order given. Elements missing a size or a
-        width are skipped rather than guessed at.
+        A `Fit` per considered element, in the order given. Elements missing a
+        size or a width are skipped rather than guessed at.
 
     Raises:
         Nothing.
+
+    Note:
+        The filter exists because fitting every box rewrote the design. On the
+        flyer reviewed 2026-08-11 it shrank "Just" from 140.8pt to 89.9pt and
+        "Listed" from 109.4pt to 80.7pt — headline type that no submission
+        touches — which pulled the two words visibly apart and left the address
+        and price riding high in boxes built for larger text. The template is
+        the specification; only the values change.
     """
+    wanted = {value.strip() for value in dynamic if value.strip()} if dynamic is not None else None
     fits: list[Fit] = []
     for box in elements:
         if not box.text or box.font_size_pt <= 0 or box.width_emu <= 0:
+            continue
+        if wanted is not None and box.text.strip() not in wanted:
             continue
         fits.append(
             fit_for(

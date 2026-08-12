@@ -460,7 +460,11 @@ class Runner:
         # verified: "Autofit types other than NONE are not supported" — so a
         # value longer than its placeholder clips silently. This is what shipped
         # a price reading $510,000 as $510,00.
-        fits = fitting.plan_fits(self.read_text_boxes(output_id))
+        # Only the boxes this run filled. Fitting every box rewrote the design:
+        # it shrank the "Just"/"Listed" headline by a third on a reviewed flyer,
+        # pulling the two words apart and leaving the address high in a box
+        # sized for larger type. The template is the specification.
+        fits = fitting.plan_fits(self.read_text_boxes(output_id), dynamic=pairs.values())
         shrunk = [fit for fit in fits if fit.overflows]
         if shrunk:
             self.apply(output_id, fitting.requests_for(fits))
