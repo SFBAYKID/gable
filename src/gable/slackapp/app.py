@@ -35,10 +35,9 @@ from gable.slackapp.style import is_clean, strip_to_plain
 
 logger = logging.getLogger("gable.slack")
 
-#: Shown the instant a mention arrives, then edited into the real answer. The
-#: ellipsis is deliberate: it reads as a pause rather than as a statement, so a
-#: reply that lands a second later does not look like a change of mind.
-THINKING: Final[str] = "Thinking..."
+#: What Slack's thread indicator says while a reply is being composed. Slack
+#: renders it after the app's name, so it reads as "Gable is thinking...".
+THINKING: Final[str] = "is thinking..."
 
 #: Slack user id to first name. Names do not change mid-conversation, and the
 #: lookup is not worth repeating on every message.
@@ -288,28 +287,23 @@ def build_app(
                 )
                 say(text=safe_reply(greeting), thread_ts=thread)
                 return
-            # Say something before doing anything slow. A reaction is too quiet
-            # to read as "working", and thinking takes several seconds during
-            # which the thread looks abandoned. This placeholder is posted first
-            # and then edited into the answer, so it costs no extra message and
-            # the wait is visible from the first moment.
-            placeholder = say(text=THINKING, thread_ts=thread)
-            placeholder_ts = str(placeholder.get("ts") or "") if hasattr(placeholder, "get") else ""
+            # Slack's own thread indicator, which animates while the reply is
+            # composed and clears the moment it lands. It starts before the
+            # first network call — the name lookup is itself a round trip, and
+            # an indicator that appears once the slow part is underway has
+            # missed the moment it exists for.
             with Working(
                 client,
                 str(event.get("channel") or ""),
                 str(thread or ""),
-                "Thinking",
+                THINKING,
                 message_ts=str(event.get("ts") or ""),
             ):
                 speaker = first_name_of(client, str(event.get("user") or ""))
                 decision = thinker(asked, speaker=speaker)
                 logger.info("replying (tool=%s)", decision.tool or "none")
                 answer = safe_reply(reply_for_decision(decision, action_handler, str(thread or "")))
-            if placeholder_ts:
-                client.chat_update(channel=event.get("channel"), ts=placeholder_ts, text=answer)
-            else:
-                say(text=answer, thread_ts=thread)
+            say(text=answer, thread_ts=thread)
             follow_up = describe_action(decision)
             if follow_up:
                 say(text=safe_reply(follow_up), thread_ts=thread)
