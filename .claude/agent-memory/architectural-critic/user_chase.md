@@ -20,4 +20,13 @@ spend the effort on what is *not* in it. He also asks explicitly to be told wher
 is about to build on an unverified assumption, which maps directly onto the
 confidence-labelling rule in the repo's CLAUDE.md 2.2.
 
+**His shipping bar, in his own words: "If it does not look correct in testing we can
+not ship it to customers."** He demos Gable live to real customers by filling the real
+Google Form with a real property address and watching Slack. So a run that ends in
+`needs_review`, a silent 30-second gap, a duplicate post, or an unreplaced sample
+name/headshot is a *product* failure to him, not a cosmetic one. Weight visual-output
+and "does the whole sequence actually execute" findings above internal code quality —
+and always separate "genuinely not implemented" from "implemented but not wired", since
+those have very different costs the night before a demo.
+
 See [[feedback-review-format]] and [[project-gable-decision-discipline]].

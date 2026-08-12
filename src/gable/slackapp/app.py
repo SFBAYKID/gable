@@ -35,10 +35,6 @@ from gable.slackapp.style import is_clean, strip_to_plain
 
 logger = logging.getLogger("gable.slack")
 
-#: What Slack's thread indicator says while a reply is being composed. Slack
-#: renders it after the app's name, so it reads as "Gable is thinking...".
-THINKING: Final[str] = "is thinking..."
-
 #: Slack user id to first name. Names do not change mid-conversation, and the
 #: lookup is not worth repeating on every message.
 _NAME_CACHE: dict[str, str] = {}
@@ -158,16 +154,24 @@ def process_file_share(
     client: Any,  # noqa: ANN401 - Slack WebClient, untyped upstream
     handler: FileShareHandler | None,
 ) -> None:
-    """Show one progress message and replace it with the photo outcome.
+    """Fit the shared photo, showing the thinking indicator while it runs.
+
+    Fitting a photo and rendering the flyer takes about thirty seconds — the
+    longest silence Carmen ever sees — so this is the path the indicator matters
+    most on.
+
+    A failure must say so. An earlier version posted "Fitting it to the flyer
+    now" and edited that message into the outcome; when the fit raised, the
+    sentence stayed in the thread claiming work that had already died.
 
     Args:
         event: Slack's file-share message event.
         say: Bolt's thread-aware posting helper.
-        client: Slack Web API client, used to edit the progress message.
+        client: Slack Web API client, used for the indicator.
         handler: The real photo workflow, or None in isolated startup checks.
 
     Raises:
-        Nothing. The surrounding event handler owns its final exception gate.
+        Nothing. Every outcome, including failure, is said out loud.
     """
     thread = event.get("thread_ts") or event.get("ts")
     if handler is None:
@@ -178,20 +182,111 @@ def process_file_share(
             thread_ts=thread,
         )
         return
-    progress = say(
-        text=safe_reply("I have the photo. Fitting it to the flyer now."),
-        thread_ts=thread,
-    )
-    outcome = safe_reply(handler(event, client))
-    progress_ts = str(progress.get("ts") or "") if hasattr(progress, "get") else ""
-    if progress_ts:
-        client.chat_update(
-            channel=event.get("channel"),
-            ts=progress_ts,
-            text=outcome,
-        )
-    else:
+    with Working(client, str(event.get("channel") or ""), str(thread or "")):
+        try:
+            outcome = safe_reply(handler(event, client))
+        except Exception:
+            logger.exception("the photo workflow failed")
+            outcome = (
+                "I could not fit that photo to the flyer. The flyer is unchanged — "
+                "send it again, or tell me which listing it belongs to."
+            )
         say(text=outcome, thread_ts=thread)
+
+
+def first_name_of(client: Any, user_id: str) -> str:  # noqa: ANN401 - Slack WebClient
+    """The speaker's first name, or empty when it cannot be looked up.
+
+    Greeting the room when one person asked the question reads as not listening,
+    so the name is worth a round trip. A failure here is not worth failing the
+    reply over — an unnamed greeting is merely worse, not wrong.
+
+    Args:
+        client: A Slack WebClient.
+        user_id: The Slack id of whoever spoke.
+
+    Returns:
+        Their first name, or an empty string.
+
+    Raises:
+        Nothing.
+    """
+    if not user_id:
+        return ""
+    cached = _NAME_CACHE.get(user_id)
+    if cached is not None:
+        return cached
+    name = ""
+    try:
+        profile = client.users_info(user=user_id).get("user", {}) or {}
+        details = profile.get("profile", {}) or {}
+        full = (
+            details.get("first_name") or details.get("real_name") or profile.get("real_name") or ""
+        )
+        name = str(full).split(" ")[0]
+    except Exception:
+        logger.debug("could not resolve the speaker's name")
+    _NAME_CACHE[user_id] = name
+    return name
+
+
+def answer_mention(
+    event: dict[str, Any],
+    say: Any,  # noqa: ANN401 - Bolt injection, untyped upstream
+    client: Any,  # noqa: ANN401 - Slack WebClient, untyped upstream
+    thinker: Thinker,
+    action_handler: ActionHandler | None = None,
+) -> None:
+    """Compose and post one reply to a mention, with the indicator over the wait.
+
+    Lifted out of the Bolt closure so it can be tested without a workspace: this
+    is the path Chase has rejected twice and it had no test at all.
+
+    Args:
+        event: Slack's `app_mention` event.
+        say: Bolt's thread-aware posting helper.
+        client: Slack Web API client, used for the name lookup and the indicator.
+        thinker: Turns what was asked into a decision.
+        action_handler: Executes a model-selected edit, when one is wired.
+
+    Raises:
+        Nothing. An exception here is a message Carmen never receives, which
+        reads as Gable ignoring her, so it becomes a sentence instead.
+    """
+    try:
+        asked = clean_mention_text(event.get("text", ""))
+        thread = event.get("thread_ts") or event.get("ts")
+        logger.info("mention received: %s", asked[:120])
+        # The indicator goes up before the first network call. The name lookup
+        # is itself a round trip, so one raised after it has already missed part
+        # of the wait it exists to cover.
+        with Working(client, str(event.get("channel") or ""), str(thread or "")):
+            speaker = first_name_of(client, str(event.get("user") or ""))
+            if not asked:
+                greeting = (
+                    f"Hi {speaker}. What would you like me to do?"
+                    if speaker
+                    else "I'm here. What would you like me to do?"
+                )
+                say(text=safe_reply(greeting), thread_ts=thread)
+                return
+            decision = thinker(asked, speaker=speaker)
+            logger.info("replying (tool=%s)", decision.tool or "none")
+            answer = safe_reply(reply_for_decision(decision, action_handler, str(thread or "")))
+            # Said inside the block on purpose: the indicator comes down on the
+            # way out, so the answer is already in the thread when it goes.
+            # Clearing first opens a silent gap at exactly the moment the wait
+            # ends, which is the moment being waited on.
+            say(text=answer, thread_ts=thread)
+        follow_up = describe_action(decision)
+        if follow_up:
+            say(text=safe_reply(follow_up), thread_ts=thread)
+    except Exception:
+        logger.exception("mention handler failed")
+        try:
+            say(text=FALLBACK, thread_ts=event.get("thread_ts") or event.get("ts"))
+        except Exception:
+            logger.exception("could not deliver the fallback either")
 
 
 def build_app(
@@ -237,84 +332,12 @@ def build_app(
 
     app = App(token=token, logger=logger)
 
-    def first_name_of(client: Any, user_id: str) -> str:  # noqa: ANN401
-        """The speaker's first name, or empty when it cannot be looked up.
-
-        Greeting the room when one person asked a question reads as not
-        listening, so the name is worth a call. A failure here is not worth
-        failing the reply over — an unnamed greeting is merely worse, not wrong.
-        """
-        if not user_id:
-            return ""
-        cached = _NAME_CACHE.get(user_id)
-        if cached is not None:
-            return cached
-        name = ""
-        try:
-            profile = client.users_info(user=user_id).get("user", {}) or {}
-            details = profile.get("profile", {}) or {}
-            full = (
-                details.get("first_name")
-                or details.get("real_name")
-                or profile.get("real_name")
-                or ""
-            )
-            name = str(full).split(" ")[0]
-        except Exception:
-            logger.debug("could not resolve the speaker's name")
-        _NAME_CACHE[user_id] = name
-        return name
-
     @app.event("app_mention")
     def handle_mention(event: dict[str, Any], say: Any, client: Any) -> None:  # noqa: ANN401
-        """Answer a direct mention.
-
-        Replies in the thread when spoken to in one, so a conversation about a
-        listing stays with that listing.
-        """
-        try:
-            if allowed_channel and event.get("channel") != allowed_channel:
-                return
-            asked = clean_mention_text(event.get("text", ""))
-            thread = event.get("thread_ts") or event.get("ts")
-            logger.info("mention received: %s", asked[:120])
-            if not asked:
-                who = first_name_of(client, str(event.get("user") or ""))
-                greeting = (
-                    f"Hi {who}. What would you like me to do?"
-                    if who
-                    else "I'm here. What would you like me to do?"
-                )
-                say(text=safe_reply(greeting), thread_ts=thread)
-                return
-            # Slack's own thread indicator, which animates while the reply is
-            # composed and clears the moment it lands. It starts before the
-            # first network call — the name lookup is itself a round trip, and
-            # an indicator that appears once the slow part is underway has
-            # missed the moment it exists for.
-            with Working(
-                client,
-                str(event.get("channel") or ""),
-                str(thread or ""),
-                THINKING,
-                message_ts=str(event.get("ts") or ""),
-            ):
-                speaker = first_name_of(client, str(event.get("user") or ""))
-                decision = thinker(asked, speaker=speaker)
-                logger.info("replying (tool=%s)", decision.tool or "none")
-                answer = safe_reply(reply_for_decision(decision, action_handler, str(thread or "")))
-            say(text=answer, thread_ts=thread)
-            follow_up = describe_action(decision)
-            if follow_up:
-                say(text=safe_reply(follow_up), thread_ts=thread)
-        except Exception:
-            # An exception here is a message Carmen never receives, which reads
-            # as Gable ignoring her. Say something instead.
-            logger.exception("mention handler failed")
-            try:
-                say(text=FALLBACK, thread_ts=event.get("thread_ts") or event.get("ts"))
-            except Exception:
-                logger.exception("could not deliver the fallback either")
+        """Answer a direct mention, in the channel Gable is allowed to speak in."""
+        if allowed_channel and event.get("channel") != allowed_channel:
+            return
+        answer_mention(event, say, client, thinker, action_handler)
 
     @app.event("message")
     def handle_message(

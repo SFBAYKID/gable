@@ -1,19 +1,25 @@
 """Showing that Gable is thinking, in the thread, while it thinks.
 
-Building a reply takes several seconds and a flyer takes about thirty. For that
-time the thread is silent, and silence in Slack reads as nothing happening —
-there is no way to tell "working" from "broken" from "asleep".
+A reply takes four to eight seconds and a flyer about thirty. For that time the
+thread is silent, and silence in Slack reads as nothing happening — no way to
+tell "working" from "broken" from "asleep".
 
-Slack has a real indicator for this: `assistant.threads.setStatus` puts an
-animated line in the thread that clears when the reply lands, which is exactly
-the shape wanted. It takes `chat:write`, which this app already has. An earlier
-version of this module assumed it needed `assistant:write`, so it fell back to
-an emoji reaction nobody noticed — verified against the live API on 2026-08-12,
-which returned `ok` on the first call.
+Slack's own `assistant.threads.setStatus` looked like the answer and is not.
+Called against a normal channel thread it returns `ok` and renders nothing:
+verified on 2026-08-12 by holding a status open for twenty seconds on a live
+thread with nothing visible throughout. That status is drawn inside an assistant
+pane, and Gable is talked to in an ordinary channel thread.
 
-Everything here is cosmetic, so **a failure must never affect the reply**. Each
-call swallows its own error, and the indicator goes up on a background thread so
-showing it cannot itself delay the work it exists to cover.
+So the indicator is a real message. It is posted into the thread, its text is
+cycled so it visibly animates, and it is **deleted** when the answer arrives —
+which is the behaviour asked for: it comes in, it runs, it goes away. An earlier
+attempt edited the placeholder into the answer instead, so it never went away,
+it turned into the reply.
+
+Everything here is cosmetic, so **a failure must never affect the reply**. Every
+call swallows its own error, the indicator runs on a background thread so
+showing it cannot delay the work it covers, and deletion happens in a `finally`
+so a crash cannot strand it in the thread.
 
 Does not handle: progress *within* the work. There is no percentage to report and
 inventing one would be worse than an honest "working on it".
@@ -28,26 +34,36 @@ from typing import Any, Final
 
 logger = logging.getLogger("gable.status")
 
-#: Shown when the thread status is unavailable. A reaction is far quieter than
-#: the real indicator, so it is a fallback rather than a choice.
-WAITING_REACTION: Final[str] = "hourglass_flowing_sand"
+#: The frames of the animation, cycled in order. An ellipsis that grows reads as
+#: motion without needing a custom animated emoji, which most workspaces do not
+#: have and which cannot be relied on.
+FRAMES: Final[tuple[str, ...]] = (
+    "_Thinking_ :hourglass_flowing_sand:",
+    "_Thinking_ .",
+    "_Thinking_ . .",
+    "_Thinking_ . . .",
+)
 
-#: How long `stop` waits for the indicator to have gone up before clearing it.
-#: Clearing before showing leaves it stuck on afterwards, which says the reply is
-#: still coming when it has already arrived.
-_SHOW_TIMEOUT_SECONDS: Final[float] = 3.0
+#: Seconds between frames. `chat.update` is rate limited around fifty calls a
+#: minute, so a one-second cycle would sit on the ceiling during a long build.
+FRAME_SECONDS: Final[float] = 1.5
+
+#: How long `stop` waits for the indicator to have been posted before deleting
+#: it. Without this a fast reply can delete before the post lands, leaving the
+#: indicator behind for good.
+_POST_TIMEOUT_SECONDS: Final[float] = 4.0
 
 
 class Working:
-    """Shows a thinking indicator for as long as its body runs.
+    """Shows an animated indicator in a thread for as long as its body runs.
 
     Used as::
 
-        with Working(client, channel, thread_ts, "is reading the template"):
-            build_the_flyer()
+        with Working(client, channel, thread_ts):
+            answer = think_about_it()
 
-    Cleared on the way out whether the body returned or raised. An indicator
-    left spinning after a failure is worse than none: it promises an answer that
+    Removed on the way out whether the body returned or raised. An indicator
+    left running after a failure is worse than none: it promises an answer that
     is never coming.
     """
 
@@ -56,7 +72,7 @@ class Working:
         client: Any,  # noqa: ANN401 - Slack WebClient, untyped upstream
         channel: str,
         thread_ts: str,
-        what: str = "is thinking",
+        what: str = "",
         message_ts: str = "",
     ) -> None:
         """Prepare an indicator without showing it yet.
@@ -64,81 +80,70 @@ class Working:
         Args:
             client: A Slack WebClient.
             channel: Channel id the thread lives in.
-            thread_ts: Thread to show the indicator in. Slack has no notion of a
-                status outside a thread, so an empty value disables it.
-            what: Present-tense description, shown to the reader.
-            message_ts: Message to react to if the thread status is unavailable.
-                Defaults to the thread parent.
+            thread_ts: The thread to post into. Empty disables the indicator
+                entirely, since a loose message in the channel would be worse
+                than none.
+            what: Unused; kept so existing call sites need not change. The
+                frames say "Thinking" and a build says the same thing.
+            message_ts: Unused; retained for the same reason.
         """
+        del what, message_ts
         self._client = client
         self._channel = channel
         self._thread = thread_ts
-        self._what = what
-        self._message = message_ts or thread_ts
-        self._reacted = False
-        self._shown = threading.Event()
+        self._ts = ""
+        self._posted = threading.Event()
+        self._done = threading.Event()
 
-    def _set_status(self, text: str) -> bool:
-        """Set or clear the thread status. True when Slack accepted it.
-
-        Failure is deliberately not remembered between instances. An earlier
-        version cached it on the class, so one transient error disabled the real
-        indicator for the whole process and quietly downgraded every later reply
-        to an emoji nobody saw.
-        """
-        if not self._channel or not self._thread:
-            return False
+    def _run(self) -> None:
+        """Post the indicator, then animate it until asked to stop."""
         try:
-            self._client.assistant_threads_setStatus(
-                channel_id=self._channel, thread_ts=self._thread, status=text
+            posted = self._client.chat_postMessage(
+                channel=self._channel, thread_ts=self._thread, text=FRAMES[0]
             )
+            self._ts = str(posted.get("ts") or "")
         except Exception:
-            logger.debug("thread status unavailable; falling back to a reaction")
-            return False
-        return True
-
-    def _react(self, add: bool) -> None:
-        """Add or remove the waiting reaction, ignoring every failure.
-
-        Slack raises when a reaction is already present, or already gone. Both
-        happen in normal use — a retry, or two replies in one thread — and
-        neither is worth surfacing.
-        """
-        if not self._channel or not self._message:
-            return
-        try:
-            call = self._client.reactions_add if add else self._client.reactions_remove
-            call(channel=self._channel, timestamp=self._message, name=WAITING_REACTION)
-        except Exception:
-            logger.debug("could not %s the waiting reaction", "add" if add else "remove")
-
-    def _show(self) -> None:
-        """Put the indicator up, by whichever route works."""
-        try:
-            if not self._set_status(self._what):
-                self._react(add=True)
-                self._reacted = True
+            logger.debug("could not post the thinking indicator")
         finally:
-            # Set even on failure: `stop` waits on this, and a wait that never
-            # completes would add seconds to every reply.
-            self._shown.set()
+            # Set even on failure, or `stop` waits the full timeout for a
+            # message that was never posted and delays every reply.
+            self._posted.set()
+
+        if not self._ts:
+            return
+        frame = 1
+        while not self._done.wait(timeout=FRAME_SECONDS):
+            try:
+                self._client.chat_update(
+                    channel=self._channel, ts=self._ts, text=FRAMES[frame % len(FRAMES)]
+                )
+            except Exception:
+                logger.debug("could not advance the thinking indicator")
+            frame += 1
 
     def start(self) -> None:
         """Show the indicator without making the caller wait for it.
 
-        A Slack call costs a few hundred milliseconds. Doing it inline delays the
-        work the indicator exists to cover, so the indicator would appear late
-        *because* it was being shown.
+        A Slack call costs a few hundred milliseconds. Posting inline would delay
+        the work the indicator exists to cover, so the indicator would appear
+        late *because* it was being shown.
         """
-        threading.Thread(target=self._show, daemon=True, name="gable-status").start()
+        if not self._channel or not self._thread:
+            self._posted.set()
+            return
+        threading.Thread(target=self._run, daemon=True, name="gable-status").start()
 
     def stop(self) -> None:
-        """Clear the indicator, whatever happened."""
-        self._shown.wait(timeout=_SHOW_TIMEOUT_SECONDS)
-        self._set_status("")
-        if self._reacted:
-            self._react(add=False)
-            self._reacted = False
+        """Stop animating and remove the indicator entirely."""
+        self._done.set()
+        self._posted.wait(timeout=_POST_TIMEOUT_SECONDS)
+        if not self._ts:
+            return
+        try:
+            self._client.chat_delete(channel=self._channel, ts=self._ts)
+        except Exception:
+            logger.debug("could not remove the thinking indicator")
+        self._ts = ""
 
     def __enter__(self) -> Working:
         """Show the indicator and return self."""
@@ -151,5 +156,5 @@ class Working:
         exc: BaseException | None,
         traceback: TracebackType | None,
     ) -> None:
-        """Clear the indicator on the way out, success or failure."""
+        """Remove the indicator on the way out, success or failure."""
         self.stop()

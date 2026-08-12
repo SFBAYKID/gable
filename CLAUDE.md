@@ -242,6 +242,13 @@ Established by running against the real APIs, not by reading docs:
    resize sends ABSOLUTE and preserves position explicitly.
 6. **`action_id` must be unique within a Slack message**, or the whole message is
    rejected.
+7. **`assistant.threads.setStatus` renders nothing in a normal channel thread.**
+   It accepts `chat:write` — `assistant:write` was never the blocker — and
+   returns `ok`. Held open on a live thread for twenty seconds on 2026-08-12
+   with nothing visible the whole time. That status paints inside an
+   assistant-pane container; Gable is spoken to in an ordinary channel, so the
+   indicator has to be a real message that is posted, animated, and deleted.
+   **`ok` from a Slack API call means accepted, not displayed.**
 
 Each of these cost a real failure to learn. They are in the decision log with
 their evidence.

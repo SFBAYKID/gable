@@ -595,19 +595,37 @@ convenient reading of an ambiguous instruction.
 
 ### 4A.2 Show that it is working
 
-Anything slower than a moment gets a status message, updated in place, with some
-personality. Silence reads as broken, and image reprocessing is genuinely slow:
+Anything slower than a moment gets an indicator in the thread. Silence reads as
+broken, and image work is genuinely slow — a reply is four to eight seconds, a
+flyer about thirty.
 
-> Working on it.
-> One sec — fitting the image to the template.
-> Shake and bake. Almost there.
-> Checking how it turned out.
+The indicator is a **separate message that is deleted when the answer lands**
+(`slackapp/status.py`). It goes up, its text cycles so it visibly moves, and it
+disappears. It is not the answer and it never becomes the answer.
 
-No emoji, here or anywhere. AGENTS.md §2.0 forbids them and `voice.violations()`
-rejects them at the last gate, so a spinner written with one would never be
-sent. The Slack photo handoff posts one fitting message and updates it with the
-outcome. The initial automatic run still has no update-in-place seam for its
-Firecrawl, Drive, render, and vision stages.
+Two earlier designs are dead and should not be revived:
+
+- **A placeholder edited into the result.** This is what "updated in place" used
+  to mean here. It reads as the indicator turning into the reply rather than
+  going away, and it strands: if the work raises, the cheerful line stays in the
+  thread claiming progress on a job that already died — the exact honesty breach
+  §4A.4 exists to prevent.
+- **`assistant.threads.setStatus`.** Verified against the live API on
+  2026-08-12: it returns `ok` on a normal channel thread and renders nothing.
+  That surface only paints inside an assistant-pane container, and Gable is
+  spoken to in an ordinary channel. See `CLAUDE.md` §4.3 item 7.
+
+The answer is posted **before** the indicator is removed. Clearing first opens a
+silent gap at precisely the moment the wait ends.
+
+No emoji beyond the indicator's own frames, here or anywhere. AGENTS.md §2.0
+forbids them in Gable's speech and `voice.violations()` rejects them at the last
+gate; the indicator is not speech and is never routed through that gate, which
+is why it may carry one.
+
+Both slow Slack paths — a mention and a shared photo — now carry it. The initial
+automatic run still has no indicator over its Firecrawl, Drive, render, and
+vision stages.
 
 Two rules keep this from being noise:
 
@@ -798,3 +816,4 @@ Append to this table. Do not rewrite history — if a decision reverses, add a n
 | 2026-08-11 | A small supplied hero photo is **upscaled automatically**, never rejected for resolution alone | Up to 2x stays on Pillow. Beyond that, one policy-gated GPT Image 2 edit restores resolution from the exact fitted composition, then a composition-distance and seam gate decide whether the derivative is faithful enough. The original Slack upload remains untouched, `ai_enhanced` is recorded only when the edit is used, a failed edit falls back to the original pixels, and the call shares both the one-image-call limit and $50 ceiling. |
 | 2026-08-11 | `files:read` is installed and the private Slack download path is **verified live** | A real thread upload reached Gable's dimension check at 10:24, which requires successful `files_info` metadata and bot-authorized download. This supersedes the earlier waiting-on-reinstall status. The new AI upscale and resulting flyer remain unverified live until `e09bb27` is deployed in a watched run. |
 | 2026-08-11 | The automatic upscale is deployed; publishing reasserts an **unprivileged writable photo root on every deploy** | A watched 10:51 upload reached GPT Image successfully, then the seam gate rejected the derivative and the original-photo fallback continued. Publishing exposed `/var/www/gable-photos` as root-owned even though systemd allowed the path. The directory is now `gable:gable`, and `make deploy` idempotently reasserts that owner and mode before restarting. This supersedes only the earlier row's deployment status; a completed live flyer and visual certification are still pending. |
+| 2026-08-12 | The thinking indicator is a **posted, animated, then deleted message**, not an edited placeholder and not Slack's own thread status | Two designs were tried and both failed against what was asked for: an indicator that comes into the thread, runs, and goes away. A placeholder edited into the answer never goes away — it becomes the reply — and it strands permanently if the work raises, leaving a progress claim above a job that died. `assistant.threads.setStatus` looked correct and is not: it accepts `chat:write` and returns `ok`, but held open for twenty seconds on a live channel thread it rendered nothing, because that surface paints only inside an assistant-pane container. So `status.py` posts a real message, cycles its text every 1.5s, and deletes it — after the answer is posted, so no silent gap opens at the moment the wait ends. It runs on a background thread and swallows every error: a broken indicator must never affect the reply. Supersedes the update-in-place contract in §4A.2 and `AGENTS.md` §2.8. |

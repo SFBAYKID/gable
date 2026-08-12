@@ -494,7 +494,34 @@ def test_an_action_reply_comes_from_the_executor_after_it_runs() -> None:
     assert calls == ["thread-1"]
 
 
-def test_file_share_progress_is_replaced_with_the_real_outcome() -> None:
+class _ShareClient:
+    """A Slack client that records everything the file-share path sends."""
+
+    def __init__(self) -> None:
+        """Start with nothing recorded."""
+        self.calls: list[str] = []
+
+    def chat_postMessage(self, **_kwargs: object) -> dict[str, str]:  # noqa: N802
+        """Record the indicator going up."""
+        self.calls.append("post")
+        return {"ts": "indicator-ts"}
+
+    def chat_update(self, **_kwargs: object) -> None:
+        """Record an indicator frame."""
+        self.calls.append("update")
+
+    def chat_delete(self, **_kwargs: object) -> None:
+        """Record the indicator coming down."""
+        self.calls.append("delete")
+
+
+def test_the_photo_path_says_the_outcome_and_nothing_before_it() -> None:
+    """Only the outcome is said; the wait is covered by the indicator.
+
+    The old version posted "Fitting it to the flyer now" and edited that message
+    into the result, which is the pattern Chase rejected — the placeholder became
+    the reply instead of going away.
+    """
     from typing import Any
 
     from gable.slackapp.app import process_file_share
@@ -503,27 +530,40 @@ def test_file_share_progress_is_replaced_with_the_real_outcome() -> None:
 
     def say(**kwargs: object) -> dict[str, str]:
         posted.append(kwargs)
-        return {"ts": "progress-ts"}
-
-    class Client:
-        def chat_update(self, **kwargs: object) -> None:
-            posted.append(kwargs)
+        return {"ts": "said-ts"}
 
     def handler(_event: dict[str, Any], _client: Any) -> str:  # noqa: ANN401
         return "I fitted the photo and finished the flyer."
 
-    process_file_share(
-        {"channel": "C0BP597644B", "thread_ts": "thread-ts"},
-        say,
-        Client(),
-        handler,
-    )
+    client = _ShareClient()
+    process_file_share({"channel": "C0B02721MNK", "thread_ts": "thread-ts"}, say, client, handler)
 
     assert posted == [
-        {"text": "I have the photo. Fitting it to the flyer now.", "thread_ts": "thread-ts"},
-        {
-            "channel": "C0BP597644B",
-            "ts": "progress-ts",
-            "text": "I fitted the photo and finished the flyer.",
-        },
+        {"text": "I fitted the photo and finished the flyer.", "thread_ts": "thread-ts"}
     ]
+
+
+def test_a_failed_photo_fit_says_so_instead_of_going_quiet() -> None:
+    """A dead job must not leave the thread looking like it is still working."""
+    from typing import Any
+
+    from gable.slackapp.app import process_file_share
+
+    posted: list[dict[str, object]] = []
+
+    def say(**kwargs: object) -> dict[str, str]:
+        posted.append(kwargs)
+        return {"ts": "said-ts"}
+
+    def handler(_event: dict[str, Any], _client: Any) -> str:  # noqa: ANN401
+        msg = "Slides rejected the image"
+        raise RuntimeError(msg)
+
+    process_file_share(
+        {"channel": "C0B02721MNK", "thread_ts": "thread-ts"}, say, _ShareClient(), handler
+    )
+
+    assert len(posted) == 1
+    said = str(posted[0]["text"])
+    assert "could not fit" in said
+    assert "unchanged" in said, "it must be clear the flyer was not damaged"

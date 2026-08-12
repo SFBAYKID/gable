@@ -215,31 +215,35 @@ Name the listing, name the field, say why it matters — as a sentence.
 Status is `needs_info`. The listing is **paused, not failed** — it waits
 indefinitely and re-enters on `/gable run`.
 
-### 2.8 Working — the progress message
+### 2.8 Working — the thinking indicator
 
-Anything slower than a moment gets a status message, edited in place rather than
-posted repeatedly. Image work is genuinely slow, and silence reads as broken.
+Anything slower than a moment shows an indicator **in the thread**, and that
+indicator **goes away** when the answer arrives. Image work is genuinely slow,
+and silence reads as broken.
 
-The Slack photo handoff implements this contract: it posts one fitting message
-and replaces that message with the verified outcome. The initial automatic run
-still lacks stage-by-stage message editing because `runner.say` can post but
-cannot update an existing timestamp; that remaining gap covers Firecrawl,
-Drive, rendering, and vision stages.
+It is a message of its own, cycling so it visibly moves, and it is deleted once
+the answer is posted:
 
 ```
-Working on it…
-One sec — fitting the image to the template…
-Shake and bake. Almost there…
-Checking how it turned out…
+Thinking ⏳
+Thinking .
+Thinking . .
+Thinking . . .
 ```
+
+It is never edited into the reply. A placeholder that becomes the answer has not
+gone away — it has been renamed — and when the work fails it sits in the thread
+claiming progress on something already dead. Both slow Slack paths carry the
+indicator: answering a mention, and fitting a shared photo. The initial
+automatic run does not yet.
 
 Two rules keep this useful rather than noisy:
 
 - **Name the real stage when you can.** "Fitting the image to the template" tells
   Carmen more than "working", and if it stalls she knows where it stalled.
 - **Personality never touches the outcome.** A failure is reported plainly, in
-  words, naming what failed. Edit the progress line away when the result arrives
-  — never leave a cheerful message sitting above a broken post.
+  words, naming what failed — including a failure during the wait. The indicator
+  disappearing is never, on its own, the report.
 
 ### 2.9 The render did not look right
 
