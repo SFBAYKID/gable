@@ -30,9 +30,19 @@ from collections.abc import Callable
 from typing import Any, Final
 
 from gable.slackapp.brain import Decision, think
+from gable.slackapp.status import Working
 from gable.slackapp.style import is_clean, strip_to_plain
 
 logger = logging.getLogger("gable.slack")
+
+#: Shown the instant a mention arrives, then edited into the real answer. The
+#: ellipsis is deliberate: it reads as a pause rather than as a statement, so a
+#: reply that lands a second later does not look like a change of mind.
+THINKING: Final[str] = "Thinking..."
+
+#: Slack user id to first name. Names do not change mid-conversation, and the
+#: lookup is not worth repeating on every message.
+_NAME_CACHE: dict[str, str] = {}
 
 #: `<@U123ABC>` — Slack's own mention markup, stripped before the model sees it
 #: so "hello" arrives as "hello" rather than as an id.
@@ -55,7 +65,7 @@ FALLBACK: Final[str] = (
 
 FileShareHandler = Callable[[dict[str, Any], Any], str]
 ActionHandler = Callable[[Decision, str], str]
-Thinker = Callable[[str], Decision]
+Thinker = Callable[..., Decision]
 
 
 def clean_mention_text(text: str) -> str:
@@ -228,8 +238,36 @@ def build_app(
 
     app = App(token=token, logger=logger)
 
+    def first_name_of(client: Any, user_id: str) -> str:  # noqa: ANN401
+        """The speaker's first name, or empty when it cannot be looked up.
+
+        Greeting the room when one person asked a question reads as not
+        listening, so the name is worth a call. A failure here is not worth
+        failing the reply over — an unnamed greeting is merely worse, not wrong.
+        """
+        if not user_id:
+            return ""
+        cached = _NAME_CACHE.get(user_id)
+        if cached is not None:
+            return cached
+        name = ""
+        try:
+            profile = client.users_info(user=user_id).get("user", {}) or {}
+            details = profile.get("profile", {}) or {}
+            full = (
+                details.get("first_name")
+                or details.get("real_name")
+                or profile.get("real_name")
+                or ""
+            )
+            name = str(full).split(" ")[0]
+        except Exception:
+            logger.debug("could not resolve the speaker's name")
+        _NAME_CACHE[user_id] = name
+        return name
+
     @app.event("app_mention")
-    def handle_mention(event: dict[str, Any], say: Any) -> None:  # noqa: ANN401
+    def handle_mention(event: dict[str, Any], say: Any, client: Any) -> None:  # noqa: ANN401
         """Answer a direct mention.
 
         Replies in the thread when spoken to in one, so a conversation about a
@@ -242,14 +280,36 @@ def build_app(
             thread = event.get("thread_ts") or event.get("ts")
             logger.info("mention received: %s", asked[:120])
             if not asked:
-                say(text=safe_reply("I'm here. What would you like me to do?"), thread_ts=thread)
+                who = first_name_of(client, str(event.get("user") or ""))
+                greeting = (
+                    f"Hi {who}. What would you like me to do?"
+                    if who
+                    else "I'm here. What would you like me to do?"
+                )
+                say(text=safe_reply(greeting), thread_ts=thread)
                 return
-            decision = thinker(asked)
-            logger.info("replying (tool=%s)", decision.tool or "none")
-            say(
-                text=safe_reply(reply_for_decision(decision, action_handler, str(thread or ""))),
-                thread_ts=thread,
-            )
+            # Say something before doing anything slow. A reaction is too quiet
+            # to read as "working", and thinking takes several seconds during
+            # which the thread looks abandoned. This placeholder is posted first
+            # and then edited into the answer, so it costs no extra message and
+            # the wait is visible from the first moment.
+            placeholder = say(text=THINKING, thread_ts=thread)
+            placeholder_ts = str(placeholder.get("ts") or "") if hasattr(placeholder, "get") else ""
+            with Working(
+                client,
+                str(event.get("channel") or ""),
+                str(thread or ""),
+                "Thinking",
+                message_ts=str(event.get("ts") or ""),
+            ):
+                speaker = first_name_of(client, str(event.get("user") or ""))
+                decision = thinker(asked, speaker=speaker)
+                logger.info("replying (tool=%s)", decision.tool or "none")
+                answer = safe_reply(reply_for_decision(decision, action_handler, str(thread or "")))
+            if placeholder_ts:
+                client.chat_update(channel=event.get("channel"), ts=placeholder_ts, text=answer)
+            else:
+                say(text=answer, thread_ts=thread)
             follow_up = describe_action(decision)
             if follow_up:
                 say(text=safe_reply(follow_up), thread_ts=thread)

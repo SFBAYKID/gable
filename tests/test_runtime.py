@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import sqlite3
 import threading
+import time
 from pathlib import Path
 
 from gable.db.schema import apply_migrations, connect
@@ -115,3 +116,39 @@ def test_database_connection_survives_a_thread_handoff(tmp_path: Path) -> None:
     connection.close()
 
     assert failures == []
+
+
+def test_slack_is_served_without_watching_the_sheet_when_polling_is_off() -> None:
+    """Polling can be held back while the Slack conversation is still exercised.
+
+    The backfill guard is skipped in this mode on purpose. It exists to stop a
+    first boot building every historical row at once, and with polling off
+    nothing is built — so letting it refuse would block the one mode meant to
+    test Slack safely.
+    """
+    events: list[str] = []
+    connection = sqlite3.connect(":memory:")
+    components = RuntimeComponents(
+        poller=FakePoller(events, ready=False),
+        socket=FakeSocket(events),
+        connection=connection,
+        poll_enabled=False,
+    )
+    result: list[int] = []
+    worker = threading.Thread(target=lambda: result.append(serve(components)), daemon=True)
+    worker.start()
+    for _ in range(200):
+        if "socket connected" in events:
+            break
+        time.sleep(0.01)
+
+    assert "socket connected" in events, "Slack must still be connected"
+    assert "poller checked" not in events, "the backfill guard must not block this mode"
+    assert not any(e.startswith("poller on") for e in events), "the sheet must not be watched"
+
+
+def test_polling_is_on_by_default() -> None:
+    """The safe default is the production one; holding it back is deliberate."""
+    events: list[str] = []
+    components, _ = _components(events)
+    assert components.poll_enabled is True

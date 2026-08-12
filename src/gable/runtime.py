@@ -51,6 +51,34 @@ class RuntimeComponents:
     poller: PollLoop
     socket: SocketConnection
     connection: sqlite3.Connection
+    #: When false, Slack is served but the Sheet is not watched. The backfill
+    #: guard is skipped too: it exists to stop a first boot building every
+    #: historical row, and nothing is being built.
+    poll_enabled: bool = True
+
+
+def _wait_for_shutdown() -> None:
+    """Block until the process is asked to stop.
+
+    Args:
+        None.
+
+    Returns:
+        None, once SIGINT or SIGTERM arrives.
+
+    Raises:
+        Nothing.
+    """
+    import contextlib
+    import signal
+    import threading
+
+    stop = threading.Event()
+    for received in (signal.SIGINT, signal.SIGTERM):
+        # Off the main thread this raises, and the caller owns shutdown instead.
+        with contextlib.suppress(ValueError):
+            signal.signal(received, lambda *_: stop.set())
+    stop.wait()
 
 
 def serve(components: RuntimeComponents) -> int:
@@ -67,12 +95,20 @@ def serve(components: RuntimeComponents) -> int:
     """
     connected = False
     try:
-        ready, reason = components.poller.ready()
-        if not ready:
-            logger.error("%s", reason)
-            return 2
+        if components.poll_enabled:
+            ready, reason = components.poller.ready()
+            if not ready:
+                logger.error("%s", reason)
+                return 2
         components.socket.connect()
         connected = True
+        if not components.poll_enabled:
+            logger.info("Slack connected; the Sheet is NOT being watched")
+            # Nothing to loop over, so block until a signal arrives. Returning
+            # here would close the socket and end the process a moment after
+            # announcing it was listening.
+            _wait_for_shutdown()
+            return 0
         logger.info("Slack connected; watching the Sheet")
         return components.poller.run_forever()
     except Exception:

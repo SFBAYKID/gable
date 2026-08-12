@@ -254,6 +254,75 @@ def strip_to_plain(text: str) -> str:
     return "\n".join(line.strip() for line in out.splitlines()).strip()
 
 
+#: Beyond this a Slack message stops being read and starts being skimmed. The
+#: number is a ceiling, not a target — most replies should be far shorter.
+MAX_REPLY_CHARS: Final[int] = 600
+
+#: Markdown that Slack does not render. `**bold**` shows the asterisks, and a
+#: `#` heading shows the hash, so both look like a mistake rather than emphasis.
+_MD_BOLD: Final[re.Pattern[str]] = re.compile(r"\*\*(.+?)\*\*", re.DOTALL)
+_MD_HEADING: Final[re.Pattern[str]] = re.compile(r"^\s{0,3}#{1,6}\s+", re.MULTILINE)
+_MD_BULLET: Final[re.Pattern[str]] = re.compile(r"^\s*[-*+]\s+", re.MULTILINE)
+_MD_NUMBER: Final[re.Pattern[str]] = re.compile(r"^\s*\d+[.)]\s+", re.MULTILINE)
+_BLANK_RUN: Final[re.Pattern[str]] = re.compile(r"\n{3,}")
+
+
+def for_slack(text: str) -> str:
+    """Render a reply the way Slack actually formats text.
+
+    Args:
+        text: A candidate message, possibly carrying Markdown.
+
+    Returns:
+        The same message in Slack's mrkdwn: `**bold**` becomes `*bold*`, headings
+        lose their hashes, and list markers become bullet characters. Slack does
+        not render Markdown, so leaving it in shows the raw asterisks and hashes
+        to Carmen, which reads as a broken message rather than a formatted one.
+
+    Raises:
+        Nothing.
+    """
+    out = _MD_BOLD.sub(r"*\1*", text)
+    out = _MD_HEADING.sub("", out)
+    out = _MD_BULLET.sub("• ", out)
+    out = _MD_NUMBER.sub("• ", out)
+    out = _BLANK_RUN.sub("\n\n", out)
+    return "\n".join(line.rstrip() for line in out.splitlines()).strip()
+
+
+def shorten(text: str, limit: int = MAX_REPLY_CHARS) -> str:
+    """Cut a runaway reply back to something a person will actually read.
+
+    Args:
+        text: The message.
+        limit: Character ceiling.
+
+    Returns:
+        The message unchanged when it is already short enough, otherwise its
+        first whole sentences up to the limit. Cutting at a sentence rather than
+        a character keeps the result readable instead of truncated mid-word.
+
+    Raises:
+        Nothing.
+
+    Note:
+        This is a backstop, not the mechanism. The reply should be short because
+        it was written short; arriving here means the wording needs fixing.
+    """
+    if len(text) <= limit:
+        return text
+    kept: list[str] = []
+    total = 0
+    for sentence in re.split(r"(?<=[.!?])\s+", text):
+        if total + len(sentence) > limit:
+            break
+        kept.append(sentence)
+        total += len(sentence) + 1
+    if not kept:
+        return text[:limit].rsplit(" ", 1)[0]
+    return " ".join(kept)
+
+
 def safe(text: str) -> str:
     """Return `text` if it obeys the house style, or the closest thing that does.
 
@@ -269,9 +338,10 @@ def safe(text: str) -> str:
     Raises:
         Nothing.
     """
-    if is_clean(text):
-        return text
-    scrubbed = strip_to_plain(text)
+    formatted = shorten(for_slack(text))
+    if is_clean(formatted):
+        return formatted
+    scrubbed = strip_to_plain(formatted)
     if is_clean(scrubbed):
         return scrubbed
     return "I have an update on this one, but I could not word it properly. Ask me again."

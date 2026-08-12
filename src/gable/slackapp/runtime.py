@@ -211,13 +211,25 @@ def build_components(settings: Settings) -> RuntimeComponents:
         finally:
             action_connection.close()
 
-    def guarded_think(message: str) -> Decision:
-        """Run a conversation call only while the shared budget permits it."""
+    def guarded_think(message: str, speaker: str = "") -> Decision:
+        """Run a conversation call only while the shared budget permits it.
+
+        Args:
+            message: What was said, with the mention already stripped.
+            speaker: The first name of whoever asked, when it could be resolved.
+
+        Returns:
+            A `Decision`.
+
+        Raises:
+            Nothing.
+        """
         if not settings.openai_image_api_key:
             return think(
                 message,
                 api_key=settings.openai_image_api_key,
                 model=settings.conversation_model,
+                speaker=speaker,
             )
         thought_connection = connect(settings.db_path)
         estimate = spend.Estimate(
@@ -234,6 +246,7 @@ def build_components(settings: Settings) -> RuntimeComponents:
                     message,
                     api_key=settings.openai_image_api_key,
                     model=settings.conversation_model,
+                    speaker=speaker,
                 ),
             )
         except spend.BudgetExceededError:
@@ -268,7 +281,12 @@ def build_components(settings: Settings) -> RuntimeComponents:
         max_per_pass=settings.max_batch,
     )
     socket = SocketModeHandler(app, settings.slack_app_token)
-    return RuntimeComponents(poller=poller, socket=socket, connection=connection)
+    return RuntimeComponents(
+        poller=poller,
+        socket=socket,
+        connection=connection,
+        poll_enabled=settings.poll_enabled,
+    )
 
 
 def main() -> int:

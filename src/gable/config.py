@@ -153,6 +153,10 @@ class Settings:
     # --- Pipeline ---
     poll_interval_seconds: int
     poll_busy_interval_seconds: int
+    #: When false, Slack stays connected but the Sheet is not watched. Used to
+    #: exercise the conversation on its own before trusting it to act on real
+    #: submissions unattended.
+    poll_enabled: bool
     max_batch: int
     max_description_chars: int
     max_retries: int
@@ -304,6 +308,7 @@ class Settings:
             photo_jpeg_quality=reader.int_value(
                 "GABLE_PHOTO_JPEG_QUALITY", 85, minimum=40, maximum=100
             ),
+            poll_enabled=reader.bool_value("GABLE_POLL_ENABLED", True),
             poll_interval_seconds=reader.int_value(
                 "GABLE_POLL_INTERVAL_SECONDS", 600, minimum=MIN_POLL_INTERVAL_SECONDS
             ),
