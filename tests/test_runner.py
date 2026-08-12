@@ -535,7 +535,10 @@ def test_no_flyer_is_delivered_without_a_hero_photo(db: sqlite3.Connection) -> N
 
     assert result.status == "needs_photo"
     assert rec.copied is False, "nothing should be built before there is a photo"
-    assert "which image" in rec.said[0].lower()
+    # Plain words. "Hero" is our name for the photo well, not Carmen's, and the
+    # question has to be answerable without learning our vocabulary.
+    assert "send me the image" in rec.said[0].lower()
+    assert "hero" not in rec.said[0].lower()
     assert submission.intake.address in rec.said[0]
 
 

@@ -77,7 +77,8 @@ def test_the_canonical_message_from_the_mockup_passes() -> None:
         "&gt;*7940 Oakwood Rd, Glen Burnie, MD 21061*\n"
         "&gt;Template  *Just Listed*\n"
         "&gt;Agent  Lolo Simmons · (443) 854-8554\n\n"
-        "I've got everything except the photo. Which image do you want as the hero?"
+        "We got a new submission for 7940 Oakwood Rd, Glen Burnie, MD 21061. "
+        "Can you send me the image?"
     )
     assert is_clean(good), violations(good)
 

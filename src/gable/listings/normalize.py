@@ -31,6 +31,7 @@ from dataclasses import dataclass, fields
 from datetime import datetime
 from typing import Final
 
+from gable.listings.address import tidy
 from gable.models import Listing, derive_response_row_id, utc_now
 
 _HORIZONTAL_WS = re.compile(r"[^\S\n]+")
@@ -214,34 +215,26 @@ def parse_price(raw: str) -> tuple[int | None, str, str | None]:
 
 
 def title_case_address(raw: str) -> str:
-    """Title-case an address, but only when doing so cannot make it worse.
+    """Present an address properly. See `listings.address.tidy` for the rules.
 
-    ARCHITECTURE.md 4.2 asks for title-casing. Applied naively that damages real
-    addresses: `str.title()` turns "McDonald" into "Mcdonald" and "4th" into
-    "4Th", and the result is printed on a flyer a buyer reads.
+    Args:
+        raw: The address exactly as the agent typed it.
 
-    So mixed-case input is left exactly as typed — an agent who wrote
-    "123 McDonald Ave" meant it. Only input that is entirely uppercase or
-    entirely lowercase is re-cased, since that carries no authorial intent.
-    Directionals stay uppercase and ordinals keep their lowercase suffix.
+    Returns:
+        The same address, cased and punctuated for a flyer. Nothing is added,
+        removed, corrected or reordered.
+
+    Raises:
+        Nothing.
+
+    Note:
+        This used to leave any mixed-case input alone, on the theory that mixed
+        case carried authorial intent. It does not: `2808 Berwick Ave,
+        Baltimore, Md 21234` is mixed case, so `Md` survived onto a rendered
+        flyer. Punctuation went unhandled entirely, which is how `1225
+        canberwell rd baltimore md 21228` reached a 44pt headline.
     """
-    cleaned = clean_text(raw)
-    if not cleaned:
-        return ""
-    letters = [character for character in cleaned if character.isalpha()]
-    if letters and not (cleaned.isupper() or cleaned.islower()):
-        return cleaned  # Deliberate mixed case; leave it alone.
-
-    words: list[str] = []
-    for word in cleaned.split(" "):
-        stripped = word.strip(".,")
-        if stripped.upper() in _ALWAYS_UPPER:
-            words.append(word.upper())
-        elif _ORDINAL.match(stripped):
-            words.append(word.lower())
-        else:
-            words.append(word.capitalize())
-    return " ".join(words)
+    return tidy(clean_text(raw))
 
 
 def truncate_on_word_boundary(text: str, limit: int) -> tuple[str, bool]:

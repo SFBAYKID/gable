@@ -274,8 +274,11 @@ class Runner:
         if not self.hero_photo_url:
             return self._ask(
                 run_id,
-                f"I have everything for {intake.address} except the photo. "
-                "Which image do you want as the hero?",
+                # Plain words only. "Hero" is our word for the photo well, not
+                # Carmen's, and asking her which image she wants "as the hero"
+                # asks her to learn our vocabulary to answer a simple question.
+                f"We got a new submission for {intake.address}. "
+                "Can you send me the image?",
                 [],
                 result,
                 status="needs_photo",
