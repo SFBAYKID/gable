@@ -217,25 +217,29 @@ indefinitely and re-enters on `/gable run`.
 
 ### 2.8 Working — the thinking indicator
 
-Anything slower than a moment shows an indicator **in the thread**, and that
-indicator **goes away** when the answer arrives. Image work is genuinely slow,
-and silence reads as broken.
+Every user-triggered response starts Slack's **native purple Gable waiting
+state** immediately. This includes the first mention, every later question in
+the thread, a flyer edit, and a shared photo. Slack owns the pulsing purple
+treatment; Gable supplies only truthful status text.
 
-It is a message of its own, cycling so it visibly moves, and it is deleted once
-the answer is posted:
+The sequence is timed from the user's message:
 
 ```
-Thinking ⏳
-Thinking .
-Thinking . .
-Thinking . . .
+0 seconds   Gable is thinking...
+1 second    Gable says hold tight...
+3 seconds   Gable is jittering...
+5 seconds   Gable is bobbing and weaving...
+6 seconds   Gable names the real work, such as building the flyer
 ```
 
-It is never edited into the reply. A placeholder that becomes the answer has not
-gone away — it has been renamed — and when the work fails it sits in the thread
-claiming progress on something already dead. Both slow Slack paths carry the
-indicator: answering a mention, and fitting a shared photo. The initial
-automatic run does not yet.
+After six seconds, the real stage refreshes as work moves — reading the photo,
+fitting it to the template, building the flyer, or applying an edit. The status
+clears only after the answer is posted, including a plain-language failure. A
+cleanup call also runs on failure so Gable cannot remain stuck thinking.
+
+This is not a message, reaction, placeholder, or emoji. It must never be edited
+into the reply or replaced with a posted animation. The initial automatic form
+poll has no user message or Slack thread to attach a native waiting state to.
 
 Two rules keep this useful rather than noisy:
 

@@ -226,9 +226,10 @@ account.
 Design detail lives in `ARCHITECTURE.md` §2.1 and the §9 decision log. Do not
 re-open Canva without reading both.
 
-### 4.3 Verified live, so build on these
+### 4.3 Verified evidence, so build on these
 
-Established by running against the real APIs, not by reading docs:
+Items 1–6 were established against the real APIs. Item 7 combines Slack's
+current vendor contract with Chase's report of the previously visible behavior:
 
 1. **Slides accepts a plain `http://` image URL.** It rejects every Google Drive
    URL form, even when the file is world-readable and serves valid bytes to an
@@ -242,13 +243,15 @@ Established by running against the real APIs, not by reading docs:
    resize sends ABSOLUTE and preserves position explicitly.
 6. **`action_id` must be unique within a Slack message**, or the whole message is
    rejected.
-7. **`assistant.threads.setStatus` renders nothing in a normal channel thread.**
-   It accepts `chat:write` — `assistant:write` was never the blocker — and
-   returns `ok`. Held open on a live thread for twenty seconds on 2026-08-12
-   with nothing visible the whole time. That status paints inside an
-   assistant-pane container; Gable is spoken to in an ordinary channel, so the
-   indicator has to be a real message that is posted, animated, and deleted.
-   **`ok` from a Slack API call means accepted, not displayed.**
+7. **`assistant.threads.setStatus` is Gable's native purple waiting surface.**
+   Slack's current method reference and March 2026 scope update explicitly allow
+   channel-based apps to use it with `chat:write`, and setting it on a new user
+   message opens the reply thread. A single live call returned `ok` without a
+   visible result on 2026-08-12 and led to its mistaken removal; Chase identified
+   that removal as a regression from the visibly working purple treatment.
+   The restored timed sequence still needs a watched live confirmation after
+   deployment. Vendor contract:
+   https://docs.slack.dev/reference/methods/assistant.threads.setStatus/
 
 Each of these cost a real failure to learn. They are in the decision log with
 their evidence.

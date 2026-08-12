@@ -582,37 +582,20 @@ convenient reading of an ambiguous instruction.
 
 ### 4A.2 Show that it is working
 
-Anything slower than a moment gets an indicator in the thread. Silence reads as
-broken, and image work is genuinely slow — a reply is four to eight seconds, a
-flyer about thirty.
+Every response to a Slack user starts `assistant.threads.setStatus` immediately
+(`slackapp/status.py`). Slack renders the native pulsing purple Gable treatment,
+auto-opens a new mention's thread, and clears it when Gable replies. The method
+is documented for channel apps with the existing `chat:write` scope.
 
-The indicator is a **separate message that is deleted when the answer lands**
-(`slackapp/status.py`). It goes up, its text cycles so it visibly moves, and it
-disappears. It is not the answer and it never becomes the answer.
+The status says Gable is thinking at once, then hold tight at one second,
+jittering at three, and bobbing and weaving at five. At six seconds personality
+gives way to the caller's truthful stage, refreshed as photo or flyer work moves.
+An explicit empty status is still sent on exit so a failure cannot strand it.
 
-Two earlier designs are dead and should not be revived:
-
-- **A placeholder edited into the result.** This is what "updated in place" used
-  to mean here. It reads as the indicator turning into the reply rather than
-  going away, and it strands: if the work raises, the cheerful line stays in the
-  thread claiming progress on a job that already died — the exact honesty breach
-  §4A.4 exists to prevent.
-- **`assistant.threads.setStatus`.** Verified against the live API on
-  2026-08-12: it returns `ok` on a normal channel thread and renders nothing.
-  That surface only paints inside an assistant-pane container, and Gable is
-  spoken to in an ordinary channel. See `CLAUDE.md` §4.3 item 7.
-
-The answer is posted **before** the indicator is removed. Clearing first opens a
-silent gap at precisely the moment the wait ends.
-
-No emoji beyond the indicator's own frames, here or anywhere. AGENTS.md §2.0
-forbids them in Gable's speech and `voice.violations()` rejects them at the last
-gate; the indicator is not speech and is never routed through that gate, which
-is why it may carry one.
-
-Both slow Slack paths — a mention and a shared photo — now carry it. The initial
-automatic run still has no indicator over its Firecrawl, Drive, render, and
-vision stages.
+This covers initial mentions, plain follow-ups in an existing thread, edit
+actions, and shared photos. A posted message, reaction, or edited placeholder is
+not equivalent: none receives Slack's native purple treatment, and placeholders
+can survive a failure. The automatic form poll has no user thread to attach to.
 
 Two rules keep this from being noise:
 
@@ -799,3 +782,4 @@ Append to this table. Do not rewrite history — if a decision reverses, add a n
 | 2026-08-12 | The thinking indicator is a **posted, animated, then deleted message**, not an edited placeholder and not Slack's own thread status | Two designs were tried and both failed against what was asked for: an indicator that comes into the thread, runs, and goes away. A placeholder edited into the answer never goes away — it becomes the reply — and it strands permanently if the work raises, leaving a progress claim above a job that died. `assistant.threads.setStatus` looked correct and is not: it accepts `chat:write` and returns `ok`, but held open for twenty seconds on a live channel thread it rendered nothing, because that surface paints only inside an assistant-pane container. So `status.py` posts a real message, cycles its text every 1.5s, and deletes it — after the answer is posted, so no silent gap opens at the moment the wait ends. It runs on a background thread and swallows every error: a broken indicator must never affect the reply. Supersedes the update-in-place contract in §4A.2 and `AGENTS.md` §2.8. |
 | 2026-08-12 | Responses columns are located by **header text**, and a tab with no recognisable header is refused | Fixed positions are only ever true of one tab. `Testing_1` splits the agent's name into `First Name` and `Second Name`, shifting every column from D rightward by one and heading row 2 under a blank row; read positionally its row 78 yields the service-guidelines paragraph as the request type, "Instagram Story" as the property address, and no price — all of which look like data downstream. `intake.columns_from_header` maps by name, `repository.find_header` locates the header row, and `maps_a_response_row` refuses a tab that names none of the email, request type and address rather than guessing. Also corrects §3.1, which described nine columns from a pre-API browser reading, and removes the `Templates` and `Runs` tab designs that D3 replaced with SQLite. |
 | 2026-08-12 | The picker takes the best design **that has been imported**, unless the submission named the missing one | Only the top-ranked candidate was ever looked for in Drive, so Just Sold — which has eleven eligible designs and one imported — reported having none filed at all, in front of a customer. `rank` already drops functional mismatches rather than demoting them, so everything it returns is usable and the order is preference; an absent candidate is now skipped and the next taken, with the fallback logged. This does **not** reverse the earlier "missing exact Drive file becomes needs_template" row, it narrows it: a design that won on a cue was explicitly asked for in the notes, and substituting another answers a different question than the agent asked, so a missing cue-matched design still stops and asks. |
+| 2026-08-12 | **Reverses the posted-message indicator:** every user response uses Slack's native purple thread status | Chase identified the posted animation as a regression from the native purple treatment that had visibly worked. Slack's current method reference and March 2026 scope update explicitly support channel apps through `chat:write`, including auto-opening the reply thread. The prior single live call that returned `ok` without visible output was not enough evidence to remove the product behavior. Mentions, follow-ups, edits, and photo work now share one timed status; after six seconds it reports the actual stage, and every exit clears it. |

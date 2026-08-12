@@ -160,6 +160,21 @@ def test_one_thread_image_resumes_the_same_run_without_a_new_attempt(tmp_path: P
     connection.close()
 
 
+def test_photo_handoff_reports_truthful_stages_during_a_long_wait(tmp_path: Path) -> None:
+    """The native indicator can move from reading through fitting to building."""
+    path = tmp_path / "gable.db"
+    _paused_database(path)
+    stages: list[str] = []
+
+    _handoff(path, []).handle(_event(), FakeSlackClient(), stages.append)
+
+    assert stages == [
+        "is reading the photo...",
+        "is fitting the photo to the template...",
+        "is building the flyer...",
+    ]
+
+
 def test_an_upload_outside_the_configured_channel_is_ignored(tmp_path: Path) -> None:
     path = tmp_path / "gable.db"
     _paused_database(path)

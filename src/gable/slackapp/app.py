@@ -58,9 +58,36 @@ FALLBACK: Final[str] = (
     "listing you mean and I'll pick it up from there."
 )
 
-FileShareHandler = Callable[[dict[str, Any], Any], str]
+ProgressReporter = Callable[[str], None]
+FileShareHandler = Callable[[dict[str, Any], Any, ProgressReporter], str]
 ActionHandler = Callable[[Decision, str], str]
 Thinker = Callable[..., Decision]
+
+ACTION_STAGES: Final[dict[str, str]] = {
+    "set_font_size": "is updating the flyer text...",
+    "set_colour": "is recolouring the flyer...",
+    "resize_photo": "is resizing the flyer photo...",
+    "move_element": "is moving an element on the flyer...",
+    "correct_field": "is correcting the flyer...",
+    "rebuild_flyer": "is rebuilding the flyer...",
+    "report_status": "is checking the flyer status...",
+}
+
+
+def stage_for_decision(decision: Decision) -> str:
+    """Describe the real work an action decision is about to perform.
+
+    Args:
+        decision: Model-selected conversational outcome.
+
+    Returns:
+        Present-tense native-status copy. Conversation and clarification retain
+        the generic answer-preparation stage.
+
+    Raises:
+        Nothing.
+    """
+    return ACTION_STAGES.get(decision.tool, "is preparing the answer...")
 
 
 def clean_mention_text(text: str) -> str:
@@ -182,9 +209,14 @@ def process_file_share(
             thread_ts=thread,
         )
         return
-    with Working(client, str(event.get("channel") or ""), str(thread or "")):
+    with Working(
+        client,
+        str(event.get("channel") or ""),
+        str(thread or ""),
+        "is building the flyer...",
+    ) as waiting:
         try:
-            outcome = safe_reply(handler(event, client))
+            outcome = safe_reply(handler(event, client, waiting.stage))
         except Exception:
             logger.exception("the photo workflow failed")
             outcome = (
@@ -260,24 +292,28 @@ def answer_mention(
         # The indicator goes up before the first network call. The name lookup
         # is itself a round trip, so one raised after it has already missed part
         # of the wait it exists to cover.
-        with Working(client, str(event.get("channel") or ""), str(thread or "")):
-            speaker = first_name_of(client, str(event.get("user") or ""))
-            if not asked:
-                greeting = (
-                    f"Hi {speaker}. What would you like me to do?"
-                    if speaker
-                    else "I'm here. What would you like me to do?"
-                )
-                say(text=safe_reply(greeting), thread_ts=thread)
+        with Working(client, str(event.get("channel") or ""), str(thread or "")) as waiting:
+            try:
+                speaker = first_name_of(client, str(event.get("user") or ""))
+                if not asked:
+                    greeting = (
+                        f"Hi {speaker}. What would you like me to do?"
+                        if speaker
+                        else "I'm here. What would you like me to do?"
+                    )
+                    say(text=safe_reply(greeting), thread_ts=thread)
+                    return
+                decision = thinker(asked, speaker=speaker)
+                logger.info("replying (tool=%s)", decision.tool or "none")
+                waiting.stage(stage_for_decision(decision))
+                answer = safe_reply(reply_for_decision(decision, action_handler, str(thread or "")))
+                # Said inside the block on purpose: the native state remains up
+                # until the answer is in the thread, then Slack clears it.
+                say(text=answer, thread_ts=thread)
+            except Exception:
+                logger.exception("mention response failed")
+                say(text=FALLBACK, thread_ts=thread)
                 return
-            decision = thinker(asked, speaker=speaker)
-            logger.info("replying (tool=%s)", decision.tool or "none")
-            answer = safe_reply(reply_for_decision(decision, action_handler, str(thread or "")))
-            # Said inside the block on purpose: the indicator comes down on the
-            # way out, so the answer is already in the thread when it goes.
-            # Clearing first opens a silent gap at exactly the moment the wait
-            # ends, which is the moment being waited on.
-            say(text=answer, thread_ts=thread)
         follow_up = describe_action(decision)
         if follow_up:
             say(text=safe_reply(follow_up), thread_ts=thread)
@@ -287,6 +323,53 @@ def answer_mention(
             say(text=FALLBACK, thread_ts=event.get("thread_ts") or event.get("ts"))
         except Exception:
             logger.exception("could not deliver the fallback either")
+
+
+def answer_thread_reply(
+    event: dict[str, Any],
+    say: Any,  # noqa: ANN401 - Bolt injection, untyped upstream
+    client: Any,  # noqa: ANN401 - Slack WebClient, untyped upstream
+    thinker: Thinker,
+    action_handler: ActionHandler | None = None,
+) -> None:
+    """Answer one follow-up in an existing Gable thread with waiting feedback.
+
+    Args:
+        event: Slack's ordinary threaded message event.
+        say: Bolt's thread-aware posting helper.
+        client: Slack Web API client for user lookup and native status.
+        thinker: Turns the follow-up into a decision.
+        action_handler: Executes a selected flyer edit when one is wired.
+
+    Raises:
+        Nothing. Failures become the same safe sentence as initial mentions.
+    """
+    thread = str(event.get("thread_ts") or "")
+    if not thread:
+        return
+    try:
+        asked = clean_mention_text(event.get("text", ""))
+        logger.info("thread reply received: %s", asked[:120])
+        with Working(client, str(event.get("channel") or ""), thread) as waiting:
+            try:
+                speaker = first_name_of(client, str(event.get("user") or ""))
+                if not asked:
+                    answer = "What would you like me to do next?"
+                else:
+                    decision = thinker(asked, speaker=speaker)
+                    logger.info("replying to thread (tool=%s)", decision.tool or "none")
+                    waiting.stage(stage_for_decision(decision))
+                    answer = reply_for_decision(decision, action_handler, thread)
+                say(text=safe_reply(answer), thread_ts=thread)
+            except Exception:
+                logger.exception("thread response failed")
+                say(text=FALLBACK, thread_ts=thread)
+    except Exception:
+        logger.exception("thread reply handler failed")
+        try:
+            say(text=FALLBACK, thread_ts=thread)
+        except Exception:
+            logger.exception("could not deliver the thread fallback either")
 
 
 def build_app(
@@ -362,13 +445,7 @@ def build_app(
                 return
             if not event.get("thread_ts"):
                 return  # a top-level message that did not mention us
-            decision = thinker(clean_mention_text(event.get("text", "")))
-            say(
-                text=safe_reply(
-                    reply_for_decision(decision, action_handler, str(event["thread_ts"]))
-                ),
-                thread_ts=event["thread_ts"],
-            )
+            answer_thread_reply(event, say, client, thinker, action_handler)
         except Exception:
             logger.exception("message handler failed")
 

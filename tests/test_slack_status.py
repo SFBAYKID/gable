@@ -1,151 +1,166 @@
-"""What the thinking indicator must do, and must never do.
+"""The native Slack waiting state covers every user-triggered response.
 
-The behaviour asked for is precise: it comes into the thread when the question
-is asked, stays while the answer is composed, and disappears once the answer
-arrives. So the tests are about the *lifecycle* — posted, animated, deleted —
-and about the fact that none of it may ever break the reply it decorates.
+The tests lock down the purple-status API, the requested timed copy, truthful
+long-work stages, follow-up coverage, and cleanup before any live deployment.
 """
 
 from __future__ import annotations
 
 import time
+from collections.abc import Callable
 from typing import Any
 
 import pytest
 
-from gable.slackapp.status import FRAMES, Working
+from gable.slackapp import status
+from gable.slackapp.status import Working
 
 
 class FakeClient:
-    """Records Slack calls and can be told to fail any of them."""
+    """Record native Slack status calls and optionally reject them."""
 
-    def __init__(self, *, post_works: bool = True, delete_works: bool = True) -> None:
-        """Start with every Slack surface working unless told otherwise."""
-        self.post_works = post_works
-        self.delete_works = delete_works
-        self.posted: list[str] = []
-        self.updated: list[str] = []
-        self.deleted: list[str] = []
+    def __init__(self, *, status_works: bool = True) -> None:
+        """Start with a working native status surface."""
+        self.status_works = status_works
+        self.statuses: list[dict[str, str]] = []
 
-    def chat_postMessage(self, **kwargs: Any) -> dict[str, str]:  # noqa: ANN401, N802
-        """Stand in for chat.postMessage."""
-        if not self.post_works:
-            msg = "channel_not_found"
-            raise RuntimeError(msg)
-        self.posted.append(str(kwargs.get("text", "")))
-        return {"ts": "111.222"}
-
-    def chat_update(self, **kwargs: Any) -> None:  # noqa: ANN401
-        """Stand in for chat.update."""
-        self.updated.append(str(kwargs.get("text", "")))
-
-    def chat_delete(self, **kwargs: Any) -> None:  # noqa: ANN401
-        """Stand in for chat.delete."""
-        if not self.delete_works:
-            msg = "message_not_found"
-            raise RuntimeError(msg)
-        self.deleted.append(str(kwargs.get("ts", "")))
+    def assistant_threads_setStatus(self, **kwargs: Any) -> None:  # noqa: ANN401, N802
+        """Stand in for Slack's assistant.threads.setStatus method."""
+        if not self.status_works:
+            raise RuntimeError("fixed test failure")
+        self.statuses.append({key: str(value) for key, value in kwargs.items()})
 
 
-def _settle(client: FakeClient, attribute: str, seconds: float = 2.0) -> None:
-    """Wait for the background thread to have done something observable."""
+def _texts(client: FakeClient) -> list[str]:
+    """Return only the status text from recorded Slack calls."""
+    return [call["status"] for call in client.statuses]
+
+
+def _wait_until(condition: Callable[[], bool], seconds: float = 1.0) -> None:
+    """Wait for a background status update without choosing a fixed long sleep."""
     deadline = time.monotonic() + seconds
-    while time.monotonic() < deadline and not getattr(client, attribute):
-        time.sleep(0.01)
+    while time.monotonic() < deadline and not condition():
+        time.sleep(0.002)
 
 
-def test_the_indicator_is_posted_into_the_thread() -> None:
-    """It has to appear in the thread the question was asked in."""
+def _use_fast_timing(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep the production sequence while making its timing cheap to test."""
+    monkeypatch.setattr(
+        status,
+        "LEAD_IN_STEPS",
+        (
+            (0.01, "says hold tight..."),
+            (0.01, "is jittering..."),
+            (0.01, "is bobbing and weaving..."),
+        ),
+    )
+    monkeypatch.setattr(status, "FINAL_LEAD_IN_SECONDS", 0.01)
+    monkeypatch.setattr(status, "STAGE_REFRESH_SECONDS", 0.01)
+
+
+def test_requested_production_timing_is_one_then_two_second_holds() -> None:
+    """The copy changes at one, three, five, then six seconds."""
+    assert status.LEAD_IN_STEPS == (
+        (1.0, "says hold tight..."),
+        (2.0, "is jittering..."),
+        (2.0, "is bobbing and weaving..."),
+    )
+    assert status.FINAL_LEAD_IN_SECONDS == 1.0
+
+
+def test_native_purple_state_starts_immediately_and_clears_afterward() -> None:
+    """A fast answer still flashes Slack's native Gable waiting treatment."""
     client = FakeClient()
-    with Working(client, "C1", "111.1"):
-        _settle(client, "posted")
-    assert client.posted, "nothing was posted"
-    assert client.posted[0] == FRAMES[0]
+
+    with Working(client, "C0B02721MNK", "111.1"):
+        assert _texts(client) == [status.INITIAL_STATUS]
+
+    assert _texts(client) == [status.INITIAL_STATUS, ""]
+    assert client.statuses[0]["channel_id"] == "C0B02721MNK"
+    assert client.statuses[0]["thread_ts"] == "111.1"
 
 
-def test_the_indicator_is_deleted_when_the_answer_arrives() -> None:
-    """It must go away, not turn into the reply.
-
-    An earlier version edited this message into the answer, so the indicator
-    never disappeared — which is not what was asked for.
-    """
+def test_long_wait_runs_the_playful_sequence_then_real_work(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """After six seconds, personality gives way to a truthful workflow stage."""
+    _use_fast_timing(monkeypatch)
     client = FakeClient()
-    with Working(client, "C1", "111.1"):
-        _settle(client, "posted")
-    assert client.deleted == ["111.222"]
+
+    with Working(client, "C1", "111.1", "is building the flyer..."):
+        _wait_until(lambda: "is building the flyer..." in _texts(client))
+
+    texts = _texts(client)
+    assert texts[:5] == [
+        "is thinking...",
+        "says hold tight...",
+        "is jittering...",
+        "is bobbing and weaving...",
+        "is building the flyer...",
+    ]
+    assert texts[-1] == ""
 
 
-def test_it_animates_while_the_work_runs() -> None:
-    """A static line does not read as working; the frames make it move."""
+def test_latest_real_stage_replaces_an_earlier_one(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A photo wait can move honestly from fitting to building."""
+    _use_fast_timing(monkeypatch)
     client = FakeClient()
-    with Working(client, "C1", "111.1"):
-        _settle(client, "posted")
-        time.sleep(1.7)  # long enough for at least one frame
-    assert client.updated, "the indicator never advanced a frame"
-    assert client.updated[0] in FRAMES
+
+    with Working(client, "C1", "111.1", "is fitting the photo...") as waiting:
+        waiting.stage("is building the flyer...")
+        _wait_until(lambda: "is building the flyer..." in _texts(client))
+
+    assert "is building the flyer..." in _texts(client)
 
 
-def test_it_is_removed_even_when_the_work_raises() -> None:
-    """A failed reply must not leave the thread looking like it is still going."""
+def test_indicator_clears_even_when_the_work_raises() -> None:
+    """A failed response cannot leave Gable claiming it is still thinking."""
     client = FakeClient()
+
     with pytest.raises(ValueError, match="thinking failed"), Working(client, "C1", "111.1"):
-        _settle(client, "posted")
         raise ValueError("thinking failed")
-    assert client.deleted == ["111.222"]
+
+    assert _texts(client)[-1] == ""
 
 
-def test_a_broken_indicator_never_breaks_the_work() -> None:
-    """Every Slack call here can fail, and none of them may propagate."""
-    client = FakeClient(post_works=False, delete_works=False)
-    done = False
+def test_broken_native_status_never_breaks_the_response() -> None:
+    """Cosmetic Slack trouble must never affect the work it describes."""
+    client = FakeClient(status_works=False)
+    completed = False
+
     with Working(client, "C1", "111.1"):
-        done = True
-    assert done, "the body must run even when every Slack call fails"
+        completed = True
+
+    assert completed is True
 
 
-def test_a_failed_post_does_not_stall_the_reply() -> None:
-    """If posting fails, `stop` must not sit waiting for a message that is absent.
-
-    Waiting the full timeout on every reply would make the decoration slower
-    than the thing it decorates.
-    """
-    client = FakeClient(post_works=False)
-    started = time.monotonic()
-    with Working(client, "C1", "111.1"):
-        pass
-    assert time.monotonic() - started < 1.0
-    assert client.deleted == []
-
-
-def test_no_thread_means_no_indicator() -> None:
-    """A loose message in the channel would be worse than showing nothing."""
+def test_missing_thread_disables_status_instead_of_broadcasting() -> None:
+    """Status belongs to a response thread and nowhere else."""
     client = FakeClient()
+
     with Working(client, "C1", ""):
-        time.sleep(0.05)
-    assert client.posted == []
-    assert client.deleted == []
+        pass
+
+    assert client.statuses == []
 
 
-class _MentionClient(FakeClient):
-    """A Slack client that also answers the speaker-name lookup."""
+class _ConversationClient(FakeClient):
+    """A native-status client that also resolves the speaker's first name."""
 
     def users_info(self, **_kwargs: Any) -> dict[str, Any]:  # noqa: ANN401
         """Stand in for users.info."""
         return {"user": {"profile": {"first_name": "Chase"}}}
 
 
-def _decision(reply: str) -> Any:  # noqa: ANN401
+def _decision(reply: str, tool: str = "") -> Any:  # noqa: ANN401
+    """Build a conversational decision without importing it at module load."""
     from gable.slackapp.brain import Decision
 
-    return Decision(reply=reply, tool="", arguments={})
+    return Decision(reply=reply, tool=tool, arguments={})
 
 
 def _thinker(reply: str) -> Any:  # noqa: ANN401
-    """A stand-in brain that always answers the same thing.
-
-    Takes `speaker` by keyword because the real one does, and getting that
-    signature wrong is what broke the live handler once already.
-    """
+    """Return a thinker with the production speaker keyword signature."""
 
     def think_it(_asked: str, speaker: str = "") -> Any:  # noqa: ANN401
         del speaker
@@ -154,89 +169,99 @@ def _thinker(reply: str) -> Any:  # noqa: ANN401
     return think_it
 
 
-def test_a_mention_says_exactly_one_message() -> None:
-    """The indicator must not be part of the answer, and must not double it.
-
-    The rejected pattern posted a placeholder and edited it into the reply. This
-    is the regression test for it: the only thing `say` is used for is the answer.
-    """
+def test_initial_mention_answers_in_thread_before_native_state_clears() -> None:
+    """The first mention opens a thread, answers there, then ends waiting."""
     from gable.slackapp.app import answer_mention
 
-    said: list[dict[str, Any]] = []
-    client = _MentionClient()
+    order: list[str] = []
+
+    class Ordered(_ConversationClient):
+        def assistant_threads_setStatus(self, **kwargs: Any) -> None:  # noqa: ANN401, N802
+            text = str(kwargs.get("status", ""))
+            order.append(f"status:{text}")
+            super().assistant_threads_setStatus(**kwargs)
 
     def say(**kwargs: Any) -> dict[str, str]:  # noqa: ANN401
-        said.append(kwargs)
+        order.append(f"answer:{kwargs['text']}")
+        assert kwargs["thread_ts"] == "1.1"
         return {"ts": "said"}
 
     answer_mention(
         {"channel": "C0B02721MNK", "ts": "1.1", "text": "<@U1> hello", "user": "U9"},
         say,
-        client,
+        Ordered(),
         _thinker("Hey Chase — what can I do for you?"),
     )
 
-    assert len(said) == 1, "the answer must be the only message said"
-    assert said[0]["text"] == "Hey Chase — what can I do for you?"
-    assert client.deleted == ["111.222"], "the indicator must have been removed"
+    assert order == [
+        "status:is thinking...",
+        "answer:Hey Chase — what can I do for you?",
+        "status:",
+    ]
 
 
-def test_the_indicator_goes_in_the_thread_not_the_channel() -> None:
-    """The indicator belongs in the thread itself — asserted, not assumed."""
-    from gable.slackapp.app import answer_mention
+def test_follow_up_question_gets_the_same_native_waiting_state() -> None:
+    """Every later question in the thread behaves like the first mention."""
+    from gable.slackapp.app import answer_thread_reply
 
-    client = _MentionClient()
-    answer_mention(
-        {"channel": "C0B02721MNK", "ts": "1.1", "thread_ts": "0.9", "text": "hi", "user": "U9"},
-        lambda **_kwargs: {"ts": "said"},
+    client = _ConversationClient()
+    said: list[dict[str, Any]] = []
+
+    def say(**kwargs: Any) -> dict[str, str]:  # noqa: ANN401
+        """Record the follow-up answer."""
+        said.append(kwargs)
+        return {"ts": "said"}
+
+    answer_thread_reply(
+        {
+            "channel": "C0B02721MNK",
+            "thread_ts": "1.1",
+            "ts": "2.2",
+            "text": "what do you need?",
+            "user": "U9",
+        },
+        say,
         client,
-        _thinker("Sure."),
+        _thinker("Send me the property photo."),
     )
-    assert client.posted, "no indicator was posted"
+
+    assert _texts(client) == ["is thinking...", ""]
+    assert said == [{"text": "Send me the property photo.", "thread_ts": "1.1"}]
 
 
-def test_the_answer_is_posted_before_the_indicator_is_removed() -> None:
-    """Clearing first would open a gap at the exact moment the wait ends."""
-    from gable.slackapp.app import answer_mention
+def test_action_decisions_name_the_work_instead_of_staying_generic() -> None:
+    """Long edits show what Gable is changing after the playful lead-in."""
+    from gable.slackapp.app import stage_for_decision
+
+    assert stage_for_decision(_decision("", "rebuild_flyer")) == "is rebuilding the flyer..."
+    assert stage_for_decision(_decision("")) == "is preparing the answer..."
+
+
+def test_thinking_failure_reports_before_native_state_clears() -> None:
+    """Even the failure sentence arrives while Slack still shows Gable working."""
+    from gable.slackapp.app import FALLBACK, answer_mention
 
     order: list[str] = []
 
-    class Ordered(_MentionClient):
-        def chat_delete(self, **kwargs: Any) -> None:  # noqa: ANN401
-            order.append("indicator removed")
-            super().chat_delete(**kwargs)
+    class Ordered(_ConversationClient):
+        def assistant_threads_setStatus(self, **kwargs: Any) -> None:  # noqa: ANN401, N802
+            order.append(f"status:{kwargs.get('status', '')}")
+            super().assistant_threads_setStatus(**kwargs)
 
-    def say(**_kwargs: Any) -> dict[str, str]:  # noqa: ANN401
-        order.append("answer said")
+    def explode(_asked: str, speaker: str = "") -> Any:  # noqa: ANN401
+        del speaker
+        raise RuntimeError("fixed model failure")
+
+    def say(**kwargs: Any) -> dict[str, str]:  # noqa: ANN401
+        """Record the plain-language failure."""
+        order.append(f"answer:{kwargs['text']}")
         return {"ts": "said"}
 
     answer_mention(
-        {"channel": "C0B02721MNK", "ts": "1.1", "text": "hi", "user": "U9"},
+        {"channel": "C0B02721MNK", "ts": "1.1", "text": "hello", "user": "U9"},
         say,
         Ordered(),
-        _thinker("Sure."),
-    )
-
-    assert order == ["answer said", "indicator removed"]
-
-
-def test_a_thinking_failure_still_answers_and_leaves_nothing_behind() -> None:
-    """A dead reply must not strand an indicator claiming work is in flight."""
-    from gable.slackapp.app import FALLBACK, answer_mention
-
-    said: list[dict[str, Any]] = []
-    client = _MentionClient()
-
-    def explode(_asked: str, _speaker: str = "") -> Any:  # noqa: ANN401
-        msg = "the model fell over"
-        raise RuntimeError(msg)
-
-    answer_mention(
-        {"channel": "C0B02721MNK", "ts": "1.1", "text": "hi", "user": "U9"},
-        lambda **kwargs: said.append(kwargs) or {"ts": "said"},  # type: ignore[func-returns-value]
-        client,
         explode,
     )
 
-    assert said and said[0]["text"] == FALLBACK
-    assert client.deleted == ["111.222"], "the indicator must not survive the failure"
+    assert order == ["status:is thinking...", f"answer:{FALLBACK}", "status:"]

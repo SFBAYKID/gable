@@ -1,28 +1,17 @@
-"""Showing that Gable is thinking, in the thread, while it thinks.
+"""Show Slack's native purple waiting state while Gable prepares a response.
 
-A reply takes four to eight seconds and a flyer about thirty. For that time the
-thread is silent, and silence in Slack reads as nothing happening — no way to
-tell "working" from "broken" from "asleep".
+Slack owns the visual treatment: ``assistant.threads.setStatus`` renders the app
+name with its pulsing purple loading treatment and clears it when a reply lands.
+The method supports channel-based apps with ``chat:write`` as of Slack's March
+2026 scope update, so Gable does not need an assistant pane or another scope.
 
-Slack's own `assistant.threads.setStatus` looked like the answer and is not.
-Called against a normal channel thread it returns `ok` and renders nothing:
-verified on 2026-08-12 by holding a status open for twenty seconds on a live
-thread with nothing visible throughout. That status is drawn inside an assistant
-pane, and Gable is talked to in an ordinary channel thread.
+The copy has two phases. A short wait gets a little personality; work lasting
+more than a few seconds names the real stage supplied by the caller. Status is
+cosmetic: every Slack failure is swallowed, updates run away from the work they
+describe, and the final empty status is attempted even when the work raises.
 
-So the indicator is a real message. It is posted into the thread, its text is
-cycled so it visibly animates, and it is **deleted** when the answer arrives —
-which is the behaviour asked for: it comes in, it runs, it goes away. An earlier
-attempt edited the placeholder into the answer instead, so it never went away,
-it turned into the reply.
-
-Everything here is cosmetic, so **a failure must never affect the reply**. Every
-call swallows its own error, the indicator runs on a background thread so
-showing it cannot delay the work it covers, and deletion happens in a `finally`
-so a crash cannot strand it in the thread.
-
-Does not handle: progress *within* the work. There is no percentage to report and
-inventing one would be worse than an honest "working on it".
+Does not handle: deciding what stage a workflow is in. Callers must provide a
+literal, truthful stage rather than a percentage or a guessed operation.
 """
 
 from __future__ import annotations
@@ -34,37 +23,39 @@ from typing import Any, Final
 
 logger = logging.getLogger("gable.status")
 
-#: The frames of the animation, cycled in order. An ellipsis that grows reads as
-#: motion without needing a custom animated emoji, which most workspaces do not
-#: have and which cannot be relied on.
-FRAMES: Final[tuple[str, ...]] = (
-    "_Thinking_ :hourglass_flowing_sand:",
-    "_Thinking_ .",
-    "_Thinking_ . .",
-    "_Thinking_ . . .",
+# Slack automatically prefixes each value with the app name. These therefore
+# read as "Gable is thinking...", not as detached narration.
+INITIAL_STATUS: Final[str] = "is thinking..."
+
+# Each pair is how long the preceding status remains visible, followed by its
+# replacement. The last playful line stays for one second so truthful workflow
+# detail begins once the wait crosses six seconds.
+LEAD_IN_STEPS: Final[tuple[tuple[float, str], ...]] = (
+    (1.0, "says hold tight..."),
+    (2.0, "is jittering..."),
+    (2.0, "is bobbing and weaving..."),
 )
+FINAL_LEAD_IN_SECONDS: Final[float] = 1.0
+STAGE_REFRESH_SECONDS: Final[float] = 2.0
 
-#: Seconds between frames. `chat.update` is rate limited around fifty calls a
-#: minute, so a one-second cycle would sit on the ceiling during a long build.
-FRAME_SECONDS: Final[float] = 1.5
-
-#: How long `stop` waits for the indicator to have been posted before deleting
-#: it. Without this a fast reply can delete before the post lands, leaving the
-#: indicator behind for good.
-_POST_TIMEOUT_SECONDS: Final[float] = 4.0
+# A stalled cosmetic request must not hold up the reply. The worker owns the
+# eventual empty-status call if it does not stop inside this small join window.
+STOP_JOIN_SECONDS: Final[float] = 1.0
 
 
 class Working:
-    """Shows an animated indicator in a thread for as long as its body runs.
+    """Keep Slack's native waiting treatment active for one response.
 
     Used as::
 
-        with Working(client, channel, thread_ts):
-            answer = think_about_it()
+        with Working(client, channel, thread_ts, "is preparing the answer...") as wait:
+            decision = think_about_it()
+            wait.stage("is updating the flyer...")
+            apply_the_change(decision)
 
-    Removed on the way out whether the body returned or raised. An indicator
-    left running after a failure is worse than none: it promises an answer that
-    is never coming.
+    The answer should be posted inside the context. Slack then clears the native
+    status automatically, and ``__exit__`` sends an explicit empty status as the
+    failure-safe cleanup.
     """
 
     def __init__(
@@ -72,81 +63,106 @@ class Working:
         client: Any,  # noqa: ANN401 - Slack WebClient, untyped upstream
         channel: str,
         thread_ts: str,
-        what: str = "",
-        message_ts: str = "",
+        stage: str = "is preparing the answer...",
     ) -> None:
         """Prepare an indicator without showing it yet.
 
         Args:
             client: A Slack WebClient.
-            channel: Channel id the thread lives in.
-            thread_ts: The thread to post into. Empty disables the indicator
-                entirely, since a loose message in the channel would be worse
-                than none.
-            what: Unused; kept so existing call sites need not change. The
-                frames say "Thinking" and a build says the same thing.
-            message_ts: Unused; retained for the same reason.
+            channel: Channel id containing the conversation.
+            thread_ts: Root timestamp the response will be posted beneath.
+                Empty disables the indicator rather than creating loose status.
+            stage: Truthful present-tense work shown after the playful lead-in.
+
+        Raises:
+            Nothing.
         """
-        del what, message_ts
         self._client = client
         self._channel = channel
         self._thread = thread_ts
-        self._ts = ""
-        self._posted = threading.Event()
+        self._stage = stage
+        self._stage_lock = threading.Lock()
         self._done = threading.Event()
+        self._worker: threading.Thread | None = None
 
-    def _run(self) -> None:
-        """Post the indicator, then animate it until asked to stop."""
-        try:
-            posted = self._client.chat_postMessage(
-                channel=self._channel, thread_ts=self._thread, text=FRAMES[0]
-            )
-            self._ts = str(posted.get("ts") or "")
-        except Exception:
-            logger.debug("could not post the thinking indicator")
-        finally:
-            # Set even on failure, or `stop` waits the full timeout for a
-            # message that was never posted and delays every reply.
-            self._posted.set()
+    def _set_status(self, text: str) -> None:
+        """Ask Slack to show one native status, ignoring every failure.
 
-        if not self._ts:
-            return
-        frame = 1
-        while not self._done.wait(timeout=FRAME_SECONDS):
-            try:
-                self._client.chat_update(
-                    channel=self._channel, ts=self._ts, text=FRAMES[frame % len(FRAMES)]
-                )
-            except Exception:
-                logger.debug("could not advance the thinking indicator")
-            frame += 1
-
-    def start(self) -> None:
-        """Show the indicator without making the caller wait for it.
-
-        A Slack call costs a few hundred milliseconds. Posting inline would delay
-        the work the indicator exists to cover, so the indicator would appear
-        late *because* it was being shown.
+        Slack contract: https://docs.slack.dev/reference/methods/assistant.threads.setStatus/
         """
         if not self._channel or not self._thread:
-            self._posted.set()
-            return
-        threading.Thread(target=self._run, daemon=True, name="gable-status").start()
-
-    def stop(self) -> None:
-        """Stop animating and remove the indicator entirely."""
-        self._done.set()
-        self._posted.wait(timeout=_POST_TIMEOUT_SECONDS)
-        if not self._ts:
             return
         try:
-            self._client.chat_delete(channel=self._channel, ts=self._ts)
+            self._client.assistant_threads_setStatus(
+                channel_id=self._channel,
+                thread_ts=self._thread,
+                status=text,
+            )
         except Exception:
-            logger.debug("could not remove the thinking indicator")
-        self._ts = ""
+            logger.debug("could not update the native thinking indicator")
+
+    def _current_stage(self) -> str:
+        """Return the latest workflow stage without racing its caller."""
+        with self._stage_lock:
+            return self._stage
+
+    def _run(self) -> None:
+        """Advance timed copy, then refresh the caller's current real stage."""
+        try:
+            if self._done.wait(timeout=LEAD_IN_STEPS[0][0]):
+                return
+            self._set_status(LEAD_IN_STEPS[0][1])
+
+            for delay, text in LEAD_IN_STEPS[1:]:
+                if self._done.wait(timeout=delay):
+                    return
+                self._set_status(text)
+
+            if self._done.wait(timeout=FINAL_LEAD_IN_SECONDS):
+                return
+            self._set_status(self._current_stage())
+            while not self._done.wait(timeout=STAGE_REFRESH_SECONDS):
+                self._set_status(self._current_stage())
+        finally:
+            self._set_status("")
+
+    def start(self) -> None:
+        """Show the native state immediately and start timed updates.
+
+        The first call is synchronous so Slack receives the purple waiting state
+        before the potentially slow model or Google request begins. Later calls
+        run on the worker and cannot delay the work they describe.
+        """
+        if not self._channel or not self._thread or self._worker is not None:
+            return
+        self._set_status(INITIAL_STATUS)
+        self._worker = threading.Thread(target=self._run, daemon=True, name="gable-status")
+        self._worker.start()
+
+    def stage(self, text: str) -> None:
+        """Record the truthful stage to show after the lead-in.
+
+        Args:
+            text: Present-tense copy that reads correctly after "Gable".
+
+        Raises:
+            Nothing.
+        """
+        if not text:
+            return
+        with self._stage_lock:
+            self._stage = text
+
+    def stop(self) -> None:
+        """Stop timed updates and clear the native state without delaying work."""
+        self._done.set()
+        worker = self._worker
+        if worker is None:
+            return
+        worker.join(timeout=STOP_JOIN_SECONDS)
 
     def __enter__(self) -> Working:
-        """Show the indicator and return self."""
+        """Show the indicator and return the stage reporter."""
         self.start()
         return self
 
@@ -156,5 +172,5 @@ class Working:
         exc: BaseException | None,
         traceback: TracebackType | None,
     ) -> None:
-        """Remove the indicator on the way out, success or failure."""
+        """Clear the indicator on the way out, success or failure."""
         self.stop()

@@ -7,6 +7,8 @@ things that shipped, not invented ones.
 
 from __future__ import annotations
 
+from collections.abc import Callable
+
 import pytest
 
 from gable.slackapp.style import (
@@ -501,18 +503,9 @@ class _ShareClient:
         """Start with nothing recorded."""
         self.calls: list[str] = []
 
-    def chat_postMessage(self, **_kwargs: object) -> dict[str, str]:  # noqa: N802
-        """Record the indicator going up."""
-        self.calls.append("post")
-        return {"ts": "indicator-ts"}
-
-    def chat_update(self, **_kwargs: object) -> None:
-        """Record an indicator frame."""
-        self.calls.append("update")
-
-    def chat_delete(self, **_kwargs: object) -> None:
-        """Record the indicator coming down."""
-        self.calls.append("delete")
+    def assistant_threads_setStatus(self, **kwargs: object) -> None:  # noqa: N802
+        """Record Slack's native waiting state changing."""
+        self.calls.append(str(kwargs.get("status", "")))
 
 
 def test_the_photo_path_says_the_outcome_and_nothing_before_it() -> None:
@@ -532,7 +525,12 @@ def test_the_photo_path_says_the_outcome_and_nothing_before_it() -> None:
         posted.append(kwargs)
         return {"ts": "said-ts"}
 
-    def handler(_event: dict[str, Any], _client: Any) -> str:  # noqa: ANN401
+    def handler(
+        _event: dict[str, Any],
+        _client: Any,  # noqa: ANN401 - Slack client double
+        progress: Callable[[str], None],
+    ) -> str:
+        progress("is building the flyer...")
         return "I fitted the photo and finished the flyer."
 
     client = _ShareClient()
@@ -541,6 +539,7 @@ def test_the_photo_path_says_the_outcome_and_nothing_before_it() -> None:
     assert posted == [
         {"text": "I fitted the photo and finished the flyer.", "thread_ts": "thread-ts"}
     ]
+    assert client.calls == ["is thinking...", ""]
 
 
 def test_a_failed_photo_fit_says_so_instead_of_going_quiet() -> None:
@@ -555,7 +554,11 @@ def test_a_failed_photo_fit_says_so_instead_of_going_quiet() -> None:
         posted.append(kwargs)
         return {"ts": "said-ts"}
 
-    def handler(_event: dict[str, Any], _client: Any) -> str:  # noqa: ANN401
+    def handler(
+        _event: dict[str, Any],
+        _client: Any,  # noqa: ANN401 - Slack client double
+        _progress: Callable[[str], None],
+    ) -> str:
         msg = "Slides rejected the image"
         raise RuntimeError(msg)
 

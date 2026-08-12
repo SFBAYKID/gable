@@ -34,6 +34,12 @@ logger = logging.getLogger("gable.slack.photos")
 MAX_UPLOAD_BYTES: Final[int] = 25 * 1024 * 1024
 _SLACK_HOST_SUFFIXES: Final[tuple[str, ...]] = (".slack.com", ".slack-edge.com")
 
+ProgressReporter = Callable[[str], None]
+
+
+def _ignore_progress(_stage: str) -> None:
+    """Default progress sink for direct calls outside the Slack event wrapper."""
+
 
 class PhotoHandoffError(Exception):
     """A private upload could not safely become a public fitted image."""
@@ -148,12 +154,18 @@ class PhotoHandoff:
     publish: Callable[[Path, str, bytes], str] = publish_local
     verify: Callable[[str], tuple[bool, str]] = verify_public
 
-    def handle(self, event: dict[str, Any], slack_client: Any) -> str:  # noqa: ANN401
+    def handle(
+        self,
+        event: dict[str, Any],
+        slack_client: Any,  # noqa: ANN401 - Slack WebClient, untyped upstream
+        progress: ProgressReporter = _ignore_progress,
+    ) -> str:
         """Fit one thread upload and resume the exact run waiting there.
 
         Args:
             event: Slack's message event with subtype ``file_share``.
             slack_client: The authenticated Bolt web client.
+            progress: Updates the native waiting state with the actual stage.
 
         Returns:
             A house-style-safe outcome for the progress message.
@@ -194,6 +206,7 @@ class PhotoHandoff:
                 return "I found the listing thread but not its request details, so I stopped there."
 
             try:
+                progress("is reading the photo...")
                 response = slack_client.files_info(file=file_id)
                 file_info = response.get("file", {})
                 mime_type = str(file_info.get("mimetype") or "")
@@ -214,6 +227,7 @@ class PhotoHandoff:
                 needed_enlargement = assessment.needs_model
                 if needed_enlargement and self.upscale is not None:
                     try:
+                        progress("is sharpening and enlarging the photo...")
                         image_bytes = self.upscale(
                             connection,
                             run.run_id,
@@ -228,6 +242,7 @@ class PhotoHandoff:
                         # still the delivery gate; a failed model call must not
                         # turn into a demand that she find the same photo again.
                         logger.exception("automatic photo enlargement fell back to the original")
+                progress("is fitting the photo to the template...")
                 fitted = fit_locally(image_bytes, self.target_width, self.target_height)
                 public_url = self.publish(self.public_root, self.public_base, fitted)
                 usable, _detail = self.verify(public_url)
@@ -258,6 +273,7 @@ class PhotoHandoff:
                 photo_source="carmen",
                 ai_enhanced=int(ai_enhanced),
             )
+            progress("is building the flyer...")
             runner = self.runner_for(connection, public_url, thread_ts)
             result = runner.resume(_submission(stored), run.run_id)
             action = "sharpened, enlarged, and fitted" if ai_enhanced else "resized and fitted"
