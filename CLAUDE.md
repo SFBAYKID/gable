@@ -351,6 +351,7 @@ gable/
 │   │   ├── selection.py         # notes-aware template purpose and routing
 │   │   ├── edit_common.py       # shared colours, guards, request type
 │   │   ├── measure.py           # measure a template once; fingerprint it
+│   │   ├── routing.py           # agent override, else the master folder
 │   │   └── catalog.py           # the 45 templates, labelled
 │   ├── slackapp/
 │   │   ├── app.py               # Socket Mode listener
