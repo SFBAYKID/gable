@@ -17,13 +17,14 @@ from gable import spend
 from gable.config import Settings
 from gable.photos.store import PhotoHost
 from gable.photos.verify import verify as verify_image
-from gable.pipeline.runner import Runner, default_research, template_picker
+from gable.pipeline.runner import Runner, default_research
 from gable.pipeline.vision import Inspection
 from gable.pipeline.vision import inspect as inspect_flyer
 from gable.slides import fitting
 from gable.slides.edits import replace_text
 from gable.slides.elements import descendants, font_size_pt, font_weight, text_content
 from gable.slides.hero import find_headshot_frame, find_hero_frame
+from gable.slides.selection import template_picker
 from gable.voice import is_clean
 
 logger = logging.getLogger("gable.live")

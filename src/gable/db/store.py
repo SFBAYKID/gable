@@ -51,6 +51,9 @@ class RunRow:
     output_url: str = ""
     slack_thread_ts: str = ""
     failure_reason: str = ""
+    #: The fitted, published hero photo, once one has been attached. Carried
+    #: here so a paused run can be continued without asking for it again.
+    photo_url: str = ""
 
     @property
     def is_terminal(self) -> bool:
@@ -325,7 +328,7 @@ def latest_run(connection: sqlite3.Connection, response_row_id: str) -> RunRow |
     """
     row = connection.execute(
         "SELECT run_id, response_row_id, status, output_file_id, output_url,"
-        " slack_thread_ts, failure_reason"
+        " slack_thread_ts, failure_reason, photo_url"
         " FROM runs WHERE response_row_id = ? ORDER BY created_at DESC LIMIT 1",
         (response_row_id,),
     ).fetchone()
@@ -350,7 +353,7 @@ def run_for_thread(connection: sqlite3.Connection, thread_ts: str) -> RunRow | N
     """
     row = connection.execute(
         "SELECT run_id, response_row_id, status, output_file_id, output_url,"
-        " slack_thread_ts, failure_reason"
+        " slack_thread_ts, failure_reason, photo_url"
         " FROM runs WHERE slack_thread_ts = ? ORDER BY created_at DESC LIMIT 1",
         (thread_ts,),
     ).fetchone()
@@ -373,7 +376,7 @@ def paused_runs(connection: sqlite3.Connection) -> list[RunRow]:
     placeholders = ",".join("?" * len(PAUSED))
     rows = connection.execute(
         "SELECT run_id, response_row_id, status, output_file_id, output_url,"
-        " slack_thread_ts, failure_reason"
+        " slack_thread_ts, failure_reason, photo_url"
         f" FROM runs WHERE status IN ({placeholders}) ORDER BY created_at",
         tuple(sorted(PAUSED)),
     ).fetchall()
@@ -390,6 +393,7 @@ def _to_run(row: sqlite3.Row) -> RunRow:
         output_url=row["output_url"] or "",
         slack_thread_ts=row["slack_thread_ts"] or "",
         failure_reason=row["failure_reason"] or "",
+        photo_url=row["photo_url"] or "",
     )
 
 

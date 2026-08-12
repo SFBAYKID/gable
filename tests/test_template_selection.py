@@ -3,9 +3,8 @@
 from __future__ import annotations
 
 from gable.listings.intake import Intake
-from gable.pipeline.runner import template_picker
 from gable.slides.catalog import CATALOG
-from gable.slides.selection import purpose_for, rank, signals_for
+from gable.slides.selection import purpose_for, rank, signals_for, template_picker
 
 
 def _intake(**overrides: str) -> Intake:

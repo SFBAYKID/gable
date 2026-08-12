@@ -41,8 +41,6 @@ from gable.sheets import repository as repo
 from gable.slides import fields as template_fields
 from gable.slides import fitting
 from gable.slides import manifest as template_manifest
-from gable.slides.catalog import for_category
-from gable.slides.selection import rank as rank_templates
 from gable.voice import safe
 
 #: Every Corner House agent is on this domain, so a roster row missing its own
@@ -756,43 +754,3 @@ def default_research(
             return Facts(caveats=["Testing has reached its spending limit"])
 
     return research
-
-
-def template_picker(
-    list_templates: Callable[[], list[dict[str, str]]],
-) -> Callable[[str, Intake], tuple[str, str]]:
-    """Choose a template for a category AND this particular listing.
-
-    Picking the first match in Drive order put a plain new listing onto a
-    "Just Listed plus Open House" design: the open-house tag stayed, its date
-    fields had nothing to fill them, and the headline overlapped the empty
-    date. Correct category, wrong design.
-
-    So the choice is scored. A design that needs a fact this listing does not
-    have is penalised, and one whose name says it is the clean variant is
-    preferred.
-
-    Args:
-        list_templates: Returns Drive files with `id` and `name`.
-
-    Returns:
-        A callable taking `(category, intake)` and returning `(file_id, label)`,
-        empty when nothing fits.
-
-    Raises:
-        Nothing.
-    """
-
-    def pick(category: str, intake: Intake) -> tuple[str, str]:
-        if not category or not for_category(category):
-            return "", ""
-        available = {str(item.get("name") or ""): item for item in list_templates()}
-        ranked = rank_templates(category, intake)
-        if not ranked:
-            return "", ""
-        candidate = available.get(ranked[0].filename)
-        if candidate is None:
-            return "", ""
-        return str(candidate["id"]), str(candidate["name"])
-
-    return pick

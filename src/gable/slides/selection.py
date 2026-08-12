@@ -14,12 +14,16 @@ guessing.
 
 from __future__ import annotations
 
+import logging
 import re
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Final
 
 from gable.listings.intake import Intake, context_text, needs_two_agents
 from gable.slides.catalog import TemplateEntry, for_category
+
+logger = logging.getLogger("gable.selection")
 
 
 @dataclass(frozen=True, slots=True)
@@ -178,3 +182,63 @@ def rank(category: str, intake: Intake) -> tuple[TemplateEntry, ...]:
     if len(scored) > 1 and scored[0][0] == scored[1][0]:
         return ()
     return tuple(entry for _score, entry in scored)
+
+
+def template_picker(
+    list_templates: Callable[[], list[dict[str, str]]],
+) -> Callable[[str, Intake], tuple[str, str]]:
+    """Choose a template for a category AND this particular listing.
+
+    Picking the first match in Drive order put a plain new listing onto a
+    "Just Listed plus Open House" design: the open-house tag stayed, its date
+    fields had nothing to fill them, and the headline overlapped the empty
+    date. Correct category, wrong design.
+
+    So the choice is scored. A design that needs a fact this listing does not
+    have is penalised, and one whose name says it is the clean variant is
+    preferred.
+
+    Args:
+        list_templates: Returns Drive files with `id` and `name`.
+
+    Returns:
+        A callable taking `(category, intake)` and returning `(file_id, label)`,
+        empty when nothing fits.
+
+    Raises:
+        Nothing.
+    """
+
+    def pick(category: str, intake: Intake) -> tuple[str, str]:
+        if not category or not for_category(category):
+            return "", ""
+        available = {str(item.get("name") or ""): item for item in list_templates()}
+        ranked = rank(category, intake)
+        # Checking only the top candidate reported "no design filed" for a
+        # category holding eleven eligible ones. Caught live on 2026-08-12:
+        # Just Sold ranked "Sold For, Agent Card" first on nothing but being
+        # the category default, only "Thinking of Selling" had been imported,
+        # and a listing that had a design stopped to ask for one.
+        #
+        # So an absent candidate is skipped — but only when nothing in the
+        # submission asked for it by name. A design that won on a cue was
+        # explicitly requested, and quietly substituting another one answers a
+        # different question than the one the agent asked.
+        signals = signals_for(intake)
+        for position, entry in enumerate(ranked):
+            candidate = available.get(entry.filename)
+            if candidate is None:
+                if any(cue in signals.text for cue in purpose_for(entry).cues):
+                    return "", ""
+                continue
+            if position:
+                logger.info(
+                    "using %r for %s; %d preferred design(s) are not in the drive",
+                    entry.filename,
+                    category,
+                    position,
+                )
+            return str(candidate["id"]), str(candidate["name"])
+        return "", ""
+
+    return pick

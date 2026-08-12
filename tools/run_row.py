@@ -105,6 +105,14 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="read and print the row without starting a run or posting to Slack",
     )
+    parser.add_argument(
+        "--resume",
+        action="store_true",
+        help=(
+            "continue this row's most recent run in its existing thread, reusing "
+            "the photo already attached to it, instead of starting a new one"
+        ),
+    )
     args = parser.parse_args(argv)
 
     try:
@@ -182,8 +190,30 @@ def main(argv: list[str] | None = None) -> int:
             )
             return str(response.get("ts") or thread_ts or "")
 
-        runner = build_runner(settings, connection, drive, slides, say)
-        result = runner.run(submission)
+        if args.resume:
+            existing = store.latest_run(connection, submission.response_row_id)
+            if existing is None:
+                logger.error("row %d has never been run, so there is nothing to resume", args.row)
+                return 2
+            if existing.is_terminal:
+                logger.error("the most recent run for row %d is %s", args.row, existing.status)
+                return 2
+            # Reuse the photo already fitted and published for this run. A
+            # resumed run must also stay in its own thread, or the answer
+            # arrives in the channel detached from the question.
+            runner = build_runner(
+                settings,
+                connection,
+                drive,
+                slides,
+                say,
+                hero_photo_url=existing.photo_url,
+                origin_thread_ts=existing.slack_thread_ts,
+            )
+            result = runner.resume(submission, existing.run_id)
+        else:
+            runner = build_runner(settings, connection, drive, slides, say)
+            result = runner.run(submission)
         logger.info("run %s finished as %s", result.run_id, result.status)
         for spoken in result.said:
             print(spoken)
