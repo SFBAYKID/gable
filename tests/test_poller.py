@@ -56,7 +56,31 @@ def _row(ts: str, address: str) -> list[str]:
     ]
 
 
-HEADER = ["Timestamp", "Email Address", "Name of Agent", "ack", "Select your request type"]
+#: The live `Form Responses 1` header, read through the service account on
+#: 2026-08-12. The columns are found by name now, so a fixture that invents
+#: header text tests a tab that does not exist.
+HEADER = [
+    "Column 1",
+    "Email Address",
+    "Name of Agent",
+    "Service Guidelines Acknowledgment",
+    "Select your request type",
+    "Please provide the property address for the postcard",
+    "Select postcard category",
+    "Upload photos",
+    "Upload your video assets (For Video Editing Requests Only)",
+    "Optional: Include any details/instruction for your video",
+    "Select social media content type",
+    "Property Address",
+    "Upload high-resolution property photos (up to 5 images)",
+    "Include details for post - required for Client Review post",
+    "Open house date/time (if applicable)",
+    "New price (if price improvement)",
+    "Closing price (for sold posts only):",
+    "Additional Notes for Social Media Team",
+    "For Sold or Under Contract posts, were you on the buyer or seller side?",
+    "Notes",
+]
 
 
 @pytest.fixture

@@ -36,10 +36,10 @@ An agent — say **Lolo Simmons** — submits the form.
    Simmons at 123 Main St. Which photo do you want as the hero?"* — and waits.
 5. **Receive it.** The user drops an image into the thread.
 6. **Fit the image to the frame.** The photo is reprocessed so it genuinely sits
-   right in the template. This is the hardest part of the product — §4.6.
-7. **Render.** Text and photo fill a copy of the template.
+   right in the template. This is the hardest part of the product — §4.5b.
+7. **Render.** Text and photo fill a copy of the template (§4.7).
 8. **Check its own work.** A vision pass asks whether the result actually looks
-   correct — §4.7.
+   correct — §4.7b.
 9. **Deliver.** Gable posts a clickable link to the finished Slides file. Carmen
    opens and edits it, or replies in the thread and Gable redoes it.
 
@@ -79,9 +79,9 @@ Google Form ─────────► Google Sheet
               or replies "use the other photo"
 ```
 
-There is no download step and no file to upload anywhere. Gable copies the
-template inside the shared drive, fills it through one `batchUpdate`, and posts
-Carmen a link to the finished Slides file. She edits it in place.
+There is no download step and no file to upload anywhere: Gable copies the
+template inside the shared drive, fills it through one `batchUpdate`, and links
+Carmen to the finished Slides file, which she edits in place.
 
 ---
 
@@ -106,8 +106,7 @@ Three Canva paths were considered, and each failed on something structural:
    and the photo is the twenty minutes. See `spikes/SPIKE_A_RESULT.md`.
 3. **A private data-connector app** — image cells *are* documented to accept an
    external HTTPS URL, but it is gated on an unverified marketplace-review
-   question (`CLAUDE.md` §4.3 item 4) and it is a TypeScript codebase alongside
-   the Python one.
+   question and is a TypeScript codebase alongside the Python one.
 
 **Google Slides does what all three were for, on infrastructure already
 required.** `replaceAllShapesWithImage` swaps a shape containing the literal text
@@ -135,9 +134,8 @@ indistinguishable from a webhook and dramatically simpler. If volume grows to
 where latency matters, revisit: add Caddy for automatic TLS and switch to HTTP
 events. Do not do that work preemptively.
 
-### 2.3 Why poll rather than use Drive change notifications?
-
-Same reason. Push notifications need a public HTTPS endpoint.
+Drive change notifications are ruled out for the same reason: push notifications
+need a public HTTPS endpoint too.
 
 ### 2.4 Why a shared drive, not My Drive
 
@@ -154,10 +152,9 @@ surface at runtime, on the first real listing, as an opaque Google error.
 `slides/renderer.py` takes domain objects and returns JSON-serializable request
 dicts. No network, no credentials, no Google client. That split means the entire
 fill behaviour is unit-tested — 36 tests today — without a service account
-existing, and leaves `slides/client.py` holding nothing but I/O.
-
-It is also why the renderer was testable before Google access existed; the live
-service-account path has since been verified separately.
+existing, and leaves `slides/client.py` holding nothing but I/O. It is also why
+the renderer was testable before Google access existed; the live service-account
+path has since been verified separately.
 
 ### 2.6 The polling schedule
 
@@ -206,27 +203,33 @@ additive and are waiting on decision D3 in `STATUS.md`.
 
 Google Forms owns this tab. Gable reads it and never modifies it.
 
-**These are the live columns, read off the real sheet on 2026-08-10** — the sheet
-is "Social Media and Marketing Request Form (Responses)", not the listing form
-this document originally assumed:
+The sheet is "Social Media and Marketing Request Form (Responses)", not the
+listing form this document originally assumed, and it has **20 columns** — the
+nine listed here until 2026-08-12 came from a browser reading taken before API
+access existed.
 
-| Col | Header | Notes |
-|---|---|---|
-| A | Timestamp | Form-generated; part of the idempotency key |
-| B | Email Address | Join key into `Agents` |
-| C | Name of Agent | Free text — `Agents` is the authority on display name |
-| D | Service Guidelines Acknowledgment | Ignored |
-| E | Select your request type | Sold, New Listing, Open House, Price Reduction, Under Contract, Client Review Post, New Listing with Open House. Scope is decision D2 |
-| F | Property address | Empty on every visible row — see §5 |
-| G | Select postcard category | Out of Phase 1 scope pending D2 |
-| H | Upload photos | Empty on every visible row — see §5 |
-| I | Upload your video assets | Out of Phase 1 scope pending D2 |
+**Columns are found by header text, never by position** (`listings/intake.py`).
+The eleven Gable reads are `Email Address`, `Name of Agent` — or a `First Name`
+and `Second Name` pair — `Select your request type`, `Property Address`,
+`Include details for post`, `Open house date/time`, `New price`, `Closing
+price`, `Additional Notes for Social Media Team`, the buyer-or-seller side, and
+`Notes`. Column A is the timestamp and is part of the idempotency key.
 
-**Absent, and needed by the template:** price, description, beds/baths/sq ft, and
-agent phone. Nothing in the form supplies a price the post displays. See §5.
+Position was the original mechanism and it broke on the first tab shaped
+differently: `Testing_1` splits the agent's name across two columns, shifting
+everything from D rightward by one, and puts its header on row 2 under a blank
+row. Read positionally, its row 78 gives the acknowledgment paragraph as the
+request type and the words "Instagram Story" as the property address — wrong in
+a way that still looks like data. Two header matches are deliberately exact:
+`Property Address`, because the postcard branch asks its own address question,
+and `Notes`, because the social-media team's notes are a different field. A tab
+whose header names none of the email, request type and address is **refused**,
+not guessed at.
 
-`listings/normalize.py` keeps this mapping as data (`ColumnMap`), so a renamed or
-reordered question is a configuration change rather than a code change.
+**Absent, and needed by the template:** description and beds/baths/square
+footage, which are researched (§4.3b), and the agent's phone, which comes from
+`Sales_People`. The request type decides which column is the price — a sold post
+carries a closing price, a price improvement carries a new price.
 
 ### 3.2 Tab `Sales_People` — identity and template map
 
@@ -279,41 +282,24 @@ bakes an agent photo into many designs. One template per agent per request type
 would be ~40 × N templates and unmaintainable. Treating the headshot as a second
 `replaceAllShapesWithImage` target keeps it at ~40 total.
 
-### 3.2b Tab `Templates` — the template catalog
+### 3.3 Run records — append-only log and idempotency guard
 
-The index of what is available to render into. A template is a **pair**: the
-filled reference design, and the blank background it was built from. Both live in
-`GABLE_DRIVE_TEMPLATES_FOLDER_ID`.
+**These live in SQLite (`db/store.py`), not in a sheet tab.** Decision D3: a
+`Runs` tab and a `Templates` tab were both specified here and neither was built.
+Derived state belongs in the database, and the template catalogue is data in
+`slides/catalog.py` resolved against the Drive folders, so a design is added by
+dropping it in a folder rather than by maintaining a second index by hand.
 
-| Column | Type | Notes |
-|---|---|---|
-| `template_id` | str | Drive file id of the blank background |
-| `label` | str | What Carmen sees in Slack |
-| `request_type` | str | Which form request type it serves |
-| `placeholders` | str | The `{{...}}` names this template actually contains |
+A run carries its `run_id`, the `response_row_id` it belongs to, its `status`
+(`pending`/`needs_photo`/`needs_info`/`needs_template`/`needs_review`/
+`delivered`/`skipped`/`failed`), the chosen template, the output file and URL,
+the `photo_url` with its `photo_source`, the `ai_generated` and `ai_enhanced`
+flags — **`ai_generated` must be true for any synthetic image** — a failure
+reason, the Slack thread it is speaking in, and UTC timestamps.
 
-`placeholders` matters because `slides/renderer.py` leaves an unmatched
-placeholder in place rather than blanking it — knowing what a template contains
-is how a missing field is caught before Carmen sees `{{price}}` on a post.
-
-### 3.3 Tab `Runs` — append-only log and idempotency guard
-
-| Column | Notes |
-|---|---|
-| `run_id` | ULID |
-| `response_row_id` | Stable identifier of the form row |
-| `address` | For human scanning |
-| `status` | `pending`/`needs_photo`/`needs_template`/`ready`/`delivered`/`failed` |
-| `photo_source` | `form`/`drive`/`brokerage`/`web`/`carmen`/`generated` |
-| `photo_url` | Final public URL |
-| `ai_generated` | bool — **must be true for any synthetic image** |
-| `ai_enhanced` | bool |
-| `output_file` | Path or Slack file ID |
-| `error` | Last error, truncated |
-| `created_at` / `updated_at` | ISO 8601, UTC |
-
-**`response_row_id` is the idempotency key.** Before processing any row, check
-`Runs` for a terminal status. Without this, every poll rebuilds every flyer.
+**`response_row_id` is the idempotency key.** Before processing any row, its
+runs are checked for a terminal or paused status. Without this, every poll
+rebuilds every flyer.
 
 Do not derive `response_row_id` from the sheet row number — inserting or sorting
 rows would silently reassign identities. Derive it from a stable tuple
@@ -502,10 +488,11 @@ is policy-gated, off by default, and always disclosed — an image model cannot
 know what 123 Main St looks like, and a wrong house on marketing for a real
 address is not a stylistic choice.
 
-### 4.6 Look up template (`sheets/repository.py`)
+### 4.6 Look up template (`slides/selection.py` + `slides/routing.py`)
 
-`email` → `Sales_People` row → `slides_template_id`. Unknown agent, or `active`
-false, pauses the listing as `needs_template` and asks in Slack.
+The request type gives the category; the notes fields choose the design within
+it; `routing.py` resolves that to a Drive file. No design, or a genuine tie,
+pauses the listing as `needs_template` and asks in Slack.
 
 ### 4.7 Render (`slides/renderer.py` + `slides/client.py`)
 
@@ -657,26 +644,19 @@ it without looking.
 
 ---
 
-## 5. Open question: where do photos come from?
+## 5. Where photos come from
 
-The form **does** have an "Upload photos" question (column H) — but it is empty on
-every visible row, as is the property address in column F. Whether that is broken
-required-ness or agents sending photos some other way is question Q1 in
-`STATUS.md`, and the answer decides whether photo *resolution* is the core of the
-product or a fallback. This is the single biggest driver of Carmen's 20 minutes
-and the least settled part of this design.
+The form asks for photos twice — `Upload photos` and `Upload high-resolution
+property photos` — and both are usually empty. So the built path is **the ask**:
+Gable stops before rendering anything and requests the image in the listing
+thread (§4.4), and Carmen's reply is fitted, published and attached to that same
+paused run. This is deliberately the common case rather than a fallback.
 
-Three moves, not mutually exclusive:
-
-1. **Add a file-upload question to the Google Form.** Cheapest fix by a wide
-   margin. Requires respondents to be signed into Google, which for a fixed roster
-   of agents is not a real obstacle. **Recommended first move.**
-2. **A shared Drive folder** where agents drop photos named by address. Looser,
-   no form change, needs a naming convention that people will violate.
-3. **Retrieval from the brokerage site**, then broader web. Always available as a
-   fallback, never as the primary path.
-
-Do not architect around generation as the primary source. See `CLAUDE.md` §8.
+`photos/resolver.py` holds the full cascade — form upload, the designated Drive
+folder, the listing agent's own brokerage site, broader web, the ask, and then
+generation only where `GABLE_PHOTO_POLICY` permits it. Do not architect around
+generation as the primary source; `CLAUDE.md` §8 explains why, and the default
+is `generate_with_approval`.
 
 ---
 
@@ -817,3 +797,4 @@ Append to this table. Do not rewrite history — if a decision reverses, add a n
 | 2026-08-11 | `files:read` is installed and the private Slack download path is **verified live** | A real thread upload reached Gable's dimension check at 10:24, which requires successful `files_info` metadata and bot-authorized download. This supersedes the earlier waiting-on-reinstall status. The new AI upscale and resulting flyer remain unverified live until `e09bb27` is deployed in a watched run. |
 | 2026-08-11 | The automatic upscale is deployed; publishing reasserts an **unprivileged writable photo root on every deploy** | A watched 10:51 upload reached GPT Image successfully, then the seam gate rejected the derivative and the original-photo fallback continued. Publishing exposed `/var/www/gable-photos` as root-owned even though systemd allowed the path. The directory is now `gable:gable`, and `make deploy` idempotently reasserts that owner and mode before restarting. This supersedes only the earlier row's deployment status; a completed live flyer and visual certification are still pending. |
 | 2026-08-12 | The thinking indicator is a **posted, animated, then deleted message**, not an edited placeholder and not Slack's own thread status | Two designs were tried and both failed against what was asked for: an indicator that comes into the thread, runs, and goes away. A placeholder edited into the answer never goes away — it becomes the reply — and it strands permanently if the work raises, leaving a progress claim above a job that died. `assistant.threads.setStatus` looked correct and is not: it accepts `chat:write` and returns `ok`, but held open for twenty seconds on a live channel thread it rendered nothing, because that surface paints only inside an assistant-pane container. So `status.py` posts a real message, cycles its text every 1.5s, and deletes it — after the answer is posted, so no silent gap opens at the moment the wait ends. It runs on a background thread and swallows every error: a broken indicator must never affect the reply. Supersedes the update-in-place contract in §4A.2 and `AGENTS.md` §2.8. |
+| 2026-08-12 | Responses columns are located by **header text**, and a tab with no recognisable header is refused | Fixed positions are only ever true of one tab. `Testing_1` splits the agent's name into `First Name` and `Second Name`, shifting every column from D rightward by one and heading row 2 under a blank row; read positionally its row 78 yields the service-guidelines paragraph as the request type, "Instagram Story" as the property address, and no price — all of which look like data downstream. `intake.columns_from_header` maps by name, `repository.find_header` locates the header row, and `maps_a_response_row` refuses a tab that names none of the email, request type and address rather than guessing. Also corrects §3.1, which described nine columns from a pre-API browser reading, and removes the `Templates` and `Runs` tab designs that D3 replaced with SQLite. |

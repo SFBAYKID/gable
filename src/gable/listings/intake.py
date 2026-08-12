@@ -25,11 +25,22 @@ Everything here is pure: a row in, a decision out. No network, no Sheets client.
 from __future__ import annotations
 
 import re
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Final
 
-#: Spreadsheet letters to zero-based indices, so this module can be read against
-#: the sheet itself. Only the eleven Chase named.
+from gable.listings.normalize import fold_header
+
+#: Spreadsheet letters to zero-based indices on `Form Responses 1`, so this
+#: module can be read against that tab itself. Only the eleven Chase named.
+#:
+#: **These positions are a fallback, not the mechanism.** `columns_from_header`
+#: reads the tab's own header row, because a position is only true of one tab:
+#: `Testing_1` splits the agent's name into `First Name` and `Second Name`,
+#: which shifts every column from D rightward by one. Read positionally, that
+#: tab yields the acknowledgment blob as the request type and the words
+#: "Instagram Story" as the property address — confirmed against row 78 on
+#: 2026-08-12, and both are the kind of wrong that still looks like data.
 COLUMNS: Final[dict[str, int]] = {
     "B": 1,  # Email Address — the join key to Sales_People
     "C": 2,  # Name of Agent
@@ -43,6 +54,106 @@ COLUMNS: Final[dict[str, int]] = {
     "S": 18,  # Buyer or seller side
     "T": 19,  # Notes
 }
+
+#: The `Form Responses 1` positions above, keyed by the field each one fills.
+DEFAULT_COLUMNS: Final[dict[str, int]] = {
+    "agent_email": COLUMNS["B"],
+    "agent_name": COLUMNS["C"],
+    "request_type": COLUMNS["E"],
+    "address": COLUMNS["L"],
+    "post_details": COLUMNS["N"],
+    "open_house": COLUMNS["O"],
+    "new_price": COLUMNS["P"],
+    "closing_price": COLUMNS["Q"],
+    "extra_notes": COLUMNS["R"],
+    "side": COLUMNS["S"],
+    "notes": COLUMNS["T"],
+}
+
+#: How a header is recognised, tried in this order: `(field, kind, text)` where
+#: kind is exact, prefix, or contains. The comparison text is already folded.
+#:
+#: The match kinds are deliberately tight rather than convenient. `address` is
+#: exact because "Please provide the property address for the postcard" also
+#: contains "property address", and the postcard branch is a different column
+#: for a different product. `notes` is exact for the same reason: "Additional
+#: Notes for Social Media Team" ends up in `extra_notes`, and conflating the two
+#: puts a note meant for Carmen into a field the flyer reads.
+HEADER_RULES: Final[tuple[tuple[str, str, str], ...]] = (
+    ("agent_email", "exact", "email address"),
+    ("agent_name", "exact", "name of agent"),
+    ("agent_first_name", "exact", "first name"),
+    ("agent_last_name", "exact", "second name"),
+    ("agent_last_name", "exact", "last name"),
+    ("request_type", "exact", "select your request type"),
+    ("address", "exact", "property address"),
+    ("post_details", "prefix", "include details for post"),
+    ("open_house", "prefix", "open house date/time"),
+    ("new_price", "prefix", "new price"),
+    ("closing_price", "prefix", "closing price"),
+    ("extra_notes", "prefix", "additional notes for social media team"),
+    ("side", "contains", "buyer or seller side"),
+    ("notes", "exact", "notes"),
+)
+
+#: Without these three there is no listing: nobody to attribute it to, no
+#: design to route to, and no property. A header row missing any of them is not
+#: a responses tab, and reading it positionally instead would invent all three.
+REQUIRED_FIELDS: Final[tuple[str, ...]] = ("agent_email", "request_type", "address")
+
+
+def columns_from_header(header: list[str]) -> dict[str, int]:
+    """Map each field Gable reads to its column index on this tab.
+
+    Args:
+        header: The tab's header row, exactly as the sheet returns it.
+
+    Returns:
+        Field name to zero-based column index, holding only the fields this
+        header actually offers. The leftmost match wins, so a duplicated
+        header cannot silently move a field rightward.
+
+    Raises:
+        Nothing.
+    """
+    found: dict[str, int] = {}
+    for index, cell in enumerate(header):
+        folded = fold_header(cell)
+        if not folded:
+            continue
+        for field, kind, text in HEADER_RULES:
+            if field in found:
+                continue
+            hit = (
+                folded == text
+                if kind == "exact"
+                else folded.startswith(text)
+                if kind == "prefix"
+                else text in folded
+            )
+            if hit:
+                found[field] = index
+                break
+    return found
+
+
+def maps_a_response_row(columns: Mapping[str, int]) -> bool:
+    """Whether a header mapping is complete enough to read submissions from.
+
+    Args:
+        columns: The output of `columns_from_header`.
+
+    Returns:
+        True when the email, request type and address were all recognised, and
+        the agent is named by either one column or a first/second name pair.
+
+    Raises:
+        Nothing.
+    """
+    if any(field not in columns for field in REQUIRED_FIELDS):
+        return False
+    return "agent_name" in columns or "agent_first_name" in columns
+
 
 #: Form wording on the left, catalogue category on the right. The form's own
 #: values are inconsistent — one row says "just listed" in lower case — so the
@@ -126,12 +237,15 @@ class Intake:
         return "open house" in lowered or bool(self.open_house.strip())
 
 
-def from_row(row: list[str]) -> Intake:
+def from_row(row: list[str], columns: Mapping[str, int] | None = None) -> Intake:
     """Read one sheet row into the fields Gable uses.
 
     Args:
-        row: A raw row from `Form Responses 1`. Short rows are normal — Sheets
+        row: A raw row from a responses tab. Short rows are normal — Sheets
             truncates trailing empties — so every access is bounds-checked.
+        columns: Field name to column index, from `columns_from_header`. When
+            omitted, the `Form Responses 1` positions are assumed, which is
+            correct only for that tab.
 
     Returns:
         An `Intake` with every value stripped.
@@ -140,23 +254,30 @@ def from_row(row: list[str]) -> Intake:
         Nothing. A malformed row must never stop a batch, so this cannot raise;
         `missing_public_facts` and `incoherences` report what is wrong instead.
     """
+    mapping = DEFAULT_COLUMNS if columns is None else columns
 
-    def cell(letter: str) -> str:
-        index = COLUMNS[letter]
-        return row[index].strip() if len(row) > index else ""
+    def cell(field: str) -> str:
+        index = mapping.get(field, -1)
+        return row[index].strip() if 0 <= index < len(row) else ""
 
+    # One column, or a first/second pair. Testing_1 splits the name and the
+    # split is the better shape to read, so both are supported rather than one
+    # being converted into the other.
+    name = cell("agent_name") or " ".join(
+        part for part in (cell("agent_first_name"), cell("agent_last_name")) if part
+    )
     return Intake(
-        agent_email=cell("B").lower(),
-        agent_name=cell("C"),
-        request_type=cell("E"),
-        address=cell("L"),
-        post_details=cell("N"),
-        open_house=cell("O"),
-        new_price=cell("P"),
-        closing_price=cell("Q"),
-        extra_notes=cell("R"),
-        side=cell("S"),
-        notes=cell("T"),
+        agent_email=cell("agent_email").lower(),
+        agent_name=name,
+        request_type=cell("request_type"),
+        address=cell("address"),
+        post_details=cell("post_details"),
+        open_house=cell("open_house"),
+        new_price=cell("new_price"),
+        closing_price=cell("closing_price"),
+        extra_notes=cell("extra_notes"),
+        side=cell("side"),
+        notes=cell("notes"),
     )
 
 

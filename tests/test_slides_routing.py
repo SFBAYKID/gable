@@ -97,5 +97,7 @@ def test_nothing_is_copied_so_one_edit_reaches_every_agent() -> None:
     """
     agents: list[list[Template]] = [[], [], [Template("k", "Kelsey — Sold", "Sold")], []]
     chosen = [choose("Sold", a, MASTER) for a in agents]
-    from_master = {c.template.file_id for c in chosen if c.source is Source.MASTER}
+    from_master = {
+        c.template.file_id for c in chosen if c.source is Source.MASTER and c.template is not None
+    }
     assert from_master == {"m-sold"}, "every non-override agent must resolve to the one file"

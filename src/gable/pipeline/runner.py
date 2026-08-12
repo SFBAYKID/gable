@@ -277,8 +277,12 @@ class Runner:
                 # Plain words only. "Hero" is our word for the photo well, not
                 # Carmen's, and asking her which image she wants "as the hero"
                 # asks her to learn our vocabulary to answer a simple question.
-                f"We got a new submission for {intake.address}. "
-                "Can you send me the image?",
+                #
+                # The request type and the agent lead the sentence because
+                # Carmen reads this in a channel carrying every listing at once.
+                # "We got a new submission" names none of the three things she
+                # needs to place it: what kind of post, whose, and which house.
+                f"{people.announce(self.connection, intake)}. Can you send me the image?",
                 [],
                 result,
                 status="needs_photo",
