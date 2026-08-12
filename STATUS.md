@@ -7,6 +7,46 @@ and which numbers can be trusted, `TEMPLATE_ISSUES.md` for the seven defects
 that belong to Carmen, and `BRAND.md` for the fonts, colours and the fact that
 not every design in the deck is a listing flyer.
 
+## 2026-08-12: a full run, end to end, and the four things it caught
+
+`Testing_1` row 78 (Eric Jacobs, Sold, 23 Pierside Ave Unit 118, $330,000) was
+run from the sheet to a finished flyer in the playground channel: Gable asked
+for the photo by name and request type, Chase dropped one in the thread, and it
+was enlarged, fitted, placed, and rendered onto a Just Sold design with Eric's
+own headshot, phone and email. It stopped at `needs_review` with the link and a
+specific note, which is the design working.
+
+Getting there exposed four defects, all now fixed and deployed:
+
+1. **Columns were read by position.** `Testing_1` splits the agent name across
+   two columns, shifting everything from D rightward, so its row 78 read as the
+   acknowledgment paragraph for a request type and "Instagram Story" for an
+   address. Columns are found by header text now, and an unrecognisable tab is
+   refused rather than guessed at.
+2. **The roster sync had been storing nobody, silently, all day.** The
+   `Sales_People` header moved to row 1 when the tab was rebuilt with 39 agents;
+   the range still started at A2, so Andy Jang's details became the column names
+   and every row was skipped for having no email. Any flyer built today carried
+   the brokerage's main number and the design's own stock face.
+3. **The template picker only ever looked for its top choice.** Just Sold has
+   eleven eligible designs and reported having none, because the one ranked
+   first is not imported. It now takes the best design that exists, unless the
+   submission named the missing one by cue.
+4. **Two address normalisers disagreed.** The flyer's check ran its own weaker
+   copy that only recognised an upper-case state, so "Baltimore Md 21230" never
+   gained its comma and a complete run stopped to ask for an address already
+   supplied. There is one set of address rules now, and a unit stays with its
+   street so condo addresses still name their city.
+
+**The open item is data, not code: only 11 of the 45 designs are marked
+`gable_role=template` in the drive.** Just Sold has exactly one, so the design
+choice was forced rather than made. Importing the rest is what turns selection
+from theoretical into real.
+
+`tools/run_row.py` starts one row by tab and number, and `--resume` continues a
+paused run using the photo already attached to it. The poller only ever starts
+rows it has never seen, so a row already on the sheet cannot be run by waiting.
+
 ## Where this actually stands, 2026-08-11 evening
 
 **Photos: proven.** A person can drop in a photo of any reasonable size or shape
