@@ -342,6 +342,7 @@ gable/
 │   │   ├── resolver.py          # the cascade, policy enforcement
 │   │   ├── sources.py           # form / drive / web source adapters
 │   │   ├── enhance.py           # guarded high-fidelity upscale of a REAL photo only
+│   │   ├── quality.py           # warn when a photo is too small for the frame
 │   │   └── store.py             # publish to the droplet over http
 │   ├── slides/
 │   │   ├── renderer.py          # pure batchUpdate builder for a fill
@@ -351,6 +352,7 @@ gable/
 │   │   ├── selection.py         # notes-aware template purpose and routing
 │   │   ├── edit_common.py       # shared colours, guards, request type
 │   │   ├── measure.py           # measure a template once; fingerprint it
+│   │   ├── registry.py          # new / unchanged / touched / changed
 │   │   ├── routing.py           # agent override, else the master folder
 │   │   └── catalog.py           # the 45 templates, labelled
 │   ├── slackapp/
@@ -360,6 +362,7 @@ gable/
 │   │   ├── photos.py            # Slack upload to fitted same-run resume
 │   │   ├── runtime.py           # production Slack + poller assembly
 │   │   ├── blocks.py            # Block Kit builders
+│   │   ├── status.py            # a working indicator that cannot break the work
 │   │   ├── style.py             # the house style, enforced
 │   │   └── handlers.py          # commands, actions, mentions
 │   ├── pipeline/
