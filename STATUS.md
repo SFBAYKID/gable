@@ -7,6 +7,35 @@ and which numbers can be trusted, `TEMPLATE_ISSUES.md` for the seven defects
 that belong to Carmen, and `BRAND.md` for the fonts, colours and the fact that
 not every design in the deck is a listing flyer.
 
+## 2026-08-12 evening: delivered, from a sheet row to a finished flyer
+
+Row 62 of `Form Responses 1` — Andy Jang, Sold, 300 Commerce St # D, Havre de
+Grace — went from a simulated submission to a **delivered** flyer in Slack, with
+no stop for review: the listing announced in the channel, the photo requested in
+its thread, Chase's upload fitted and published, the `Sold` design taken from
+Generic Templates by name, Andy's own headshot published from the Head Shots
+folder, his direct line read from the contact workbook, and one closing message
+carrying the link.
+
+Five defects were found and fixed by watching that run rather than by reasoning
+about it:
+
+1. **The photo was pillarboxed.** `createImage` fits rather than fills, and the
+   upload was cropped to the slide's 4:5 canvas instead of the frame's 2.14:1
+   band — a narrow column of photograph with the layout showing either side.
+   This was true of every design whose photo area is not 4:5.
+2. **A question nobody was waiting for.** A non-blocking advisory was posted
+   mid-build, phrased as a question, and then walked past. Advisories are now
+   statements folded into the one closing message.
+3. **Four messages for one flyer.** Now one, carrying the link.
+4. **The indicator kept pulsing under a question**, which reads as "still
+   working" and stops anyone from answering.
+5. **A combined announcement started no thread**, so an upload had nowhere valid
+   to land — the handoff matches a photo to a run by its thread.
+
+**The `Sold` design has no price field**, so a sale price cannot appear on it as
+built. If Carmen wants sold prices shown, that template needs one added.
+
 ## 2026-08-12: a full run, end to end, and the four things it caught
 
 `Testing_1` row 78 (Eric Jacobs, Sold, 23 Pierside Ave Unit 118, $330,000) was
