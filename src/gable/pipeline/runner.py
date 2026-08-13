@@ -538,6 +538,7 @@ class Runner:
             )
             result.status = "needs_review"
             result.output_url = output_url
+            self.progress("")
             spoken = seen.say or verdict.say or safe(f"I rendered it, but {problems[0]}")
             result.said.append(spoken)
             posted_ts = self.say(spoken, self.origin_thread_ts or None)
@@ -559,6 +560,7 @@ class Runner:
         )
         result.status = "delivered"
         result.output_url = output_url
+        self.progress("")
         message = safe(f"Your flyer is ready. <{output_url}|Open the flyer>")
         result.said.append(message)
         posted_ts = self.say(message, self.origin_thread_ts or None)
@@ -597,6 +599,9 @@ class Runner:
         so a flat message leaves Carmen nowhere to put the photo.
         """
         asked = safe(question or "I need one more thing before I can build this.")
+        # Gable is about to wait for a person. Leaving the indicator up under a
+        # question reads as "still working on it", so nobody answers.
+        self.progress("")
         if headline and not self.origin_thread_ts:
             root_ts = self.say(safe(headline), None)
             posted_ts = self.say(asked, root_ts or None)

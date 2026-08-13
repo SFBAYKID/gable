@@ -143,12 +143,17 @@ class Working:
         """Record the truthful stage to show after the lead-in.
 
         Args:
-            text: Present-tense copy that reads correctly after "Gable".
+            text: Present-tense copy that reads correctly after "Gable". An
+                **empty** stage means the work has stopped and Gable is about to
+                ask something, so the indicator is taken down rather than left
+                pulsing underneath a question. It comes back when the answer
+                arrives, because the reply handler opens a new indicator.
 
         Raises:
             Nothing.
         """
         if not text:
+            self.stop()
             return
         with self._stage_lock:
             self._stage = text
