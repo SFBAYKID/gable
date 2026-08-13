@@ -11,9 +11,11 @@ from pathlib import Path
 import pytest
 
 from gable import spend
+from gable.db import store
 from gable.db.schema import apply_migrations, connect
 from gable.listings import enrich as enrich_module
 from gable.listings.enrich import Facts
+from gable.listings.intake import Intake
 
 
 @pytest.fixture
@@ -22,6 +24,30 @@ def db() -> sqlite3.Connection:
     connection = connect(":memory:")
     apply_migrations(connection)
     return connection
+
+
+def _listing_run(connection: sqlite3.Connection, response_id: str = "response-spend") -> str:
+    """Create one real listing/run parent for operation-limit tests."""
+    store.record_submission(
+        connection,
+        response_id,
+        48,
+        response_id,
+        Intake(
+            agent_email="agent@example.com",
+            agent_name="Agent Example",
+            request_type="Sold",
+            address="1 Main St, Baltimore, MD 21201",
+            post_details="",
+            open_house="",
+            new_price="",
+            closing_price="",
+            extra_notes="",
+            side="",
+            notes="",
+        ),
+    )
+    return store.start_run(connection, response_id).run_id
 
 
 def test_guarded_call_records_its_conservative_reservation(db: sqlite3.Connection) -> None:
@@ -63,6 +89,254 @@ def test_operation_count_includes_failed_paid_attempts(db: sqlite3.Connection) -
 
     assert spend.operation_count(db, "run-1", spend.IMAGE_UPSCALE_DETAIL) == 1
     assert spend.operation_count(db, "run-2", spend.IMAGE_UPSCALE_DETAIL) == 0
+
+
+def test_an_unreleased_vendor_failure_consumes_the_image_allowance(
+    db: sqlite3.Connection,
+) -> None:
+    """A crash or ordinary vendor failure never releases itself automatically."""
+    run_id = _listing_run(db)
+    estimate = spend.Estimate(
+        "openai",
+        "gpt-image-2",
+        spend.IMAGE_EDIT_RESERVE_USD,
+        spend.IMAGE_UPSCALE_DETAIL,
+    )
+    calls = 0
+
+    def fail() -> bytes:
+        nonlocal calls
+        calls += 1
+        raise RuntimeError("provider failure with unknown billing state")
+
+    with pytest.raises(RuntimeError):
+        spend.guarded_call(db, estimate, fail, run_id=run_id, max_operations=1)
+    with pytest.raises(spend.OperationLimitReachedError):
+        spend.guarded_call(db, estimate, fail, run_id=run_id, max_operations=1)
+
+    assert calls == 1
+    assert db.execute("SELECT COUNT(*) FROM operation_releases").fetchone()[0] == 0
+
+
+def test_releasing_a_rejected_request_preserves_spend_and_allows_one_actual_call(
+    db: sqlite3.Connection,
+) -> None:
+    run_id = _listing_run(db)
+    estimate = spend.Estimate(
+        "openai",
+        "gpt-image-2",
+        spend.IMAGE_EDIT_RESERVE_USD,
+        spend.IMAGE_UPSCALE_DETAIL,
+    )
+    with pytest.raises(RuntimeError):
+        spend.guarded_call(
+            db,
+            estimate,
+            lambda: (_ for _ in ()).throw(RuntimeError("HTTP 400 before inference")),
+            run_id=run_id,
+            max_operations=1,
+        )
+    spend_id = int(db.execute("SELECT id FROM spend WHERE run_id = ?", (run_id,)).fetchone()[0])
+    before = spend.total_spent(db)
+
+    spend.release_rejected_image_reservation(
+        db,
+        spend_id,
+        reason="invalid_request_dimensions",
+        evidence="HTTP 400; 1088x512 is below the documented 655360 pixels",
+    )
+    result = spend.guarded_call(
+        db,
+        estimate,
+        lambda: b"actual model output",
+        run_id=run_id,
+        max_operations=1,
+    )
+    with pytest.raises(spend.OperationLimitReachedError):
+        spend.guarded_call(
+            db,
+            estimate,
+            lambda: b"must not run",
+            run_id=run_id,
+            max_operations=1,
+        )
+
+    assert result == b"actual model output"
+    assert spend.total_spent(db) == pytest.approx(before + spend.IMAGE_EDIT_RESERVE_USD)
+    assert spend.operation_count(db, run_id, spend.IMAGE_UPSCALE_DETAIL) == 2
+
+
+def test_reservation_release_is_append_only_and_idempotent(db: sqlite3.Connection) -> None:
+    run_id = _listing_run(db)
+    spend.record(
+        db,
+        spend.Estimate(
+            "openai",
+            "gpt-image-2",
+            spend.IMAGE_EDIT_RESERVE_USD,
+            spend.IMAGE_UPSCALE_DETAIL,
+        ),
+        run_id,
+    )
+    spend_id = int(db.execute("SELECT id FROM spend").fetchone()[0])
+    kwargs = {
+        "reason": "invalid_request_dimensions",
+        "evidence": "HTTP 400 before inference for an invalid documented size",
+    }
+
+    spend.release_rejected_image_reservation(db, spend_id, **kwargs)
+    with pytest.raises(spend.OperationReleaseError, match="already released"):
+        spend.release_rejected_image_reservation(db, spend_id, **kwargs)
+
+    release = db.execute(
+        "SELECT spend_id, run_id, operation_detail, reason, evidence FROM operation_releases"
+    ).fetchone()
+    assert tuple(release) == (
+        spend_id,
+        run_id,
+        spend.IMAGE_UPSCALE_DETAIL,
+        kwargs["reason"],
+        kwargs["evidence"],
+    )
+
+
+@pytest.mark.parametrize(
+    ("service", "detail", "run_scoped"),
+    [
+        ("openai", "conversation", True),
+        ("firecrawl", spend.IMAGE_UPSCALE_DETAIL, True),
+        ("openai", spend.IMAGE_UPSCALE_DETAIL, False),
+    ],
+)
+def test_only_an_exact_listing_image_reservation_can_be_released(
+    db: sqlite3.Connection,
+    service: str,
+    detail: str,
+    run_scoped: bool,
+) -> None:
+    run_id = _listing_run(db)
+    spend.record(
+        db,
+        spend.Estimate(service, "test-model", 0.25, detail),
+        run_id if run_scoped else "",
+    )
+    spend_id = int(db.execute("SELECT id FROM spend").fetchone()[0])
+
+    with pytest.raises(spend.OperationReleaseError, match="only a listing-scoped"):
+        spend.release_rejected_image_reservation(
+            db,
+            spend_id,
+            reason="not_releasable",
+            evidence="Specific evidence long enough for the audit record",
+        )
+
+    assert db.execute("SELECT COUNT(*) FROM operation_releases").fetchone()[0] == 0
+
+
+def test_a_release_does_not_reset_the_listing_allowance_on_later_runs(
+    db: sqlite3.Connection,
+) -> None:
+    first_run = _listing_run(db)
+    estimate = spend.Estimate(
+        "openai",
+        "gpt-image-2",
+        spend.IMAGE_EDIT_RESERVE_USD,
+        spend.IMAGE_UPSCALE_DETAIL,
+    )
+    with pytest.raises(RuntimeError):
+        spend.guarded_call(
+            db,
+            estimate,
+            lambda: (_ for _ in ()).throw(RuntimeError("pre-inference rejection")),
+            run_id=first_run,
+            max_operations=1,
+        )
+    spend_id = int(db.execute("SELECT id FROM spend").fetchone()[0])
+    spend.release_rejected_image_reservation(
+        db,
+        spend_id,
+        reason="invalid_request_dimensions",
+        evidence="HTTP 400 before inference for an invalid documented size",
+    )
+    store.set_status(db, first_run, "failed", "test attempt boundary")
+    second_run = store.start_run(db, "response-spend").run_id
+    spend.guarded_call(
+        db,
+        estimate,
+        lambda: b"actual model output",
+        run_id=second_run,
+        max_operations=1,
+    )
+    store.set_status(db, second_run, "failed", "test attempt boundary")
+    third_run = store.start_run(db, "response-spend").run_id
+
+    with pytest.raises(spend.OperationLimitReachedError):
+        spend.guarded_call(
+            db,
+            estimate,
+            lambda: b"must not run",
+            run_id=third_run,
+            max_operations=1,
+        )
+
+
+def test_concurrent_workers_after_a_release_still_buy_only_one_operation(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "released-operation.db"
+    setup = connect(path)
+    apply_migrations(setup)
+    run_id = _listing_run(setup)
+    estimate = spend.Estimate(
+        "openai",
+        "gpt-image-2",
+        spend.IMAGE_EDIT_RESERVE_USD,
+        spend.IMAGE_UPSCALE_DETAIL,
+    )
+    spend.record(setup, estimate, run_id)
+    spend_id = int(setup.execute("SELECT id FROM spend").fetchone()[0])
+    spend.release_rejected_image_reservation(
+        setup,
+        spend_id,
+        reason="invalid_request_dimensions",
+        evidence="HTTP 400 before inference for an invalid documented size",
+    )
+    setup.close()
+
+    start = threading.Barrier(2)
+    vendor_calls: list[int] = []
+    call_lock = threading.Lock()
+
+    def compete(index: int) -> str:
+        connection = connect(path)
+        try:
+            start.wait(timeout=5)
+
+            def vendor() -> bytes:
+                with call_lock:
+                    vendor_calls.append(index)
+                time.sleep(0.05)
+                return b"actual model output"
+
+            try:
+                spend.guarded_call(
+                    connection,
+                    estimate,
+                    vendor,
+                    run_id=run_id,
+                    max_operations=1,
+                )
+            except spend.OperationLimitReachedError:
+                return "refused"
+            return "called"
+        finally:
+            connection.close()
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        outcomes = list(pool.map(compete, (1, 2)))
+
+    assert sorted(outcomes) == ["called", "refused"]
+    assert len(vendor_calls) == 1
 
 
 def test_guarded_call_never_invokes_vendor_at_the_ceiling(db: sqlite3.Connection) -> None:

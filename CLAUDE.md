@@ -346,6 +346,7 @@ gable/
 ├── tools/
 │   ├── check_connections.py     # prove every .env credential works, live
 │   ├── adopt_backfill.py        # mark existing rows as history, build none
+│   ├── reconcile_image_reservation.py # evidence-gated pre-inference release
 │   ├── run_row.py               # start one row by tab and number, or resume it
 │   └── template_smoke_test.py   # recoverable live new-template path
 ├── src/gable/

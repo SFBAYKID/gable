@@ -284,6 +284,8 @@ Two rules keep this useful rather than noisy:
 
 Gable inspects its own output before delivering (ARCHITECTURE.md §4.7b). When
 that check fails, it says so rather than shipping something it doubts.
+The rejected draft remains in Drive for audit but its link stays out of Slack.
+The supplied image and same run are retained for a corrected retry.
 
 ```
 123 Main St — I rendered it, but I do not think it looks right.
@@ -291,8 +293,8 @@ that check fails, it says so rather than shipping something it doubts.
      The house is cropped through the roofline. The photo is a lot wider
      than the space the template leaves for it.
 
-     Send a different photo, or adjust the source template and tell me to run
-     again.
+     I kept the supplied image and draft so this run can be retried without
+     starting over.
 ```
 
 ### 2.10 Something failed
@@ -417,8 +419,10 @@ a timestamp. A listing whose state cannot be explained from that log is a bug.
 ## 7. Rate and cost discipline
 
 - Max `GABLE_MAX_BATCH` (default 25) listings per cycle.
-- Max 1 image-model call per listing, whether generation or real-photo
-  upscaling. A paid image edit is never retried automatically.
+- Max 1 actual image-model operation per listing, whether generation or
+  real-photo upscaling. A paid edit is never retried automatically. A documented
+  pre-inference rejection may be released only by an operator naming the exact
+  reservation and evidence; runtime never releases it, and spend stays recorded.
 - Never retry a failing listing more than 3 times. Enforced by
   `db.store.start_run`; paused states resume the same run and do not consume a
   new attempt.

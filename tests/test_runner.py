@@ -44,6 +44,7 @@ def test_a_complete_listing_is_built_and_delivered(db: sqlite3.Connection) -> No
     assert rec.copied is True
     assert result.output_url.endswith("/edit")
     assert any("Open the flyer" in said for said in rec.said)
+    assert sum(said.count(result.output_url) for said in rec.said) == 1
 
 
 def test_a_resumed_delivery_preserves_the_root_thread_timestamp(

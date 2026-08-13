@@ -170,7 +170,7 @@ operating timezone, full stop.
 There are three stores with separate ownership: the form-response tab is
 read-only input, the shared drive holds templates, contacts, headshots and
 editable output, and SQLite holds every derived submission, run transition,
-template audit, cached fact and paid-call reservation.
+template audit, cached fact, paid-call reservation and explicit operator release.
 
 ### 3.1 Tab `Form Responses 1` — read only, never written
 
@@ -423,8 +423,8 @@ gate still blocks delivery if the automatic crop removes important content.
 Only a source that would need more than 2x enlargement takes the image-edit
 path in `photos/enhance.py`. Gable first makes the exact deterministic frame
 composition, then sends that derivative to `GABLE_IMAGE_MODEL_HQ` for
-super-resolution with a preservation-only prompt. GPT Image 2 runs at medium
-quality and high input fidelity, returns one image, and gets no automatic retry.
+super-resolution with a preservation-only prompt. GPT Image 2 runs at high
+quality and automatic high input fidelity, returns one image, and gets no automatic retry.
 The output must still be large enough and remain within a low-frequency
 composition distance from the supplied photo. Failure falls back to the locally
 resized original; the rendered-flyer vision pass remains the final delivery
@@ -793,3 +793,5 @@ Append to this table. Do not rewrite history — if a decision reverses, add a n
 | 2026-08-13 | Owned-thread clarification receives bounded Slack history and persisted listing facts | A terse answer such as “the big one” is meaningful only after Gable's prior hero-or-headshot question. The listener supplies up to twelve earlier turns plus the run's status, address, template, agent, output and photo facts. A confirmed hero replacement retains the current flyer until the new upload passes the ordinary build gates; a headshot replacement waits on `Head Shots`. |
 | 2026-08-13 | Readable text overflow is corrected automatically, not presented as template work for Carmen | Exact Slides geometry determines the largest fitting size. Gable applies that font size only to fields it filled, keeps names, phones, emails and similar values on one line, reports the reduction in the final outcome, and still stops at the 8-point readability limit or when the source structure cannot be measured safely. The rendered vision inspection remains the final clipping and overlap gate. |
 | 2026-08-13 | **Reverses the pre-build crop approval:** a supplied photo is fitted before Gable asks about layout | Chase's live test reached eighteen messages because every correctable fit became user work. A large center crop now becomes a truthful note in the one outcome after the build; it never asks “run anyway.” Structural defects, missing facts and unreadable text still stop, and the rendered vision inspection remains the fail-closed gate for a crop that removed important property content. |
+| 2026-08-13 | A documented pre-inference image rejection can receive one **append-only operator release** | Reservations remain in the spend total and ordinary failures still consume the listing allowance. Only a human naming the exact spend row and durable evidence may append a release after the provider rejected an invalid request before model execution; runtime never does this automatically. The released reservation is excluded only from the per-listing image-operation count, and a unique database constraint plus an immediate transaction keep the replacement at one actual image-model call. |
+| 2026-08-13 | GPT Image 2 final-photo edits use **high quality and a constraint-valid proportional canvas** | The Mike test exposed a client bug: rounding its 1078×504 frame to 1088×512 produced only 557,056 pixels, below the documented 655,360 minimum, so the API rejected it before inference and local stretching looked visibly pixelated. The chooser now enforces both 16-pixel edges, 3:1, 3,840-pixel, and total-pixel bounds; that frame becomes 1184×560. A vision-rejected draft stays internal rather than giving Slack a link to known-bad work. |

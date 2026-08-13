@@ -15,6 +15,7 @@ from __future__ import annotations
 import base64
 import binascii
 import io
+import math
 from collections.abc import Callable, Mapping
 from typing import Any, Final, cast
 
@@ -26,6 +27,11 @@ from gable.photos.fit import assess, fit_locally, image_dimensions
 _ENDPOINT: Final[str] = "https://api.openai.com/v1/images/edits"
 _TIMEOUT_SECONDS: Final[float] = 180.0
 _MAX_OUTPUT_BYTES: Final[int] = 32 * 1024 * 1024
+_GPT_IMAGE_2_EDGE_STEP: Final[int] = 16
+_GPT_IMAGE_2_MIN_PIXELS: Final[int] = 655_360
+_GPT_IMAGE_2_MAX_PIXELS: Final[int] = 8_294_400
+_GPT_IMAGE_2_MAX_EDGE: Final[int] = 3_840
+_GPT_IMAGE_2_MAX_ASPECT: Final[float] = 3.0
 # ASSUMPTION: 0.18 separates sharpening from a materially changed composition.
 # Confirm by comparing the real rejected and accepted upscales during the first
 # watched Slack workflow; STATUS.md keeps that visual certification open.
@@ -77,11 +83,96 @@ def _post(
     )
 
 
-def _multiple_of_16(value: int) -> int:
-    """Round a positive pixel dimension up to GPT Image 2's size boundary."""
-    # VERIFIED: GPT Image 2's arbitrary sizes require both edges divisible by
-    # 16. https://developers.openai.com/api/docs/guides/image-generation
-    return ((value + 15) // 16) * 16
+def _gpt_image_2_output_dimensions(
+    target_width: int,
+    target_height: int,
+) -> tuple[int, int]:
+    """Find the closest valid GPT Image 2 canvas to a flyer photo frame.
+
+    GPT Image 2 rejects a size unless both edges are multiples of 16, the
+    aspect ratio is at most 3:1, and the canvas contains 655,360 to 8,294,400
+    pixels with neither edge over 3,840. Small, wide flyer bands are the easy
+    constraint to miss: simply rounding 1078x504 to 1088x512 still produces
+    too few pixels and returns HTTP 400.
+
+    The continuous target is scaled only as much as the API constraints
+    require. Searching the small 240-by-240 output grid then chooses the valid
+    integer canvas closest to that target, preserving its aspect ratio without
+    accidentally selecting a much larger, more expensive canvas.
+
+    Raises:
+        ValueError: If either requested edge is not positive.
+    """
+    if target_width <= 0 or target_height <= 0:
+        msg = f"target must be positive, got {target_width}x{target_height}"
+        raise ValueError(msg)
+
+    target_aspect = target_width / target_height
+    if target_aspect > _GPT_IMAGE_2_MAX_ASPECT:
+        base_width = float(target_width)
+        base_height = base_width / _GPT_IMAGE_2_MAX_ASPECT
+    elif target_aspect < 1 / _GPT_IMAGE_2_MAX_ASPECT:
+        base_height = float(target_height)
+        base_width = base_height / _GPT_IMAGE_2_MAX_ASPECT
+    else:
+        base_width = float(target_width)
+        base_height = float(target_height)
+
+    base_pixels = base_width * base_height
+    if base_pixels < _GPT_IMAGE_2_MIN_PIXELS:
+        scale = math.sqrt(_GPT_IMAGE_2_MIN_PIXELS / base_pixels)
+    else:
+        scale = min(
+            1.0,
+            _GPT_IMAGE_2_MAX_EDGE / max(base_width, base_height),
+            math.sqrt(_GPT_IMAGE_2_MAX_PIXELS / base_pixels),
+        )
+    desired_width = base_width * scale
+    desired_height = base_height * scale
+
+    # If the requested frame already respects the upper constraints, an output
+    # edge must not undershoot it. Otherwise the provider could return a valid
+    # canvas that immediately needs another enlargement to fill the frame.
+    request_respects_upper_bounds = (
+        max(target_width, target_height) <= _GPT_IMAGE_2_MAX_EDGE
+        and max(target_aspect, 1 / target_aspect) <= _GPT_IMAGE_2_MAX_ASPECT
+        and target_width * target_height <= _GPT_IMAGE_2_MAX_PIXELS
+    )
+
+    best: tuple[tuple[float, float, int], int, int] | None = None
+    for width in range(
+        _GPT_IMAGE_2_EDGE_STEP,
+        _GPT_IMAGE_2_MAX_EDGE + 1,
+        _GPT_IMAGE_2_EDGE_STEP,
+    ):
+        if request_respects_upper_bounds and width < target_width:
+            continue
+        for height in range(
+            _GPT_IMAGE_2_EDGE_STEP,
+            _GPT_IMAGE_2_MAX_EDGE + 1,
+            _GPT_IMAGE_2_EDGE_STEP,
+        ):
+            if request_respects_upper_bounds and height < target_height:
+                continue
+            pixels = width * height
+            if not _GPT_IMAGE_2_MIN_PIXELS <= pixels <= _GPT_IMAGE_2_MAX_PIXELS:
+                continue
+            if max(width, height) / min(width, height) > _GPT_IMAGE_2_MAX_ASPECT:
+                continue
+            distance = (
+                ((width / desired_width) - 1) ** 2 + ((height / desired_height) - 1) ** 2,
+                abs(pixels - (desired_width * desired_height)),
+                pixels,
+            )
+            candidate = (distance, width, height)
+            if best is None or candidate < best:
+                best = candidate
+
+    # The documented constraint space always has valid canvases (1024x1024 is
+    # one), so reaching this branch means the constants above are inconsistent.
+    if best is None:  # pragma: no cover - defensive invariant
+        raise EnhancementError("no supported image enlargement size is available")
+    return best[1], best[2]
 
 
 def _accepts_input_fidelity(model: str) -> bool:
@@ -103,7 +194,8 @@ def _accepts_input_fidelity(model: str) -> bool:
 def _output_size(model: str, target_width: int, target_height: int) -> str:
     """Choose a supported portrait, landscape, or square edit size."""
     if model.startswith("gpt-image-2"):
-        return f"{_multiple_of_16(target_width)}x{_multiple_of_16(target_height)}"
+        width, height = _gpt_image_2_output_dimensions(target_width, target_height)
+        return f"{width}x{height}"
     if target_width == target_height:
         return "1024x1024"
     if target_width < target_height:
@@ -201,7 +293,7 @@ def upscale_real_photo(
         "model": model,
         "prompt": _PROMPT,
         "size": size,
-        "quality": "medium",
+        "quality": "high" if model.startswith("gpt-image-2") else "medium",
         "output_format": "jpeg",
         "output_compression": "95",
         "n": "1",

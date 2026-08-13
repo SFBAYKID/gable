@@ -46,6 +46,31 @@ def _db(tmp_path: Path) -> sqlite3.Connection:
     return connection
 
 
+def test_schema_six_migrates_to_the_append_only_operation_release_ledger(
+    tmp_path: Path,
+) -> None:
+    """A deployed v6 database gains reconciliation without changing old rows."""
+    connection = _db(tmp_path)
+    connection.execute("DROP TABLE operation_releases")
+    connection.execute("DROP INDEX idx_spend_id_run")
+    connection.execute("DELETE FROM schema_version WHERE version = 7")
+    assert current_version(connection) == 6
+
+    assert apply_migrations(connection) == 1
+
+    assert current_version(connection) == SCHEMA_VERSION == 7
+    columns = connection.execute("PRAGMA table_info(operation_releases)").fetchall()
+    assert [str(row["name"]) for row in columns] == [
+        "id",
+        "spend_id",
+        "run_id",
+        "operation_detail",
+        "reason",
+        "evidence",
+        "at",
+    ]
+
+
 def test_opening_a_run_rolls_back_if_its_first_event_cannot_be_written(
     tmp_path: Path,
 ) -> None:

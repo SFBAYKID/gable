@@ -15,6 +15,7 @@ from __future__ import annotations
 import sqlite3
 from collections.abc import Callable
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from typing import Final, TypeVar
 
 #: Firecrawl bills per search rather than per token.
@@ -33,10 +34,11 @@ CONVERSATION_RESERVE_USD: Final[float] = 0.10
 # including the configured output ceiling, instead of understating a two-image
 # request as though it still contained only one thumbnail.
 VISION_RESERVE_USD: Final[float] = 0.10
-#: One medium-quality GPT Image 2 edit plus its high-fidelity input.
-#: VERIFIED 2026-08-11: the official image-generation guide prices the standard
-#: portrait output below this reservation. The extra headroom deliberately
-#: covers input-image tokens and pricing drift without understating the ledger.
+#: One high-quality GPT Image 2 edit plus its high-fidelity input.
+#: VERIFIED 2026-08-13: the official image-generation guide prices a high-quality
+#: 1536x1024 output at $0.165. Gable's 1080x1350 slide bounds keep every flyer
+#: frame below that standard canvas's pixel area, so $0.25 leaves headroom for
+#: input-image tokens and pricing drift without understating the ledger.
 IMAGE_EDIT_RESERVE_USD: Final[float] = 0.25
 
 #: Exact ledger detail used to enforce the one-upscale-per-listing limit.
@@ -55,6 +57,10 @@ class BudgetExceededError(Exception):
 
 class OperationLimitReachedError(Exception):
     """Raised when one listing has already reserved its allowed paid operations."""
+
+
+class OperationReleaseError(Exception):
+    """Raised when an operator cannot safely release one rejected reservation."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -133,10 +139,90 @@ def _listing_operation_count(
     row = connection.execute(
         "SELECT COUNT(*) AS calls FROM spend AS expense "
         "JOIN runs AS spent_run ON spent_run.run_id = expense.run_id "
-        "WHERE spent_run.response_row_id = ? AND expense.note = ?",
+        "LEFT JOIN operation_releases AS released ON released.spend_id = expense.id "
+        "WHERE spent_run.response_row_id = ? AND expense.note = ? "
+        "AND released.spend_id IS NULL",
         (str(listing["response_row_id"]), detail),
     ).fetchone()
     return int(row["calls"] if row else 0)
+
+
+def release_rejected_image_reservation(
+    connection: sqlite3.Connection,
+    spend_id: int,
+    *,
+    reason: str,
+    evidence: str,
+) -> None:
+    """Append an operator reconciliation for a pre-inference image rejection.
+
+    This is deliberately not called by runtime error handling. A human must
+    identify one exact ledger row and provide durable evidence that the vendor
+    rejected Gable's request before image-model execution. The original spend
+    reservation remains untouched and still counts toward the $50 ceiling; only
+    the one-image-operation allowance is released.
+
+    Args:
+        connection: Database holding the spend and listing ledgers.
+        spend_id: Exact reservation row to reconcile.
+        reason: Short classification of why no model operation occurred.
+        evidence: Specific observed evidence, at least 20 characters long.
+
+    Raises:
+        OperationReleaseError: When the evidence is inadequate, the spend row
+            is missing or not an image-upscale reservation, or it was released.
+        sqlite3.Error: When the append cannot be committed.
+    """
+    clean_reason = reason.strip()
+    clean_evidence = evidence.strip()
+    if spend_id <= 0:
+        raise OperationReleaseError("spend id must be a positive integer")
+    if not clean_reason:
+        raise OperationReleaseError("a reservation release requires a reason")
+    if len(clean_evidence) < 20:
+        raise OperationReleaseError("reservation-release evidence is too short to audit")
+
+    connection.execute("BEGIN IMMEDIATE")
+    try:
+        reservation = connection.execute(
+            "SELECT run_id, service, note FROM spend WHERE id = ?", (spend_id,)
+        ).fetchone()
+        if reservation is None:
+            raise OperationReleaseError("that spend reservation does not exist")
+        run_id = str(reservation["run_id"] or "")
+        if (
+            str(reservation["service"] or "") != "openai"
+            or str(reservation["note"] or "") != IMAGE_UPSCALE_DETAIL
+            or not run_id
+        ):
+            raise OperationReleaseError(
+                "only a listing-scoped OpenAI image-upscale reservation can be released"
+            )
+        known_run = connection.execute("SELECT 1 FROM runs WHERE run_id = ?", (run_id,)).fetchone()
+        if known_run is None:
+            raise OperationReleaseError("the reservation is not attached to a known listing run")
+        already = connection.execute(
+            "SELECT 1 FROM operation_releases WHERE spend_id = ?", (spend_id,)
+        ).fetchone()
+        if already is not None:
+            raise OperationReleaseError("that spend reservation was already released")
+        connection.execute(
+            "INSERT INTO operation_releases "
+            "(spend_id, run_id, operation_detail, reason, evidence, at) "
+            "VALUES (?,?,?,?,?,?)",
+            (
+                spend_id,
+                run_id,
+                IMAGE_UPSCALE_DETAIL,
+                clean_reason,
+                clean_evidence,
+                datetime.now(UTC).isoformat(),
+            ),
+        )
+        connection.execute("COMMIT")
+    except Exception:
+        connection.execute("ROLLBACK")
+        raise
 
 
 def record(connection: sqlite3.Connection, estimate: Estimate, run_id: str = "") -> None:

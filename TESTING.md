@@ -200,8 +200,8 @@ confirms all of the following:
 - the file remains an editable Google Slides presentation.
 
 `needs_review` is a correct safety stop, but it is not a passing release result.
-Read the precise Slack explanation, fix the code or source responsible, and run
-a fresh controlled row only after the cause is understood.
+Read the precise Slack explanation and fix the responsible code or source. A
+rejected draft remains recorded in Drive but its link must not appear in Slack.
 
 ## 7. Repeating live tests
 
@@ -209,3 +209,18 @@ Do not delete run rows or edit the response tab to make a test repeatable. A
 submission has a hard three-attempt ceiling, including its adopted historical
 attempt. Use a fresh dedicated test response once a row reaches the limit. This
 is intentional protection against duplicate flyers and paid retry loops.
+
+A provider failure normally consumes the one image-operation allowance because
+its billing state is unknown. Only when durable evidence proves a request was
+rejected before inference may an operator preview and append a release:
+
+```bash
+sudo -u gable .venv/bin/python -m tools.reconcile_image_reservation \
+  --db /opt/gable/var/gable.db --spend-id SPEND_ID \
+  --reason invalid_request_dimensions --evidence "specific observed evidence"
+```
+
+Verify the preview identifies the exact run, model, and upscale marker, then
+repeat with `--commit`. The original reservation remains in the $50 total, the
+runtime never releases or retries automatically, and the same paused run may
+then be resumed once through `tools.run_row --resume`.

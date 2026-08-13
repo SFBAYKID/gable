@@ -13,6 +13,7 @@ from PIL import Image
 from gable.photos.enhance import (
     EnhancementError,
     EnhancementQualityError,
+    _output_size,
     composition_distance,
     upscale_real_photo,
 )
@@ -76,12 +77,68 @@ def test_gpt_image_2_upscale_preserves_and_returns_exact_flyer_size() -> None:
     assert image_dimensions(result) == (1080, 1350)
     assert post.auth == "Bearer test-key"
     assert post.data["size"] == "1088x1360"
-    assert post.data["quality"] == "medium"
+    assert post.data["quality"] == "high"
     assert "input_fidelity" not in post.data
     filename, uploaded, content_type = post.files["image[]"]
     assert filename == "property.jpg"
     assert content_type == "image/jpeg"
     assert image_dimensions(uploaded) == (1080, 1350)
+
+
+def test_sold_photo_band_is_scaled_above_the_gpt_image_2_pixel_floor() -> None:
+    """The production 1078x504 frame used to send an invalid 1088x512 size."""
+    post = FakePost(_jpeg(1184, 560))
+
+    result = upscale_real_photo(
+        _jpeg(275, 183),
+        api_key="test-key",
+        model="gpt-image-2",
+        target_width=1078,
+        target_height=504,
+        post=post,
+    )
+
+    assert image_dimensions(result) == (1078, 504)
+    assert post.data["size"] == "1184x560"
+    assert 1184 * 560 >= 655_360
+    assert post.data["quality"] == "high"
+
+
+@pytest.mark.parametrize(
+    ("target_width", "target_height", "expected"),
+    [
+        (1, 1, "816x816"),
+        (1024, 640, "1024x640"),
+        (1078, 504, "1184x560"),
+        (1080, 1350, "1088x1360"),
+        (3840, 1279, "3840x1280"),
+        (3840, 1280, "3840x1280"),
+        (3840, 2160, "3840x2160"),
+        (3840, 2161, "3840x2160"),
+        (3841, 2160, "3840x2160"),
+        (10_000, 10_000, "2880x2880"),
+        (6000, 1000, "3840x1280"),
+        (1000, 6000, "1280x3840"),
+    ],
+)
+def test_gpt_image_2_sizes_obey_every_documented_boundary(
+    target_width: int,
+    target_height: int,
+    expected: str,
+) -> None:
+    assert _output_size("gpt-image-2", target_width, target_height) == expected
+    width, height = (int(edge) for edge in expected.split("x"))
+    assert width % 16 == 0
+    assert height % 16 == 0
+    assert max(width, height) <= 3840
+    assert max(width, height) / min(width, height) <= 3
+    assert 655_360 <= width * height <= 8_294_400
+
+
+@pytest.mark.parametrize(("width", "height"), [(0, 504), (1078, 0), (-1, 10)])
+def test_gpt_image_2_size_rejects_nonpositive_edges(width: int, height: int) -> None:
+    with pytest.raises(ValueError, match="target must be positive"):
+        _output_size("gpt-image-2", width, height)
 
 
 def test_full_gpt_image_1_requests_high_input_fidelity() -> None:
@@ -98,6 +155,7 @@ def test_full_gpt_image_1_requests_high_input_fidelity() -> None:
 
     assert post.data["size"] == "1024x1536"
     assert post.data["input_fidelity"] == "high"
+    assert post.data["quality"] == "medium"
 
 
 def test_the_mini_model_is_never_sent_input_fidelity() -> None:

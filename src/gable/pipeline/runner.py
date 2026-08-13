@@ -666,24 +666,17 @@ class Runner:
             result.status = "needs_review"
             result.output_url = output_url
             if not seen.checked:
-                spoken = safe(
-                    "I rendered it, but I could not complete the visual inspection. "
-                    "I have not sent it as finished."
-                )
+                spoken = safe("I rendered it, but I could not complete the visual inspection.")
             elif not seen.confident:
-                spoken = safe(
-                    "I rendered it, but the visual inspection was inconclusive. "
-                    "I have not sent it as finished."
-                )
+                spoken = safe("I rendered it, but the visual inspection was inconclusive.")
             else:
                 spoken = seen.say or verdict.say or safe(f"I rendered it, but {problems[0]}")
             message = safe(
                 "\n".join(
                     [
                         spoken,
-                        *run_notes,
-                        *advisories,
-                        f"Have a look and tell me what to change. <{output_url}|Open it>",
+                        "I have not sent it as finished. I kept the supplied image and draft "
+                        "so this run can be retried without starting over.",
                     ]
                 )
             )

@@ -31,7 +31,8 @@ engineering constraints and the decision history live in `CLAUDE.md` and
    and asks the configured vision model to compare the supplied property photo
    with the visible result.
 7. Only a confident pass is linked as ready. The output is a live Slides file,
-   so Carmen can also correct it directly.
+   so Carmen can also correct it directly. A rejected draft stays internal and
+   its bad link is not offered in Slack.
 
 When a cycle attempts at least two listings, its channel summary counts only
 delivered files as ready and separates paused, failed, and skipped requests.
@@ -127,6 +128,11 @@ The tool creates one recoverable Drive copy, runs the production triage logic,
 prints the result locally, and moves only that temporary copy to Drive trash in
 a `finally` block.
 
+`tools/reconcile_image_reservation.py` is an exceptional operator-only recovery
+tool for a documented provider rejection before model execution. It previews by
+default and needs an exact spend row, reason, evidence, and explicit `--commit`.
+It never refunds the conservative spend reservation or retries anything itself.
+
 ## Important limits
 
 - Perfect output cannot be guaranteed by any current vision model. Gable's
@@ -143,5 +149,6 @@ a `finally` block.
   Slides API does not expose final line-break layout. Actual values are measured
   again, text is read back after mutation, and the rendered image is the final
   gate.
-- A hard cumulative $50 ledger guards connected paid calls. A listing gets at
-  most one image-edit attempt and three fresh run attempts.
+- A hard cumulative $50 ledger guards connected paid calls. A listing gets one
+  actual image-model operation and three fresh run attempts. Only an evidenced,
+  append-only operator release can reconcile a pre-inference request rejection.

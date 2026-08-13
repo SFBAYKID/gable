@@ -7,8 +7,10 @@ from pathlib import Path
 
 import pytest
 
+from gable.agents.website import OfficialProfile, ProfileLookup
 from gable.db import store
 from gable.db.schema import apply_migrations, connect
+from gable.pipeline.vision import Inspection
 from tests.runner_support import Recorder
 from tests.runner_support import record as _record
 from tests.runner_support import runner as _runner
@@ -228,3 +230,60 @@ def test_an_unsafe_text_match_stops_before_photo_placement(db: sqlite3.Connectio
     assert result.status == "needs_review"
     assert rec.photo_placed is False
     assert "did not match exactly once" in result.said[-1]
+
+
+def test_pixelated_mike_render_is_held_without_exposing_the_bad_flyer(
+    db: sqlite3.Connection,
+) -> None:
+    """The visual gate keeps a rejected Drive copy for audit, not for Slack."""
+    submission = _submission(
+        rid="rid-mike-pixelated",
+        email="mike@cornerhouserealty.com",
+        name="Mike Kulnich",
+        request_type="Sold",
+        address="703 Perception Way, Aberdeen, MD 21001",
+        closing_price="615000",
+    )
+    _record(db, submission)
+    db.execute(
+        "INSERT INTO salespeople (email, first_name, last_name, phone, template, synced_at) "
+        "VALUES (?, ?, ?, ?, '', 'now')",
+        ("mike@cornerhouserealty.com", "Mike", "Kulnich", "410.456.3564"),
+    )
+    rec = Recorder(
+        slide_text=["[PROPERTY ADDRESS]", "AGENT NAME", "Phone", "Realtor"],
+        template_label="Sold",
+    )
+    runner = _runner(db, rec)
+    runner.official_contact_lookup = lambda name, email: ProfileLookup(
+        profile=OfficialProfile(
+            name=name,
+            email=email,
+            phone="410.456.3564",
+            title="REALTOR®",
+            source_url="https://cornerhouserealty.com/mike-kulnich/",
+        )
+    )
+    runner.look_at = lambda _run_id, _image: Inspection(
+        looks_right=False,
+        confident=True,
+        problems=["The main property photo is badly pixelated and blurry."],
+    )
+
+    result = runner.run(submission)
+
+    current = db.execute(
+        "SELECT status, output_url FROM runs WHERE run_id = ?", (result.run_id,)
+    ).fetchone()
+    assert result.status == "needs_review"
+    assert current["status"] == "needs_review"
+    assert current["output_url"].endswith("/edit"), "retain the rejected copy for audit"
+    assert result.output_url == current["output_url"]
+    assert len(rec.said) == 1
+    assert "badly pixelated and blurry" in rec.said[0]
+    assert "kept the supplied image and draft" in rec.said[0]
+    assert "without starting over" in rec.said[0]
+    assert "send" not in rec.said[0].lower()
+    assert "larger" not in rec.said[0].lower()
+    assert "Open it" not in rec.said[0]
+    assert current["output_url"] not in rec.said[0]

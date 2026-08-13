@@ -17,21 +17,24 @@ The review also fixed a fail-open edge case where a confident negative visual
 verdict with no explanatory items could otherwise leave the problem list empty
 and deliver.
 
-Ruff, strict Mypy, 892 Pytest tests, Vulture, dependency integrity, diff
-integrity, and the 800-line source ceiling pass. The controlled release target
-is Testing_1 line 48: Mike Kulnich, Sold, 703 Perception Way, Aberdeen, MD 21001.
+Commit `d406059` is deployed in monarch-bot-playground and the service is active.
+The controlled release target is Testing_1 line 48: Mike Kulnich, Sold,
+703 Perception Way, Aberdeen, MD 21001. The same owned-thread run retains Mike's
+exact contact record, filed headshot, current Sold source, and Test_2.jpg.
 
-Commit `84cc543` is the last deployed baseline in monarch-bot-playground, but
-the listener is deliberately stopped while this correction release is held.
-All configured service connections pass. The Testing_1 row-48 run is paused in
-its owned Slack thread with Mike's exact contact record, filed headshot, Sold
-source, and supplied property image retained.
+The first corrected resume automatically fitted the title and phone and replaced
+the sample headshot, but it did not pass: Test_2.jpg is 275×183, the image edit
+sent an invalid 1088×512 request below GPT Image 2's documented minimum, and the
+local fallback was visibly pixelated. The vision gate correctly left the run in
+`needs_review`, but the old outcome wrongly exposed that bad draft's link.
 
-Chase uploaded Test_2.jpg in the owned thread. That upload exposed a poor UX
-loop: the deployed build paused on a second readable text-fit warning and then
-asked Chase to diagnose source fields. The release is held while readable text
-fits and photo crops become automatic one-outcome adjustments; the same image
-and run are retained for the resumed end-to-end proof. The prior
+The next release fixes the exact dimensions to 1184×560, uses high quality,
+keeps a rejected draft's link out of Slack, and adds an append-only operator
+release for the proven pre-inference HTTP 400 without refunding its spend.
+Ruff, strict Mypy over 132 source files, 1,069 tests, Vulture, dependency
+integrity, compileall, diff integrity, and all file ceilings pass. Deployment,
+one evidenced reservation release, and one same-run retry remain before this
+test can be called successful. The prior
 OpenAI exposure remains recorded below, and Slack's settings page also surfaced
 the installed bot token during this audit. Neither secret is repeated or stored
 in the repository. The explicit playground test is using the already-installed

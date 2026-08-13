@@ -27,7 +27,7 @@ from typing import Final
 
 #: Bumped whenever a migration is added. `apply_migrations` uses it to decide
 #: what still needs running.
-SCHEMA_VERSION: Final[int] = 6
+SCHEMA_VERSION: Final[int] = 7
 
 #: Each migration is (version, sql). They run in order and only once. Never edit
 #: one that has shipped — add another, the same rule as the decision log.
@@ -214,6 +214,33 @@ MIGRATIONS: Final[tuple[tuple[int, str], ...]] = (
         -- both have a row 48, and the form itself remains read-only.
         ALTER TABLE submissions
             ADD COLUMN source_tab TEXT NOT NULL DEFAULT '';
+        """,
+    ),
+    (
+        7,
+        """
+        -- Reservations remain in the spend total even when a provider rejects
+        -- a request before model execution. A human operator may append one
+        -- narrowly evidenced release so that rejection does not consume the
+        -- listing's one actual image-model operation forever.
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_spend_id_run
+            ON spend (id, run_id);
+
+        CREATE TABLE IF NOT EXISTS operation_releases (
+            id                INTEGER PRIMARY KEY AUTOINCREMENT,
+            spend_id          INTEGER NOT NULL UNIQUE,
+            run_id            TEXT NOT NULL REFERENCES runs(run_id),
+            operation_detail  TEXT NOT NULL CHECK (
+                operation_detail = 'conservative real-photo upscale reservation'
+            ),
+            reason            TEXT NOT NULL CHECK (length(trim(reason)) > 0),
+            evidence          TEXT NOT NULL CHECK (length(trim(evidence)) >= 20),
+            at                TEXT NOT NULL,
+            FOREIGN KEY (spend_id, run_id) REFERENCES spend(id, run_id)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_operation_releases_run
+            ON operation_releases (run_id, operation_detail);
         """,
     ),
 )
