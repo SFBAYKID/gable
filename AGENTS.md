@@ -229,7 +229,7 @@ Name the listing, name the field, say why it matters — as a sentence.
 
 Status is `needs_info`. The listing is **paused, not failed** — it waits
 indefinitely. Carmen or Chase fixes the form row, contact workbook, or Head
-Shots folder, then replies that it is updated or uses `/gable run`. Gable
+Shots folder, then replies in the listing thread that it is updated. Gable
 refreshes those sources before re-entering the same run.
 
 ### 2.8 Working — the thinking indicator
@@ -257,12 +257,6 @@ cleanup call also runs on failure so Gable cannot remain stuck thinking.
 This is not a message, reaction, placeholder, or emoji. It must never be edited
 into the reply or replaced with a posted animation. The initial automatic form
 poll has no user message or Slack thread to attach a native waiting state to.
-
-A slash command also has no message timestamp, so Slack gives Gable no thread
-to which the native state can attach. It is acknowledged immediately with an
-ephemeral result. When `/gable run` rechecks an already-paused listing, the
-queued work uses that listing's existing owned thread and the same native
-waiting sequence there.
 
 Two rules keep this useful rather than noisy:
 
@@ -304,22 +298,19 @@ next message.
 
 ---
 
-## 3. Commands
+## 3. Conversation
 
-| Command | Behavior |
-|---|---|
-| `/gable status` | Pending, ready, and failed counts; last poll time |
-| `/gable run` | Refresh the Sheet and templates, then re-check each latest paused listing in its existing run |
-| `/gable retry run ID` | Re-run one listing from scratch |
-| `/gable templates` | List the current Google Slides files in `Generic Templates` |
-| `/gable pause` / `/gable resume` | Stop and start polling |
-| `@gable <question>` | Free-form; answers only about its own state and data |
+Gable has no slash commands. Carmen and Chase mention `@Gable` to begin, then
+use ordinary language inside the owned thread. “Can you rerun this project?”
+reloads the current source and continues a paused listing. “Update the image”
+is ambiguous and gets a clarifying question. Polling, retry counters, template
+inventory, and service controls are implementation details, not user commands.
 
-The command, mention, thread-reply, and shared-photo boundaries accept only the
-two configured stable Slack user IDs for Carmen and Chase. A display name is
-never an access check.
+The mention, thread-reply, and shared-photo boundaries accept only the two
+configured stable Slack user IDs for Carmen and Chase. A display name is never
+an access check.
 
-`@gable` is not a general-purpose chatbot. If asked something outside its
+`@Gable` is not a general-purpose chatbot. If asked something outside its
 domain, it says so briefly rather than improvising.
 
 ---
@@ -387,12 +378,12 @@ needs_photo · needs_template · needs_info · needs_review
 ```
 
 The four `needs_*` states are **paused**, not failed. They wait for Carmen
-indefinitely and are re-checked on `/gable run`:
+indefinitely and are re-checked from their owned Slack thread:
 
 | State | What is missing | How it clears |
 |---|---|---|
 | `needs_photo` | No supplied hero image, or the upload could not be used | Carmen or Chase uploads one in the owned thread |
-| `needs_template` | No exact request-type design, unsafe structure, unresolved new-template audit, or measured capacity warning | The source is fixed or added, then its thread or `/gable run` rechecks it |
+| `needs_template` | No exact request-type design, unsafe structure, unresolved new-template audit, or measured capacity warning | The source is fixed or added, then Carmen or Chase asks in its thread to check again |
 | `needs_info` | A required form, contact-workbook, or headshot value is missing | The source record or Head Shots folder is fixed, then the run is rechecked |
 | `needs_review` | Build/readback/photo placement/render inspection could not prove the output is right | Carmen or Chase resolves the named problem and requests a recheck or retry |
 

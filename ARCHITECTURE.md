@@ -326,7 +326,8 @@ specific field, naming the listing:
 
 It never invents a value and never silently drops a field. Status is
 `needs_info`, and the listing is **paused, not failed** — it waits indefinitely
-and re-enters on `/gable run`.
+and re-enters when Carmen or Chase replies in its owned thread after correcting
+the form or roster source.
 
 Agent details live only in the Drive sources; Gable never substitutes the office
 number or writes web findings into them.
@@ -534,8 +535,8 @@ Gable never publishes or exports the file. Carmen decides what leaves the
 building.
 
 For two or more attempts, one summary counts only `delivered` as ready.
-Operator-only `/gable` commands expose status, recheck, retry, templates, pause,
-and resume.
+There is no operator console in Slack. Mentions and owned-thread replies are the
+interface; polling and retry state stay internal.
 
 ---
 
@@ -594,8 +595,6 @@ This covers initial mentions, plain follow-ups in an existing thread, edit
 actions, and shared photos. A posted message, reaction, or edited placeholder is
 not equivalent: none receives Slack's native purple treatment, and placeholders
 can survive a failure. The automatic form poll has no user thread to attach to.
-Slash commands also have no message timestamp: they acknowledge ephemerally,
-while queued rechecks attach the same native state to the owned listing thread.
 
 Two rules keep this from being noise:
 
@@ -798,3 +797,4 @@ Append to this table. Do not rewrite history — if a decision reverses, add a n
 | 2026-08-12 | Replacement photos return to the source frame's **original z-order boundary** | Sending every hero to the back hid it behind imported raster art, while bringing every headshot to the front covered decorations. A new image starts frontmost; page-element order now identifies only the elements originally above the deleted frame and brings that set back to the front, leaving the replacement at the frame's former boundary while preserving relative order. |
 | 2026-08-12 | Backfill, state transitions, and startup recovery are transactional | Catalogue adoption and its ready marker commit together; an old orphan marker is repaired rather than trusted. Runs interrupted by process death are marked failed on boot, row corrections reconcile by form timestamp, and duplicate active starts are refused before paid work begins. |
 | 2026-08-12 | GPT-5.6 conversation tools use the **Responses API with explicit reasoning** | A live check found Chat Completions rejects Sol function tools at its default reasoning level. The Responses API is OpenAI's recommended reasoning/tool path; Gable now requests medium reasoning, parses direct function calls, fails plainly on incomplete/refused output, reserves ten conservative cents instead of the obsolete mini-model penny, and was verified live to ask whether “update the image” means the hero or headshot. |
+| 2026-08-13 | **Reverses the `/gable` operator-command surface:** Slack is natural-language only | Chase rejected status, run, retry, templates, pause, and resume as user work the product should not require. The manifest no longer declares a slash command or `commands` scope; Bolt no longer registers one; the command service and poller's operator queue and pause controls are deleted. Mentions and owned-thread replies remain, including a plain-language request to reload a corrected source and continue a paused listing. |

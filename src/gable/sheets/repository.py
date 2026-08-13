@@ -249,10 +249,10 @@ def new_submissions(connection: Connection, submissions: list[Submission]) -> li
         submissions: Everything currently on the sheet.
 
     Returns:
-        Submissions that have never had a run attempt. Paused and failed work
-        resumes or retries only through an explicit operator action. Empty
-        until the backfill has been adopted — a poller that has not been told
-        which rows are history must not guess.
+        Submissions that have never had a run attempt. Paused work resumes only
+        from its owned Slack thread, and failed work is not restarted by the
+        poller. Empty until the backfill has been adopted — a poller that has
+        not been told which rows are history must not guess.
 
     Raises:
         sqlite3.Error: on a query failure.

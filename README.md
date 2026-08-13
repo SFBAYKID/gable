@@ -6,7 +6,7 @@ never publishes outside the configured Gable channel, and never calls a flyer
 ready unless its deterministic checks and rendered-image inspection both pass.
 
 The current implementation and its limits are documented in
-`AUDIT_2026-08-12.md`. Runtime language and safety rules live in `AGENTS.md`;
+`AUDIT_2026-08-13.md`. Runtime language and safety rules live in `AGENTS.md`;
 engineering constraints and the decision history live in `CLAUDE.md` and
 `ARCHITECTURE.md`.
 
@@ -72,16 +72,14 @@ template rather than inferring placement from page order.
 ## Slack operations
 
 Only the two stable user IDs in `GABLE_SLACK_ALLOWED_USER_IDS` can mention,
-reply to, upload to, or operate Gable. The `/gable` command supports:
+reply to, upload to, or operate Gable. There are no slash commands and no
+operator console in Slack. Mention `@Gable` to start a conversation, then reply
+normally inside the Gable-owned thread. Natural requests such as “can you rerun
+this project?” reload the current source and continue the same paused listing;
+ambiguous instructions produce one clarifying question instead of a guess.
 
-- `status` — latest-listing pending, ready, and failed counts plus poll state;
-- `run` — refresh sources and recheck current paused listings in the same run;
-- `retry run ID` — queue one fresh bounded attempt for the latest run;
-- `templates` — list current native Slides files in `Generic Templates`;
-- `pause` and `resume` — control scheduled polling without disabling threads.
-
-Slash replies are ephemeral. A queued paused-listing recheck uses the ordinary
-native purple waiting state in that listing's owned thread.
+Polling starts with the service and follows the configured schedule. A Slack
+user cannot pause it, force it, list internal state, or start arbitrary retries.
 
 ## Setup
 
@@ -105,7 +103,7 @@ Fill `.env` before running connection checks. Never commit it or place the
 service-account JSON inside the repository.
 
 Apply [slack/manifest.json](slack/manifest.json) and reinstall the Slack app when
-the command or scope set changes. Production startup requires the three Drive
+the event or scope set changes. Production startup requires the three Drive
 locations, the OpenAI key used by the fail-closed visual gate, and exactly two
 allowed Slack user IDs; legacy Slack OAuth client variables are rejected.
 
@@ -113,6 +111,9 @@ allowed Slack user IDs; legacy Slack OAuth client variables are rejected.
 
 `make check` is the definition-of-done gate: Ruff formatting and lint, strict
 Mypy, and the full Pytest suite.
+
+[`TESTING.md`](TESTING.md) maps each feature to an exact automated or live test,
+including the safe one-row Slack-to-Slides workflow in the playground channel.
 
 To exercise the real new-template path without touching the response Sheet or
 posting to Slack, copy and inspect one existing source through a temporary

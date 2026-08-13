@@ -22,7 +22,6 @@ from __future__ import annotations
 import logging
 import signal
 import threading
-from collections import deque
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -39,7 +38,6 @@ logger = logging.getLogger("gable.poller")
 #: How many submissions one pass will start. A backfill that slipped through
 #: would otherwise arrive all at once.
 MAX_PER_PASS: Final[int] = 5
-MAX_QUEUED_OPERATOR_TASKS: Final[int] = 25
 
 
 @dataclass(frozen=True, slots=True)
@@ -65,27 +63,13 @@ class Poller:
     #: Receives only work attempted in this pass, after every listing has had
     #: its own precise thread outcome. It never changes an individual run.
     on_batch: Callable[[tuple[BatchOutcome, ...]], None] = lambda _outcomes: None
-    #: Starts one explicit fresh attempt by source run id. Operator requests are
-    #: drained on the poller's main thread, never inside a Slack worker.
-    on_retry: Callable[[str], None] = lambda _run_id: None
-    #: Re-enters one existing human-paused run without consuming a new attempt.
-    on_resume: Callable[[str], None] = lambda _run_id: None
     #: Reviews newly added source files. The first call adopts the existing
     #: catalogue silently, so enabling this cannot flood Slack on deployment.
     scan_templates: Callable[[], int] = lambda: 0
     schedule: PollSchedule = field(default_factory=PollSchedule)
     max_per_pass: int = MAX_PER_PASS
     _stopping: bool = False
-    _paused: threading.Event = field(default_factory=threading.Event, init=False, repr=False)
     _wake: threading.Event = field(default_factory=threading.Event, init=False, repr=False)
-    _force_pass: threading.Event = field(default_factory=threading.Event, init=False, repr=False)
-    _operator_lock: threading.Lock = field(default_factory=threading.Lock, init=False, repr=False)
-    _operator_queue: deque[tuple[str, str]] = field(default_factory=deque, init=False, repr=False)
-    _queued_operator_tasks: set[tuple[str, str]] = field(
-        default_factory=set, init=False, repr=False
-    )
-    _last_poll_at: datetime | None = field(default=None, init=False, repr=False)
-    _source_refresh_succeeded: bool = field(default=False, init=False, repr=False)
 
     def stop(self, _signum: int | None = None, _frame: FrameType | None = None) -> None:
         """Ask the loop to finish the current pass and exit.
@@ -96,67 +80,6 @@ class Poller:
         logger.info("stop requested; finishing this pass")
         self._stopping = True
         self._wake.set()
-
-    @property
-    def is_paused(self) -> bool:
-        """Return whether scheduled polling is paused by an operator."""
-        return self._paused.is_set()
-
-    @property
-    def last_poll_at(self) -> datetime | None:
-        """Return when the most recent Sheet pass finished in this process."""
-        return self._last_poll_at
-
-    def pause(self) -> None:
-        """Stop scheduled passes after any pass already running finishes."""
-        self._paused.set()
-        self._wake.set()
-        logger.info("scheduled polling paused by an operator")
-
-    def resume(self) -> None:
-        """Resume scheduled polling and request an immediate catch-up pass."""
-        self._paused.clear()
-        self.request_pass()
-        logger.info("scheduled polling resumed by an operator")
-
-    def request_pass(self) -> None:
-        """Wake the main loop for one immediate pass, even while paused."""
-        self._force_pass.set()
-        self._wake.set()
-
-    def queue_retry(self, run_id: str) -> bool:
-        """Queue one bounded fresh-run request on the main poller thread.
-
-        Args:
-            run_id: Existing run whose submission should receive a fresh attempt.
-
-        Returns:
-            True when newly queued. False for a duplicate or full queue.
-
-        Raises:
-            Nothing.
-        """
-        return self._queue_operator_task("retry", run_id)
-
-    def queue_resume(self, run_id: str) -> bool:
-        """Queue one existing paused run for a source-refresh and recheck."""
-        return self._queue_operator_task("resume", run_id)
-
-    def _queue_operator_task(self, action: str, run_id: str) -> bool:
-        """Add one unique bounded task and force the source refresh before it."""
-        task = (action, run_id)
-        with self._operator_lock:
-            if (
-                task in self._queued_operator_tasks
-                or len(self._operator_queue) >= MAX_QUEUED_OPERATOR_TASKS
-            ):
-                return False
-            self._operator_queue.append(task)
-            self._queued_operator_tasks.add(task)
-        # The pass refreshes in-place form corrections and the current template
-        # catalogue before either kind of operator-requested work reads them.
-        self.request_pass()
-        return True
 
     def ready(self) -> tuple[bool, str]:
         """Whether it is safe to start polling.
@@ -186,11 +109,7 @@ class Poller:
             Nothing. A pass that fails is logged and the loop continues — a
             transient Sheets error must not stop the watcher.
         """
-        self._source_refresh_succeeded = False
-        try:
-            return self._one_pass()
-        finally:
-            self._last_poll_at = datetime.now(UTC)
+        return self._one_pass()
 
     def _one_pass(self) -> int:
         """Perform one pass behind the timestamp-recording public boundary."""
@@ -227,10 +146,6 @@ class Poller:
         except Exception:
             logger.exception("could not reconcile the current sheet rows this pass")
             return 0
-        # Operator work may use the stored request only after this pass has
-        # refreshed every row successfully. A failed read must not rebuild from
-        # stale form data merely because the request was already queued.
-        self._source_refresh_succeeded = True
         if not pending:
             return 0
 
@@ -261,48 +176,10 @@ class Poller:
                 logger.exception("could not post the batch summary")
         return started
 
-    def _drain_operator_tasks(self, limit: int) -> tuple[int, int]:
-        """Run a bounded queue snapshot on the thread owning Google clients.
-
-        ``limit`` is captured before the source refresh begins. Work arriving
-        during that refresh waits for the next pass, guaranteeing that its pass
-        began after the operator asked for it.
-        """
-        resumed = 0
-        handled = 0
-        processed = 0
-        while not self._stopping and processed < limit:
-            with self._operator_lock:
-                if not self._operator_queue:
-                    return resumed, handled
-                action, run_id = self._operator_queue.popleft()
-                self._queued_operator_tasks.discard((action, run_id))
-            processed += 1
-            try:
-                if action == "resume":
-                    self.on_resume(run_id)
-                    resumed += 1
-                else:
-                    self.on_retry(run_id)
-                    handled += 1
-            except Exception:
-                logger.exception("operator %s for %s failed", action, run_id)
-        return resumed, handled
-
-    def _operator_task_waiting(self) -> bool:
-        """Return whether queued operator work still needs the main loop."""
-        with self._operator_lock:
-            return bool(self._operator_queue)
-
-    def _operator_task_count(self) -> int:
-        """Return a locked snapshot of how much operator work is queued."""
-        with self._operator_lock:
-            return len(self._operator_queue)
-
     def _wait(self, timeout: float | None) -> None:
-        """Wait until schedule time or an operator request without losing a wakeup."""
+        """Wait until the next scheduled pass or a shutdown request."""
         self._wake.clear()
-        if self._stopping or self._force_pass.is_set():
+        if self._stopping:
             return
         self._wake.wait(timeout=timeout)
 
@@ -328,33 +205,9 @@ class Poller:
         logger.info("watching the sheet, %s", self.schedule.describe(now()))
 
         while not self._stopping:
-            queued_before_refresh = self._operator_task_count()
-            forced = self._force_pass.is_set()
-            if forced:
-                self._force_pass.clear()
-            should_refresh = not self.is_paused or forced or queued_before_refresh > 0
-            if should_refresh:
-                started = self.one_pass()
-                if started:
-                    logger.info("started %d submission(s)", started)
-            resumed = retried = 0
-            if queued_before_refresh and self._source_refresh_succeeded:
-                resumed, retried = self._drain_operator_tasks(queued_before_refresh)
-            if resumed:
-                logger.info("rechecked %d paused run(s)", resumed)
-            if retried:
-                logger.info("started %d operator retry request(s)", retried)
-            if self._force_pass.is_set():
-                continue
-            # A failed source refresh leaves operator work queued, but waits the
-            # normal bounded interval before trying again. Immediate looping
-            # here would turn a Sheets outage into a quota-burning retry storm.
-            operator_waiting = self._operator_task_waiting()
-            timeout = (
-                None
-                if self.is_paused and not operator_waiting
-                else self.schedule.interval_seconds(now())
-            )
-            self._wait(timeout)
+            started = self.one_pass()
+            if started:
+                logger.info("started %d submission(s)", started)
+            self._wait(self.schedule.interval_seconds(now()))
         logger.info("stopped cleanly")
         return 0

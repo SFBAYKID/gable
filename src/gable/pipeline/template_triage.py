@@ -171,7 +171,7 @@ class TemplateTriage:
             )
             # A deleted or moved source must revoke an older ready verdict. The
             # picker also fails closed, but persisting the real state keeps
-            # listing clearance and operator status truthful between scans.
+            # listing clearance truthful between scans.
             store.record_template_audit(
                 self.connection,
                 existing.file_id,

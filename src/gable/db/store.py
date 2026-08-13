@@ -20,19 +20,16 @@ from gable.db.run_store import (
     PAUSED,
     TERMINAL,
     RunAlreadyActiveError,
-    RunCounts,
     RunLimitReachedError,
     RunRow,
     claim_paused_run,
     latest_run,
-    paused_runs,
     recover_interrupted_runs,
     run_attempt_count,
     run_by_id,
     run_for_thread,
     set_status,
     start_run,
-    status_counts,
 )
 from gable.db.template_store import (
     TemplateAudit,
@@ -50,14 +47,12 @@ __all__ = [
     "PAUSED",
     "TERMINAL",
     "RunAlreadyActiveError",
-    "RunCounts",
     "RunLimitReachedError",
     "RunRow",
     "TemplateAudit",
     "adopt_template_catalog",
     "claim_paused_run",
     "latest_run",
-    "paused_runs",
     "record_template_audit",
     "recover_interrupted_runs",
     "run_attempt_count",
@@ -65,7 +60,6 @@ __all__ = [
     "run_for_thread",
     "set_status",
     "start_run",
-    "status_counts",
     "template_audit",
     "template_catalog_adopted",
     "template_for_thread",
@@ -265,8 +259,8 @@ def has_been_handled(connection: sqlite3.Connection, response_row_id: str) -> bo
 
     Returns:
         True after any attempt exists. Scheduled polling starts only genuinely
-        unseen rows; human-paused work resumes the same run, and fresh retries
-        are explicit operator actions.
+        unseen rows; human-paused work resumes the same run only from its owned
+        Slack thread, and failed work never restarts silently.
 
     Raises:
         sqlite3.Error: on a query failure.

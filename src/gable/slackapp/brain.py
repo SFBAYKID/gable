@@ -483,9 +483,18 @@ def _rebuild_shortcut(message: str) -> Decision | None:
         for character in message.casefold()
     )
     folded = " ".join(words_only.split())
+    for greeting in ("hey gable ", "hi gable ", "hey ", "hi ", "gable "):
+        if folded.startswith(greeting):
+            folded = folded.removeprefix(greeting)
+            break
     if folded in {
         "yes run again",
         "run again",
+        "rerun this project",
+        "can you rerun this project",
+        "rerun this flyer",
+        "can you rerun this flyer",
+        "rebuild this flyer",
         "i updated the template",
         "check the template again",
         "check the updated template",

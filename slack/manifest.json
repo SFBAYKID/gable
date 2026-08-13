@@ -9,15 +9,7 @@
     "bot_user": {
       "display_name": "Gable",
       "always_online": true
-    },
-    "slash_commands": [
-      {
-        "command": "/gable",
-        "description": "Check status, force a run, retry a listing, or list templates",
-        "usage_hint": "status | run | retry run ID | templates | pause | resume",
-        "should_escape": false
-      }
-    ]
+    }
   },
   "oauth_config": {
     "scopes": {
@@ -25,7 +17,6 @@
         "app_mentions:read",
         "channels:history",
         "chat:write",
-        "commands",
         "files:read",
         "users:read"
       ]

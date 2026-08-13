@@ -16,6 +16,9 @@ from gable.slackapp.brain import think
     [
         "yes, run again",
         "run again",
+        "Hey, can you rerun this project?",
+        "Can you rerun this flyer?",
+        "Rebuild this flyer",
         "I updated the template",
         "check the template again",
         "check the updated template",

@@ -136,15 +136,14 @@ class PollSchedule:
         return self.quiet_interval_seconds
 
     def describe(self, moment: datetime, zone: tzinfo | None = None) -> str:
-        """A one-line explanation for `/gable status` and the startup log.
+        """A one-line explanation for the startup log.
 
         Args:
             moment: The instant to describe.
             zone: Override for the business-hours zone.
 
         Returns:
-            Something like `every 2m (business hours)`. Written for a human
-            reading Slack, not for a log parser.
+            Something like `every 2m (business hours)` for a human-readable log.
 
         Raises:
             Nothing.

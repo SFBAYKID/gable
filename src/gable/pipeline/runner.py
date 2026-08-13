@@ -594,7 +594,7 @@ class Runner:
         elif not seen.confident:
             problems.append("the visual inspection was inconclusive")
         elif not seen.looks_right:
-            problems.extend(seen.problems)
+            problems.extend(seen.problems or ["the visual inspection found a problem"])
         if unreadable:
             problems.append(
                 f"the {unreadable[0].text[:24]} had to be shrunk so far it is hard to read"

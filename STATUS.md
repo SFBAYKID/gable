@@ -1,6 +1,30 @@
 # Gable — status, and what's needed from Chase
 
-Last updated 2026-08-12 by the building agent.
+Last updated 2026-08-13 by the building agent.
+
+## 2026-08-13: natural-language Slack and current release gate
+
+The current review is in `AUDIT_2026-08-13.md`; the exact verification sequence
+is in `TESTING.md`. The `/gable` declaration, `commands` OAuth scope, Bolt
+handler, command service, operator queue, poll pause/resume controls, and their
+command-only database queries are removed. The saved Slack app manifest was
+updated successfully and its Slash Commands page now has no configured command.
+
+Owned-thread natural language remains. Chase's exact sentence, “Hey, can you
+rerun this project?”, deterministically reloads the current source and resumes a
+paused run. The full gate caught and fixed the greeting-normalization mismatch.
+The review also fixed a fail-open edge case where a confident negative visual
+verdict with no explanatory items could otherwise leave the problem list empty
+and deliver.
+
+Ruff, strict Mypy, 892 Pytest tests, Vulture, dependency integrity, diff
+integrity, and the 800-line source ceiling pass. The live release row is Form
+Responses 1 line 47: Mike Kulnich, Sold, 703 Perception Way, Aberdeen, MD 21001.
+
+The final deployment and paid end-to-end run require credential rotation first.
+The prior OpenAI exposure remains recorded below, and Slack's settings page also
+surfaced the installed bot token during this audit. Neither secret is repeated
+or stored in the repository.
 
 ## 2026-08-12 current quality gate
 

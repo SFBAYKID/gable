@@ -332,6 +332,7 @@ gable/
 ├── ARCHITECTURE.md              # system design, data model, decisions
 ├── AGENTS.md                    # runtime agent behavior and Slack contract
 ├── README.md                    # setup and operations
+├── TESTING.md                   # repeatable unit, integration and live checks
 ├── .env.example                 # every variable, documented, no real values
 ├── .gitignore                   # .env, *.json keys, __pycache__, .venv
 ├── pyproject.toml
@@ -388,7 +389,6 @@ gable/
 │   │   ├── app.py               # Socket Mode listener
 │   │   ├── batches.py           # ready-only multi-listing summary
 │   │   ├── brain.py             # reads intent, picks a tool, asks when unsure
-│   │   ├── commands.py          # bounded operator command service
 │   │   ├── editing.py           # execute edits on the thread's Slides file
 │   │   ├── photos.py            # Slack upload to fitted same-run resume
 │   │   ├── routing.py           # keep ordinary replies inside Gable-owned threads

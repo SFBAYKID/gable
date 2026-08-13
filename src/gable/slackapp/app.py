@@ -63,7 +63,6 @@ ProgressReporter = Callable[[str], None]
 FileShareHandler = Callable[[dict[str, Any], Any, ProgressReporter], str]
 ActionHandler = Callable[[Decision, str, ProgressReporter], str]
 Thinker = Callable[..., Decision]
-CommandHandler = Callable[[str], tuple[str, ...]]
 
 ACTION_STAGES: Final[dict[str, str]] = {
     "set_font_size": "is updating the flyer text...",
@@ -403,67 +402,10 @@ def answer_thread_reply(
             logger.exception("could not deliver the thread fallback either")
 
 
-def answer_slash_command(
-    command: dict[str, Any],
-    ack: Callable[..., Any],
-    respond: Callable[..., Any],
-    handler: CommandHandler | None,
-    *,
-    allowed_channel: str,
-    allowed_user_ids: frozenset[str],
-) -> None:
-    """Acknowledge and route one operator-only ``/gable`` request.
-
-    Slack requires acknowledgement within three seconds, before database or
-    Drive work. The business operation lives in ``slackapp.commands``; this
-    boundary only enforces channel and speaker ownership and posts its safe
-    ephemeral result.
-
-    Args:
-        command: Bolt slash-command payload.
-        ack: Bolt acknowledgement function.
-        respond: Bolt response-URL helper.
-        handler: Parsed command service, or None during isolated bootstrap.
-        allowed_channel: Gable's one configured channel.
-        allowed_user_ids: Carmen and Chase's stable Slack user IDs.
-
-    Raises:
-        Nothing. Unauthorized commands are acknowledged silently; operational
-        failures receive a plain ephemeral sentence.
-    """
-    # Vendor contract: commands must be acknowledged before slow work.
-    # https://docs.slack.dev/tools/bolt-python/concepts/commands/
-    ack()
-    if allowed_channel and str(command.get("channel_id") or "") != allowed_channel:
-        return
-    if not speaker_allowed(str(command.get("user_id") or ""), allowed_user_ids):
-        return
-    if handler is None:
-        respond(
-            text="Gable's operator commands are not available right now.",
-            response_type="ephemeral",
-        )
-        return
-    try:
-        messages = handler(str(command.get("text") or ""))
-        for message in messages:
-            respond(text=safe_reply(message), response_type="ephemeral")
-    except Exception:
-        logger.exception("a slash command response failed")
-        respond(
-            text=(
-                "I could not deliver the command result. Check Gable's status before "
-                "trying it again."
-            ),
-            response_type="ephemeral",
-        )
-
-
 def build_app(
     bot_token: str,
     file_share_handler: FileShareHandler | None = None,
     action_handler: ActionHandler | None = None,
-    command_handler: CommandHandler | None = None,
     allowed_channel: str = "",
     allowed_user_ids: frozenset[str] = frozenset(),
     thinker: Thinker = think,
@@ -475,7 +417,6 @@ def build_app(
         file_share_handler: Production photo workflow. Optional so import and
             isolated conversation tests need no Google or database clients.
         action_handler: Executes model-selected edits against a thread's flyer.
-        command_handler: Executes the six documented operator subcommands.
         allowed_channel: The only channel Gable may answer. Blank preserves the
             isolated app bootstrap used by connection checks.
         allowed_user_ids: The only two people Gable may answer in production.
@@ -498,18 +439,6 @@ def build_app(
 
     app = App(token=bot_token, signing_secret="", logger=logger)
     thread_ownership = ThreadOwnership()
-
-    @app.command("/gable")
-    def handle_command(command: dict[str, Any], ack: Any, respond: Any) -> None:  # noqa: ANN401
-        """Acknowledge immediately, then delegate the requested operation."""
-        answer_slash_command(
-            command,
-            ack,
-            respond,
-            command_handler,
-            allowed_channel=allowed_channel,
-            allowed_user_ids=allowed_user_ids,
-        )
 
     @app.event("app_mention")
     def handle_mention(event: dict[str, Any], say: Any, client: Any) -> None:  # noqa: ANN401

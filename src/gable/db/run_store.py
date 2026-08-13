@@ -1,4 +1,4 @@
-"""Persist flyer-run attempts, transitions, and operator-facing counts.
+"""Persist flyer-run attempts and append-only transitions.
 
 Run state is a separate concern from submissions, cached facts, and spend.  It
 also has the highest write frequency in the database layer, so keeping it here
@@ -110,15 +110,6 @@ class RunRow:
         return self.status in PAUSED
 
 
-@dataclass(frozen=True, slots=True)
-class RunCounts:
-    """Latest-listing counts shown by the operator status command."""
-
-    pending: int = 0
-    ready: int = 0
-    failed: int = 0
-
-
 def run_attempt_count(connection: sqlite3.Connection, response_row_id: str) -> int:
     """Count attempts already recorded for one submission.
 
@@ -197,8 +188,8 @@ def recover_interrupted_runs(connection: sqlite3.Connection) -> int:
 
     This runs once during production construction, before the new poller or
     Slack listener can own work. Ordinary polling never treats a pending row as
-    permission to retry; after a restart the operator can inspect and retry the
-    explained failure without risking two live workers on one listing.
+    permission to retry; the explained failure remains visible for diagnosis
+    without risking two live workers on one listing.
     """
     placeholders = ",".join("?" * len(ACTIVE))
     rows = connection.execute(
@@ -321,11 +312,11 @@ def latest_run(connection: sqlite3.Connection, response_row_id: str) -> RunRow |
 
 
 def run_by_id(connection: sqlite3.Connection, run_id: str) -> RunRow | None:
-    """Return one exact run for an operator retry request.
+    """Return one exact run by its immutable identifier.
 
     Args:
         connection: Open Gable database connection.
-        run_id: Exact run identifier supplied by Chase or Carmen.
+        run_id: Exact run identifier.
 
     Returns:
         Matching run, or ``None``.
@@ -348,78 +339,6 @@ def run_for_thread(connection: sqlite3.Connection, thread_ts: str) -> RunRow | N
         (thread_ts,),
     ).fetchone()
     return _to_run(row) if row else None
-
-
-def paused_runs(connection: sqlite3.Connection) -> list[RunRow]:
-    """Return each submission's latest run when it is human-paused.
-
-    An older paused attempt must not re-enter after a newer attempt has already
-    failed, skipped, or delivered that submission.
-    """
-    placeholders = ",".join("?" * len(PAUSED))
-    rows = connection.execute(
-        f"""
-        WITH ranked AS (
-            SELECT {_RUN_COLUMNS}, created_at, rowid,
-                   ROW_NUMBER() OVER (
-                       PARTITION BY response_row_id
-                       ORDER BY created_at DESC, rowid DESC
-                   ) AS position
-              FROM runs
-        )
-        SELECT {_RUN_COLUMNS}
-          FROM ranked
-         WHERE position = 1 AND status IN ({placeholders})
-         ORDER BY created_at, rowid
-        """,
-        tuple(sorted(PAUSED)),
-    ).fetchall()
-    return [_to_run(row) for row in rows]
-
-
-def status_counts(connection: sqlite3.Connection) -> RunCounts:
-    """Count listings by their latest attempt for ``/gable status``.
-
-    Older failed attempts do not inflate the failure count after a later run is
-    delivered. ``skipped`` backfill rows are history and appear in no count.
-
-    Args:
-        connection: Open Gable database connection.
-
-    Returns:
-        Pending, delivered-ready, and failed listing counts.
-
-    Raises:
-        sqlite3.Error: On a query failure.
-    """
-    row = connection.execute(
-        """
-        WITH ranked AS (
-            SELECT status,
-                   ROW_NUMBER() OVER (
-                       PARTITION BY response_row_id
-                       ORDER BY created_at DESC, rowid DESC
-                   ) AS position
-              FROM runs
-        ), latest AS (
-            SELECT status FROM ranked WHERE position = 1
-        )
-        SELECT
-            COALESCE(SUM(CASE
-                WHEN status NOT IN ('delivered', 'failed', 'skipped') THEN 1 ELSE 0 END), 0
-            ) AS pending,
-            COALESCE(SUM(CASE WHEN status = 'delivered' THEN 1 ELSE 0 END), 0) AS ready,
-            COALESCE(SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END), 0) AS failed
-          FROM latest
-        """
-    ).fetchone()
-    if row is None:
-        return RunCounts()
-    return RunCounts(
-        pending=int(row["pending"]),
-        ready=int(row["ready"]),
-        failed=int(row["failed"]),
-    )
 
 
 def _to_run(row: sqlite3.Row) -> RunRow:

@@ -570,6 +570,23 @@ def test_a_flyer_the_vision_pass_rejects_is_not_delivered(db: sqlite3.Connection
     assert any("cut off" in said for said in rec.said)
 
 
+def test_a_bare_negative_vision_verdict_cannot_silently_deliver(
+    db: sqlite3.Connection,
+) -> None:
+    """A strict schema does not require a problem sentence with a false verdict."""
+    from gable.pipeline.vision import Inspection
+
+    submission = _submission(rid="rid-vision-empty-problem")
+    _record(db, submission)
+    runner = _runner(db, Recorder())
+    runner.look_at = lambda _run_id, _image: Inspection(looks_right=False, confident=True)
+
+    result = runner.run(submission)
+
+    assert result.status == "needs_review"
+    assert any("looks off" in message for message in result.said)
+
+
 def test_a_vision_check_that_could_not_run_blocks_delivery(
     db: sqlite3.Connection,
 ) -> None:
