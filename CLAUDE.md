@@ -370,6 +370,7 @@ gable/
 │   │   ├── brain.py             # reads intent, picks a tool, asks when unsure
 │   │   ├── editing.py           # execute edits on the thread's Slides file
 │   │   ├── photos.py            # Slack upload to fitted same-run resume
+│   │   ├── routing.py           # keep ordinary replies inside Gable-owned threads
 │   │   ├── runtime.py           # production Slack + poller assembly
 │   │   ├── status.py            # a working indicator that cannot break the work
 │   │   └── style.py             # the house style, enforced

@@ -13,7 +13,9 @@ trusted to the caller:
 2. **A handler never raises into Slack.** An unhandled exception in an event
    handler is a message that silently never arrives, which reads to Carmen as
    Gable ignoring her. Everything is caught and turned into a sentence.
-3. **Gable posts to one channel.** The mention handler replies where it was
+3. **A thread timestamp is not ownership.** Direct mentions always reach Gable;
+   ordinary replies and photos reach it only under a Gable-owned root.
+4. **Gable posts to one channel.** The mention handler replies where it was
    spoken to; nothing else broadcasts.
 
 Run it with `python -m gable.slackapp.app`, or under the systemd unit in
@@ -30,6 +32,7 @@ from collections.abc import Callable
 from typing import Any, Final
 
 from gable.slackapp.brain import Decision, think
+from gable.slackapp.routing import MessageRoute, ThreadOwnership
 from gable.slackapp.status import Working
 from gable.slackapp.style import is_clean, strip_to_plain
 
@@ -414,6 +417,7 @@ def build_app(
         os.environ.pop(oauth_only, None)
 
     app = App(token=token, logger=logger)
+    thread_ownership = ThreadOwnership()
 
     @app.event("app_mention")
     def handle_mention(event: dict[str, Any], say: Any, client: Any) -> None:  # noqa: ANN401
@@ -427,25 +431,27 @@ def build_app(
         event: dict[str, Any],
         say: Any,  # noqa: ANN401
         client: Any,  # noqa: ANN401
+        context: Any,  # noqa: ANN401 - Bolt context, untyped upstream
     ) -> None:
-        """Answer a reply in a thread Gable is already part of.
+        """Answer only inside a thread Gable owns.
 
-        Ignores everything else, including its own messages, so the channel does
-        not become a place where Gable talks to itself.
+        Direct mentions have their own listener. This ordinary-message path is
+        silent in threads rooted by Monarch or any other app.
         """
         try:
             if allowed_channel and event.get("channel") != allowed_channel:
                 return
-            if event.get("bot_id"):
-                return
-            if event.get("subtype") == "file_share":
+            route = thread_ownership.route(
+                event,
+                client,
+                bot_user_id=str(context.get("bot_user_id") or ""),
+                bot_id=str(context.get("bot_id") or ""),
+            )
+            if route is MessageRoute.FILE_SHARE:
                 process_file_share(event, say, client, file_share_handler)
                 return
-            if event.get("subtype"):
-                return
-            if not event.get("thread_ts"):
-                return  # a top-level message that did not mention us
-            answer_thread_reply(event, say, client, thinker, action_handler)
+            if route is MessageRoute.THREAD_REPLY:
+                answer_thread_reply(event, say, client, thinker, action_handler)
         except Exception:
             logger.exception("message handler failed")
 

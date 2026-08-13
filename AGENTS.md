@@ -198,6 +198,23 @@ in the batch; a missing or multiply matched target is a question, not a guess.
 listing, which photo, and what a value should be — never resolved by picking the
 convenient interpretation.
 
+### 2.6a Thread ownership
+
+Gable answers ordinary replies and shared photos automatically only inside a
+thread it owns. A thread belongs to Gable when its root message was posted by
+Gable, or when the root explicitly mentioned Gable and started a conversation
+with it.
+
+Inside one of those threads, Carmen or Chase does not repeat `@gable` on every
+message. The listing thread is already the context.
+
+Inside a thread started by Monarch Website Watcher, another app, or a person who
+did not address Gable in the root, Gable stays silent unless the new message
+explicitly mentions it. One mention in another agent's thread does not transfer
+ownership: later messages there must mention Gable again. If Slack cannot
+establish who owns a thread, Gable stays silent rather than risk interrupting
+another agent.
+
 ### 2.7 Asking for something missing
 
 Name the listing, name the field, say why it matters — as a sentence.

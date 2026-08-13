@@ -1,0 +1,241 @@
+"""Regression tests for Slack thread ownership and mention routing."""
+
+from __future__ import annotations
+
+from typing import Any
+
+import pytest
+
+from gable.slackapp.app import answer_mention
+from gable.slackapp.brain import Decision
+from gable.slackapp.routing import MessageRoute, ThreadOwnership
+
+CHANNEL = "C0B02721MNK"
+GABLE_USER = "UGABLE"
+GABLE_BOT = "BGABLE"
+
+
+def _event(**overrides: object) -> dict[str, Any]:
+    """Build one ordinary human reply event."""
+    event: dict[str, Any] = {
+        "channel": CHANNEL,
+        "thread_ts": "1786.1",
+        "ts": "1786.2",
+        "user": "UCHASE",
+        "text": "Number 13 and 22",
+    }
+    event.update(overrides)
+    return event
+
+
+class RootClient:
+    """Return configured Slack thread roots and record each lookup."""
+
+    def __init__(self, roots: dict[str, dict[str, Any]] | None = None) -> None:
+        """Store root messages by thread timestamp."""
+        self.roots = roots or {}
+        self.calls: list[tuple[str, str, int]] = []
+
+    def conversations_replies(self, *, channel: str, ts: str, limit: int) -> dict[str, Any]:
+        """Stand in for Slack's conversations.replies method."""
+        self.calls.append((channel, ts, limit))
+        root = self.roots.get(ts)
+        return {"messages": [root] if root is not None else []}
+
+
+def test_plain_reply_in_another_agents_thread_is_ignored_and_cached() -> None:
+    """The reported Monarch keyword thread cannot wake Gable."""
+    client = RootClient(
+        {
+            "1786.1": {
+                "user": "UMONARCH",
+                "bot_id": "BMONARCH",
+                "text": "Blog keywords for 2026-08-13 — pick two numbers",
+            }
+        }
+    )
+    ownership = ThreadOwnership()
+
+    first = ownership.route(
+        _event(parent_user_id="UMONARCH"),
+        client,
+        bot_user_id=GABLE_USER,
+        bot_id=GABLE_BOT,
+    )
+    second = ownership.route(
+        _event(parent_user_id="UMONARCH", ts="1786.3"),
+        client,
+        bot_user_id=GABLE_USER,
+        bot_id=GABLE_BOT,
+    )
+
+    assert first is MessageRoute.IGNORE
+    assert second is MessageRoute.IGNORE
+    assert client.calls == [(CHANNEL, "1786.1", 1)]
+
+
+def test_plain_reply_in_a_gable_authored_thread_needs_no_mention_or_lookup() -> None:
+    """A listing thread rooted by Gable remains conversational by default."""
+    client = RootClient()
+
+    route = ThreadOwnership().route(
+        _event(parent_user_id=GABLE_USER, text="Can you send me the image?"),
+        client,
+        bot_user_id=GABLE_USER,
+        bot_id=GABLE_BOT,
+    )
+
+    assert route is MessageRoute.THREAD_REPLY
+    assert client.calls == []
+
+
+def test_photo_in_a_gable_authored_thread_routes_to_the_handoff() -> None:
+    """The ownership guard preserves automatic listing photo replies."""
+    route = ThreadOwnership().route(
+        _event(parent_user_id=GABLE_USER, subtype="file_share", files=[{"id": "F1"}]),
+        RootClient(),
+        bot_user_id=GABLE_USER,
+        bot_id=GABLE_BOT,
+    )
+
+    assert route is MessageRoute.FILE_SHARE
+
+
+def test_follow_up_to_a_human_root_that_called_gable_remains_owned() -> None:
+    """A top-level app mention starts a Gable conversation after the first reply."""
+    client = RootClient(
+        {
+            "1786.1": {
+                "user": "UCHASE",
+                "text": "<@UGABLE> help me with this listing",
+            }
+        }
+    )
+
+    route = ThreadOwnership().route(
+        _event(parent_user_id="UCHASE", text="What do you need from me?"),
+        client,
+        bot_user_id=GABLE_USER,
+        bot_id=GABLE_BOT,
+    )
+
+    assert route is MessageRoute.THREAD_REPLY
+
+
+def test_an_unaddressed_human_thread_is_also_foreign() -> None:
+    """Thread ownership depends on its root, not whether its author was a bot."""
+    client = RootClient({"1786.1": {"user": "UCARMEN", "text": "Campaign notes"}})
+
+    route = ThreadOwnership().route(
+        _event(parent_user_id="UCARMEN"),
+        client,
+        bot_user_id=GABLE_USER,
+        bot_id=GABLE_BOT,
+    )
+
+    assert route is MessageRoute.IGNORE
+
+
+def test_top_level_and_bot_authored_messages_are_ignored_without_a_lookup() -> None:
+    """Only human replies inside an owned thread reach either workflow."""
+    client = RootClient()
+    ownership = ThreadOwnership()
+
+    top_level = ownership.route(
+        _event(thread_ts=""),
+        client,
+        bot_user_id=GABLE_USER,
+        bot_id=GABLE_BOT,
+    )
+    bot_message = ownership.route(
+        _event(bot_id="BMONARCH"),
+        client,
+        bot_user_id=GABLE_USER,
+        bot_id=GABLE_BOT,
+    )
+
+    assert top_level is MessageRoute.IGNORE
+    assert bot_message is MessageRoute.IGNORE
+    assert client.calls == []
+
+
+def test_a_root_lookup_failure_stays_silent_and_can_retry() -> None:
+    """Slack read trouble cannot make Gable intrude on an unknown thread."""
+
+    class BrokenClient:
+        """Reject every root lookup."""
+
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def conversations_replies(self, **_kwargs: Any) -> dict[str, Any]:  # noqa: ANN401
+            """Raise a fixed Slack-like failure."""
+            self.calls += 1
+            raise RuntimeError("fixed root lookup failure")
+
+    client = BrokenClient()
+    ownership = ThreadOwnership()
+
+    first = ownership.route(
+        _event(parent_user_id="UMONARCH"),
+        client,
+        bot_user_id=GABLE_USER,
+        bot_id=GABLE_BOT,
+    )
+    second = ownership.route(
+        _event(parent_user_id="UMONARCH", ts="1786.3"),
+        client,
+        bot_user_id=GABLE_USER,
+        bot_id=GABLE_BOT,
+    )
+
+    assert first is MessageRoute.IGNORE
+    assert second is MessageRoute.IGNORE
+    assert client.calls == 2
+
+
+def test_cache_size_must_be_positive() -> None:
+    """A configuration error cannot silently create an unbounded cache."""
+    with pytest.raises(ValueError, match="must be positive"):
+        ThreadOwnership(max_entries=0)
+
+
+def test_explicit_gable_mention_still_answers_inside_a_foreign_thread() -> None:
+    """The direct-mention path intentionally bypasses root ownership."""
+    said: list[dict[str, Any]] = []
+    asked: list[str] = []
+
+    class MentionClient:
+        """Support the name lookup and native waiting surface."""
+
+        def users_info(self, **_kwargs: Any) -> dict[str, Any]:  # noqa: ANN401
+            """Return Chase's name."""
+            return {"user": {"profile": {"first_name": "Chase"}}}
+
+        def assistant_threads_setStatus(self, **_kwargs: Any) -> None:  # noqa: ANN401, N802
+            """Accept the native status call."""
+
+    def thinker(message: str, speaker: str = "") -> Decision:
+        """Record what reached the conversation model."""
+        assert speaker == "Chase"
+        asked.append(message)
+        return Decision(reply="Tell me which flyer you mean.")
+
+    def say(**kwargs: Any) -> dict[str, str]:  # noqa: ANN401
+        """Record the direct-mention reply."""
+        said.append(kwargs)
+        return {"ts": "1786.3"}
+
+    answer_mention(
+        _event(
+            thread_ts="1786.1",
+            text="<@UGABLE> Number 13 and 22",
+            parent_user_id="UMONARCH",
+        ),
+        say,
+        MentionClient(),
+        thinker,
+    )
+
+    assert asked == ["Number 13 and 22"]
+    assert said == [{"text": "Tell me which flyer you mean.", "thread_ts": "1786.1"}]

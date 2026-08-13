@@ -555,6 +555,20 @@ Anything AI-generated gets a loud, unmissable badge. Not a footnote.
 This is what makes Gable an agent rather than a scheduled job, and it is as much
 of the product as the renderer.
 
+### 4A.0 Thread ownership
+
+An ordinary `message` event is not an invitation merely because it has a
+`thread_ts`. Before a plain reply or shared photo is accepted,
+`slackapp/routing.py` reads the root. Only a root Gable authored or one that
+explicitly mentioned Gable is owned; the bounded cache keys that decision by
+channel and root timestamp.
+
+Direct `app_mention` events bypass this check, but do not transfer ownership of
+a Monarch Website Watcher thread. Gable-authored listing threads keep automatic
+follow-ups and uploads. If Slack cannot return the root or identify Gable's bot
+user, the lookup fails closed and Gable stays silent; an explicit mention still
+works.
+
 ### 4A.1 Confirm before acting
 
 Gable restates what it understood and waits for a yes. Ambiguity is resolved by
@@ -781,3 +795,4 @@ Append to this table. Do not rewrite history — if a decision reverses, add a n
 | 2026-08-12 | The roster moves out of the workbook tab and into the drive, and a **headshot is republished, never linked from Drive** | The `Sales_People` tab was deleted, so every run died on `Unable to parse range`. Contacts now come from `Agents Contact Information / Sales_Agents_Contact_Information.xlsx` and faces from `Head Shots`, each matched by name. The face cannot be handed to Slides as a Drive URL (§4.3 item 1), so it is downloaded with the service account and published through nginx like a hero photo; `publish_local` is content-addressed so each is written once. `agents/contacts.py` mirrors the workbook into the existing `salespeople` table, which left `find_salesperson` and its callers untouched. |
 | 2026-08-12 | **A missing price no longer stops a sold post** — the flyer is built, the link posted, and the price offered afterwards | Chase's rule. A flyer with a photo, an agent, an address and a design should not wait on a number that can be typed into the thread in seconds. The offer is made **only when the chosen design has a price field**: the live `Sold` design carries the address and the agent card and no price at all, and offering to add one there promises something that cannot be done. |
 | 2026-08-12 | Deleted every module unreachable from the entry points — about 3,000 lines of `src` and 1,600 of tests | Reachability from `slackapp.runtime`, `cli` and `tools/run_row` found thirteen orphans: `measure`, `registry`, `renderer`, `routing`, `catalog`, `blocks`, `handlers`, `quality`, `resolver`, `sources`, `verify`, `models` and `normalize` (whose one live function became `listings/headers.py`). Some were days old and never wired; keeping them meant the next agent reading a routing rule that routes nothing. `boto3` went with them, since Spaces was abandoned for nginx, and `openpyxl` became an explicit dependency. |
+| 2026-08-12 | **Ordinary Slack replies are gated by thread-root ownership** | Gable answered Chase's keyword selection inside a Monarch Website Watcher thread because the handler treated every `thread_ts` as Gable context. It now answers without a repeated mention only when Gable authored the root or the root originally mentioned Gable. Direct mentions still work in foreign threads, but do not transfer ownership. Root lookup failures stay silent, and the bounded cache prevents one Slack read per later reply. |
