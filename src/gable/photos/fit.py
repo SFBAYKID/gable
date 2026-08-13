@@ -474,6 +474,90 @@ def fit_bounded_source_locally(
         return _fit_locally_unlocked(prepared, target_width, target_height, quality)
 
 
+def _fit_portrait_unlocked(
+    image_bytes: bytes,
+    target_width: int,
+    target_height: int,
+    max_source_edge_px: int,
+) -> bytes:
+    """Cover-fit a portrait to its slot while the caller holds the memory guard.
+
+    Identical geometry to ``_fit_locally_unlocked``; the difference is that
+    transparency survives and the result is PNG.
+    """
+    with Image.open(io.BytesIO(image_bytes)) as opened:
+        if opened.width * opened.height > MAX_SOURCE_PIXELS:
+            msg = "the source image dimensions exceed the safe processing limit"
+            raise ValueError(msg)
+        # Bound the decoded frame before any full-size copy, exactly as the
+        # property path does, so one 1 GB droplet can hold two of these.
+        if max(opened.size) > max_source_edge_px:
+            opened.thumbnail((max_source_edge_px, max_source_edge_px), Image.Resampling.LANCZOS)
+        upright = ImageOps.exif_transpose(opened)
+        im = upright if upright.mode == "RGBA" else upright.convert("RGBA")
+
+        source_aspect = im.width / im.height
+        target_aspect = target_width / target_height
+        if source_aspect > target_aspect:
+            new_width = round(im.height * target_aspect)
+            left = (im.width - new_width) // 2
+            box = (left, 0, left + new_width, im.height)
+        else:
+            new_height = round(im.width / target_aspect)
+            top = (im.height - new_height) // 2
+            box = (0, top, im.width, top + new_height)
+
+        resized = im.crop(box).resize((target_width, target_height), Image.Resampling.LANCZOS)
+        out = io.BytesIO()
+        # No quality argument: PNG is lossless, and a matte here is what put a
+        # white rectangle over the address panel.
+        resized.save(out, format="PNG", optimize=True)
+        return out.getvalue()
+
+
+def fit_bounded_portrait_locally(
+    image_bytes: bytes,
+    target_width: int,
+    target_height: int,
+    *,
+    max_source_edge_px: int = 2400,
+) -> bytes:
+    """Fit a cut-out agent portrait to its slot without matting it onto white.
+
+    The Corner House designs place the agent as a transparent cut-out that
+    overlaps the address panel and reads as part of the page. Fitting that
+    portrait through the JPEG property path composites its alpha onto white,
+    which turns the cut-out into an opaque rectangle whose corner covers the
+    address box. Seen live on the 2026-08-13 Louis Smith flyer, where two
+    independent visual inspections reported the panel over the address.
+
+    A photograph with no alpha is unaffected beyond the format change; Slides
+    accepts PNG and JPEG alike.
+
+    Args:
+        image_bytes: The filed portrait.
+        target_width: Measured frame width in pixels.
+        target_height: Measured frame height in pixels.
+        max_source_edge_px: Bound applied before any full-size copy.
+
+    Returns:
+        PNG bytes at exactly ``target_width`` by ``target_height``, alpha intact.
+
+    Raises:
+        ValueError: for an invalid target, edge limit, or oversized source.
+        OSError: if Pillow cannot read the input.
+    """
+    _validate_target_dimensions(target_width, target_height)
+    _validate_max_edge(max_source_edge_px)
+    with _IMAGE_PROCESSING_LOCK:
+        return _fit_portrait_unlocked(
+            image_bytes,
+            target_width,
+            target_height,
+            max_source_edge_px,
+        )
+
+
 def image_dimensions(image_bytes: bytes) -> tuple[int, int]:
     """Read an image's pixel dimensions without decoding the whole frame.
 

@@ -22,6 +22,7 @@ from gable.photos.fit import (
     MAX_TOLERABLE_UPSCALE,
     FitAction,
     assess,
+    fit_bounded_portrait_locally,
     fit_bounded_source_locally,
     fit_locally,
     fit_small_source,
@@ -558,3 +559,64 @@ def test_a_rotated_photo_is_cropped_on_the_right_axis() -> None:
 def test_fitting_a_rotated_photo_still_produces_the_frame() -> None:
     out = fit_locally(_portrait_stored_landscape(), FRAME_W, FRAME_H)
     assert image_dimensions(out) == (FRAME_W, FRAME_H)
+
+
+def _cutout_png(width: int = 600, height: int = 800) -> bytes:
+    """A portrait cut-out: opaque subject, fully transparent surround."""
+    image = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+    for x in range(width // 4, 3 * width // 4):
+        for y in range(height // 4, 3 * height // 4):
+            image.putpixel((x, y), (30, 60, 90, 255))
+    out = io.BytesIO()
+    image.save(out, format="PNG")
+    return out.getvalue()
+
+
+def test_a_cut_out_portrait_keeps_its_transparent_surround() -> None:
+    """The Corner House agent is a cut-out over the address panel.
+
+    Matting that alpha onto white turns it into an opaque rectangle whose
+    corner covers the address box — seen live on the 2026-08-13 Louis Smith
+    flyer, reported by two independent visual inspections.
+    """
+    fitted = fit_bounded_portrait_locally(_cutout_png(), 300, 400)
+
+    with Image.open(io.BytesIO(fitted)) as out:
+        assert out.format == "PNG"
+        assert out.size == (300, 400)
+        assert out.mode == "RGBA"
+        surround = cast(tuple[int, int, int, int], out.getpixel((2, 2)))
+        subject = cast(tuple[int, int, int, int], out.getpixel((150, 200)))
+        assert surround[3] == 0, "the surround must stay transparent"
+        assert subject[3] == 255, "the subject must stay opaque"
+
+
+def test_the_property_path_still_mattes_alpha_onto_white() -> None:
+    """The hero photo is a full-bleed JPEG; this contract must not change."""
+    fitted = fit_bounded_source_locally(_cutout_png(), 300, 400)
+
+    with Image.open(io.BytesIO(fitted)) as out:
+        assert out.format == "JPEG"
+        assert out.mode == "RGB"
+        assert out.getpixel((2, 2)) == pytest.approx((255, 255, 255), abs=4)
+
+
+def test_a_portrait_without_alpha_is_fitted_unharmed() -> None:
+    """An ordinary opaque JPEG headshot must survive the PNG path."""
+    source = io.BytesIO()
+    Image.new("RGB", (900, 900), (200, 120, 60)).save(source, format="JPEG")
+
+    fitted = fit_bounded_portrait_locally(source.getvalue(), 200, 400)
+
+    with Image.open(io.BytesIO(fitted)) as out:
+        assert out.format == "PNG"
+        assert out.size == (200, 400)
+        assert cast(tuple[int, int, int, int], out.getpixel((100, 200)))[3] == 255
+
+
+def test_an_oversized_portrait_is_bounded_before_it_is_fitted() -> None:
+    """The 1 GB droplet must not hold a full-size copy of a huge portrait."""
+    with pytest.raises(ValueError):
+        fit_bounded_portrait_locally(_cutout_png(), 0, 400)
+    with pytest.raises(ValueError):
+        fit_bounded_portrait_locally(_cutout_png(), 300, 400, max_source_edge_px=0)

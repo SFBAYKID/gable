@@ -22,14 +22,14 @@ from gable.db import store
 from gable.listings.enrich import default_research
 from gable.photos.fit import (
     assess,
-    fit_bounded_source_locally,
+    fit_bounded_portrait_locally,
     fit_locally,
     fit_small_source,
     image_dimensions,
 )
 from gable.photos.headshots import MAX_HEADSHOT_BYTES
 from gable.photos.headshots import url_for_agent as headshot_url_for
-from gable.photos.store import publish_local, verify_public
+from gable.photos.store import content_name, publish_local, verify_public
 from gable.photos.verify import verify as verify_image
 from gable.pipeline.questions import Reconciliation
 from gable.pipeline.runner import Runner
@@ -694,17 +694,22 @@ def build_runner(
             if not original or len(original) > MAX_HEADSHOT_BYTES:
                 logger.error("the filed headshot is empty or too large to fit")
                 return ""
-            fitted = fit_bounded_source_locally(
+            # The portrait is a transparent cut-out that sits over the address
+            # panel. Fitting it through the JPEG property path mattes that alpha
+            # onto white and the cut-out becomes an opaque rectangle covering
+            # the address box, which is what the 2026-08-13 Louis Smith flyer
+            # showed. Keep the alpha and publish PNG.
+            fitted = fit_bounded_portrait_locally(
                 original,
                 width_px,
                 height_px,
                 max_source_edge_px=settings.photo_max_edge_px,
-                quality=settings.photo_jpeg_quality,
             )
             url = publish_local(
                 settings.photo_public_root,
                 settings.photo_public_base,
                 fitted,
+                content_name(fitted, ".png"),
             )
         except Exception:
             logger.exception("the agent headshot could not be fitted to its measured frame")
