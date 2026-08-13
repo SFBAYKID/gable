@@ -392,8 +392,8 @@ No source file is over 800 lines. `mypy` covers `src`, `tests` and `tools`.
 | `spikes/` | Findings only — `SPIKE_A.md` and `SPIKE_A_RESULT.md`. The generator and its tests were deleted once Spike A was answered. |
 | Most of `src/gable/` | Built and unit-tested: the runner, orchestrator, poller, schedule, database, sheet client, enrichment, photo fitting and hosting, the edit tools, the field manifest, the image verifier, the vision check and the house style. |
 | **The wiring between them** | **Built and deployed.** The production runtime constructs `Poller` and `Runner`; the Slack-free CLI performs one guarded pass. |
-| The Slack photo handoff | **Built and partly verified live.** Slack receive, authenticated download, model call, fallback fitting, and the repaired publish directory have each run or been checked. A successful resumed render and final visual result still need one watched upload. |
-| `photos/enhance.py` | Built, unit-tested, and invoked live. A Slack hero needing more than 2x enlargement gets one guarded high-fidelity image edit, a drift and seam check, an `ai_enhanced` audit flag, and an automatic original-photo fallback. The first live derivative was rejected by the seam gate and was not used; output is not visually certified. |
+| The Slack photo handoff | **Built and partly verified live.** Slack receive, authenticated download, deterministic frame fitting, and the repaired publish directory have each run or been checked. A successful resumed render and final visual result still need one watched upload. |
+| Small-photo fitting | The former generative enhancement module is deleted. A source needing more than 2x now stays at no more than 2x over a blurred, darkened fill derived only from that upload, with `ai_enhanced=0`; the exact Mike 275×183 to 1078×504 result was rendered and visually inspected locally. |
 | Former photo-resolver and handler placeholders | Historical only. They were unreachable and have since been removed rather than advertised as built. |
 
 `normalize.py`'s `ColumnMap` can be re-pointed at the real headers above without

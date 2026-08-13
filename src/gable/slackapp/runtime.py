@@ -20,7 +20,6 @@ from gable.config import ConfigError, Settings
 from gable.db import store
 from gable.db.schema import apply_migrations, connect
 from gable.logging_setup import configure_logging
-from gable.photos.enhance import EnhancementError, upscale_real_photo
 from gable.pipeline.live import build_runner
 from gable.pipeline.poller import BatchOutcome, Poller
 from gable.pipeline.runner import Runner
@@ -45,8 +44,6 @@ GOOGLE_SCOPES: tuple[str, ...] = (
     "https://www.googleapis.com/auth/drive",
     "https://www.googleapis.com/auth/presentations",
 )
-
-UpscaleProvider = Callable[[bytes, str, str, int, int], bytes]
 
 
 class SourceRefreshError(RuntimeError):
@@ -104,61 +101,6 @@ def refresh_submission_sources(
         raise
     except Exception as exc:
         raise SourceRefreshError("the request sources could not be refreshed") from exc
-
-
-def guarded_upscale_photo(
-    connection: Connection,
-    run_id: str,
-    image_bytes: bytes,
-    target_width: int,
-    target_height: int,
-    *,
-    enabled: bool,
-    max_calls: int,
-    api_key: str,
-    model: str,
-    provider: UpscaleProvider = upscale_real_photo,
-) -> bytes:
-    """Run one real-photo edit behind the budget and per-listing ceilings.
-
-    Args:
-        connection: The Slack event's database connection.
-        run_id: Existing paused flyer run.
-        image_bytes: Original human-supplied photograph.
-        target_width: Flyer width in pixels.
-        target_height: Flyer height in pixels.
-        enabled: Whether the configured photo policy permits reprocessing.
-        max_calls: Hard image-call allowance per listing.
-        api_key: Existing provider credential.
-        model: High-fidelity edit model.
-        provider: Injectable image-edit implementation.
-
-    Returns:
-        Faithful enlarged image bytes.
-
-    Raises:
-        EnhancementError: when policy or the listing call limit refuses it.
-        BudgetExceededError: when the shared $50 ceiling refuses it.
-        Exception: a provider failure, after its reservation is recorded.
-    """
-    if not enabled:
-        raise EnhancementError("automatic enlargement is disabled by the photo policy")
-    estimate = spend.Estimate(
-        service="openai",
-        model=model,
-        usd=spend.IMAGE_EDIT_RESERVE_USD,
-        detail=spend.IMAGE_UPSCALE_DETAIL,
-    )
-    try:
-        return spend.guarded_call(
-            connection,
-            estimate,
-            lambda: provider(image_bytes, api_key, model, target_width, target_height),
-            run_id=run_id,
-            max_operations=max_calls,
-        )
-    except spend.OperationLimitReachedError as exc:
-        raise EnhancementError("this listing has already used its image-edit allowance") from exc
 
 
 def notify_interrupted_runs(
@@ -321,13 +263,6 @@ def build_components(settings: Settings) -> RuntimeComponents:
             hero_photo_url=photo_url,
             origin_thread_ts=thread_ts,
             progress=progress,
-            upscale_photo=lambda run_id, image, width, height: upscale_photo(
-                connection_for_event,
-                run_id,
-                image,
-                width,
-                height,
-            ),
             approved_template_warning_codes=approved,
         )
 
@@ -348,26 +283,6 @@ def build_components(settings: Settings) -> RuntimeComponents:
             event_drive,
             settings.drive_id,
             settings.drive_templates_folder_id,
-        )
-
-    def upscale_photo(
-        event_connection: Connection,
-        run_id: str,
-        image_bytes: bytes,
-        target_width: int,
-        target_height: int,
-    ) -> bytes:
-        """Use the one permitted high-fidelity edit behind both hard guards."""
-        return guarded_upscale_photo(
-            event_connection,
-            run_id,
-            image_bytes,
-            target_width,
-            target_height,
-            enabled=settings.reprocessing_enabled,
-            max_calls=settings.max_image_calls_per_listing,
-            api_key=settings.openai_image_api_key,
-            model=settings.image_model_hq,
         )
 
     photo_handoff = PhotoHandoff(
@@ -490,13 +405,6 @@ def build_components(settings: Settings) -> RuntimeComponents:
                     hero_photo_url=run.photo_url,
                     origin_thread_ts=thread_ts,
                     progress=progress,
-                    upscale_photo=lambda run_id, image, width, height: upscale_photo(
-                        action_connection,
-                        run_id,
-                        image,
-                        width,
-                        height,
-                    ),
                     approved_template_warning_codes=approved,
                 )
                 submission = repo.Submission(

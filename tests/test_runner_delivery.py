@@ -10,7 +10,8 @@ import pytest
 from gable.agents.website import OfficialProfile, ProfileLookup
 from gable.db import store
 from gable.db.schema import apply_migrations, connect
-from gable.pipeline.vision import Inspection
+from gable.pipeline.vision import Inspection, InspectionRemedy
+from gable.voice import is_clean
 from tests.runner_support import Recorder
 from tests.runner_support import record as _record
 from tests.runner_support import runner as _runner
@@ -287,3 +288,92 @@ def test_pixelated_mike_render_is_held_without_exposing_the_bad_flyer(
     assert "larger" not in rec.said[0].lower()
     assert "Open it" not in rec.said[0]
     assert current["output_url"] not in rec.said[0]
+
+
+def test_mike_wrong_property_photo_requests_one_replacement_on_the_same_run(
+    db: sqlite3.Connection,
+) -> None:
+    """A proved photo contradiction routes directly back to thread upload."""
+    submission = _submission(
+        rid="rid-mike-wrong-house",
+        email="mike@cornerhouserealty.com",
+        name="Mike Kulnich",
+        request_type="Sold",
+        address="703 Perception Way, Aberdeen, MD 21001",
+        closing_price="615000",
+    )
+    _record(db, submission)
+    db.execute(
+        "INSERT INTO salespeople (email, first_name, last_name, phone, template, synced_at) "
+        "VALUES (?, ?, ?, ?, '', 'now')",
+        ("mike@cornerhouserealty.com", "Mike", "Kulnich", "410.456.3564"),
+    )
+    rec = Recorder(
+        slide_text=["[PROPERTY ADDRESS]", "AGENT NAME", "Phone", "Realtor"],
+        template_label="Sold",
+    )
+    runner = _runner(db, rec)
+    runner.official_contact_lookup = lambda name, email: ProfileLookup(
+        profile=OfficialProfile(
+            name=name,
+            email=email,
+            phone="410.456.3564",
+            title="REALTOR®",
+            source_url="https://cornerhouserealty.com/mike-kulnich/",
+        )
+    )
+    runner.look_at = lambda _run_id, _image: Inspection(
+        looks_right=False,
+        confident=True,
+        problems=["The flyer says 703, but the house number in the photo says 721."],
+        remedy=InspectionRemedy.REPLACE_PHOTO,
+        source_conflict_visible=True,
+    )
+
+    result = runner.run(submission)
+
+    current = store.run_by_id(db, result.run_id)
+    assert current is not None
+    assert result.status == "needs_photo"
+    assert current.status == "needs_photo"
+    assert current.output_file_id == "out-1", "retain the rejected copy for audit"
+    assert current.output_url.endswith("/edit")
+    assert current.failure_reason == (
+        "waiting for the correct property image because the supplied photo conflicts "
+        "with the listing"
+    )
+    assert store.run_attempt_count(db, submission.response_row_id) == 1
+    assert len(result.said) == len(rec.said) == 1
+    assert result.questions == ["Can you send the correct property image?"]
+    assert "house number in the photo says 721" in rec.said[0]
+    assert "Can you send the correct property image?" in rec.said[0]
+    assert rec.said[0].startswith("&gt;I rendered it")
+    assert is_clean(rec.said[0])
+    assert "Open the flyer" not in rec.said[0]
+    assert current.output_url not in rec.said[0]
+
+
+def test_a_conflict_visible_only_in_the_render_stays_needs_review(
+    db: sqlite3.Connection,
+) -> None:
+    """A derivative-created house number is not evidence against the upload."""
+    submission = _submission(rid="rid-render-only-number")
+    _record(db, submission)
+    rec = Recorder()
+    runner = _runner(db, rec)
+    runner.look_at = lambda _run_id, _image: Inspection(
+        looks_right=False,
+        confident=True,
+        problems=["The render shows 721, but the number is unreadable in the source image."],
+        remedy=InspectionRemedy.REPLACE_PHOTO,
+        source_conflict_visible=False,
+    )
+
+    result = runner.run(submission)
+
+    current = store.run_by_id(db, result.run_id)
+    assert current is not None
+    assert result.status == current.status == "needs_review"
+    assert result.questions == []
+    assert "correct property image" not in rec.said[0]
+    assert current.failure_reason == ""

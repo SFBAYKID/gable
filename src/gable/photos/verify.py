@@ -116,11 +116,10 @@ def verify(url: str, slot: str = "any", timeout: int = _TIMEOUT_SECONDS) -> Verd
         )
 
     # An aspect-preserved human upload is checked as ``any`` before its actual
-    # template frame is known. A small source is still usable: the guarded
-    # fidelity-preserving upscale handles it, and the local original remains
-    # the fallback. AGENTS.md explicitly forbids asking for a larger copy merely
-    # because the upload is small. Slot-specific assets such as headshots keep
-    # the minimum because there is no upscale path for them.
+    # template frame is known. A small source is still usable: the deterministic
+    # contained fit preserves it over a same-photo backdrop. AGENTS.md forbids
+    # asking for a larger copy merely because the upload is small. Slot-specific
+    # assets such as headshots keep the minimum because they do not use that fit.
     if slot != "any" and min(width, height) < MIN_EDGE_PX:
         return Verdict(
             ok=False,

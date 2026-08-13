@@ -47,23 +47,13 @@ class PhotoPolicy(StrEnum):
     Generation-flavoured values remain in the enum so an old environment gets
     a precise configuration error instead of an unknown-value error, but no
     synthetic-photo generator is connected. The live policy decision is
-    whether a real supplied photo may use fidelity-gated enlargement.
+    whether future synthetic-photo generation is prohibited at startup.
     """
 
     RETRIEVE_ONLY = "retrieve_only"
     GENERATE_WITH_APPROVAL = "generate_with_approval"
     GENERATE_FREELY = "generate_freely"
     NO_AI = "no_ai"
-
-    @property
-    def allows_reprocessing(self) -> bool:
-        """True if a *real* photo may be reshaped to fit the template frame.
-
-        Reprocessing changes framing, exposure and resolution; generation
-        invents a subject. They are different operations on separate code
-        paths. Every policy except `no_ai` permits reprocessing.
-        """
-        return self is not PhotoPolicy.NO_AI
 
 
 class ConfigError(Exception):
@@ -130,8 +120,6 @@ class Settings:
 
     # --- Photo policy ---
     photo_policy: PhotoPolicy
-    photo_reprocess: bool
-    max_image_calls_per_listing: int
 
     # --- Photo hosting ---
     photo_public_root: Path
@@ -154,29 +142,11 @@ class Settings:
     openai_image_api_key: str
     conversation_model: str
     vision_model: str
-    image_model_hq: str
 
     # --- Logging ---
     log_level: str
     log_format: str
     log_redact_secrets: bool
-
-    @property
-    def images_available(self) -> bool:
-        """True when an image model can actually be called."""
-        return bool(self.openai_image_api_key)
-
-    @property
-    def reprocessing_enabled(self) -> bool:
-        """True if a real photo may be reshaped to fit the template frame.
-
-        Policy is authoritative and the flag is subordinate: `no_ai` disables
-        reprocessing regardless of `GABLE_PHOTO_REPROCESS`, rather than forcing
-        the operator to edit two variables to express one intent.
-        """
-        return (
-            self.photo_reprocess and self.photo_policy.allows_reprocessing and self.images_available
-        )
 
     @property
     def poll_schedule(self) -> PollSchedule:
@@ -267,10 +237,6 @@ class Settings:
             photo_policy=reader.enum_value(
                 "GABLE_PHOTO_POLICY", PhotoPolicy, PhotoPolicy.RETRIEVE_ONLY
             ),
-            photo_reprocess=reader.bool_value("GABLE_PHOTO_REPROCESS", True),
-            max_image_calls_per_listing=reader.int_value(
-                "GABLE_MAX_IMAGE_CALLS_PER_LISTING", 1, minimum=0, maximum=1
-            ),
             photo_public_root=reader.path_value(
                 "GABLE_PHOTO_PUBLIC_ROOT", Path("/var/www/gable-photos")
             ),
@@ -294,7 +260,6 @@ class Settings:
             openai_image_api_key=reader.secret("OPENAI_IMAGE_API_KEY", require_credentials),
             conversation_model=reader.str_value("GABLE_CONVERSATION_MODEL", "gpt-5.6-sol"),
             vision_model=reader.str_value("GABLE_VISION_MODEL", "gpt-5.6-sol"),
-            image_model_hq=reader.str_value("GABLE_IMAGE_MODEL_HQ", "gpt-image-2"),
             log_level=reader.str_value("LOG_LEVEL", "INFO").upper(),
             log_format=reader.str_value("LOG_FORMAT", "json").lower(),
             log_redact_secrets=reader.bool_value("LOG_REDACT_SECRETS", True),
@@ -310,10 +275,9 @@ def _validate_cross_field(settings: Settings, problems: list[str]) -> None:
     """Check constraints that span more than one variable.
 
     The rule applied here is to reject settings whose stated behavior the
-    runtime cannot honour. A missing image key degrades safely to local fitting
-    and a blocked visual delivery gate. Automatic synthetic generation does not
-    degrade safely because no generator is connected, so both generation policy
-    values are refused even when a general OpenAI credential exists.
+    runtime cannot honour. Automatic synthetic generation does not degrade
+    safely because no generator is connected, so both generation policy values
+    are refused even when a general OpenAI credential exists.
     """
     if settings.slack_channel_id not in ALLOWED_SLACK_CHANNEL_IDS:
         problems.append(

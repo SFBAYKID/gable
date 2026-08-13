@@ -98,27 +98,16 @@ keeps the Slack upload untouched, makes a separate fitted derivative, and
 resumes the same run automatically.
 
 - Up to a 2x enlargement is handled locally.
-- Beyond 2x, one policy-gated image edit restores resolution while preserving
-  the exact property and composition. It is recorded as AI-enhanced, never as
-  AI-generated.
-- The edit gets one attempt per listing and shares the $50 spend ceiling.
-- If the edit fails its fidelity check or the provider is unavailable, Gable
-  falls back to a local resize of the original. The normal render inspection is
-  still the delivery gate.
+- Beyond 2x, Gable keeps a complete foreground copy at no more than 2x over a
+  blurred, darkened fill derived only from the same upload. It never invents
+  property detail and never calls an image provider.
 - Gable never asks for a larger version merely because the upload is small.
 - A shape mismatch, even one requiring a large center crop, is fitted
   automatically. Gable reports a material crop in the single final outcome; it
   never asks whether to run anyway. The rendered vision inspection still stops
   delivery when the automatic crop removes an important part of the property.
 
-On a successful enhanced path, the edited progress message is precise:
-
-```
-I sharpened, enlarged, and fitted the photo and finished the flyer.
-```
-
-On the local path it says “resized and fitted”; it never claims AI enhancement
-when the model result was not used.
+The final outcome says “resized and fitted”; it never claims AI enhancement.
 
 ### 2.3 AI-generated photo — future safety contract
 
@@ -287,6 +276,22 @@ that check fails, it says so rather than shipping something it doubts.
 The rejected draft remains in Drive for audit but its link stays out of Slack.
 The supplied image and same run are retained for a corrected retry.
 
+A confident inspection may instead prove that the supplied property image
+itself contradicts the listing, such as a house number independently legible
+in the original upload that does not match the address. A number not legible in
+the source is not evidence against it. Only proved source evidence moves the
+same run to `needs_photo` and posts one request, not a troubleshooting conversation:
+
+```
+     I rendered it, but the house number in the photo does not match the
+     listing address.
+
+Can you send the correct property image?
+```
+
+The next single image in that owned thread replaces the rejected upload and
+resumes the same run. Gable never searches for or substitutes a web photo.
+
 ```
 123 Main St — I rendered it, but I do not think it looks right.
 
@@ -401,10 +406,10 @@ indefinitely and are re-checked from their owned Slack thread:
 
 | State | What is missing | How it clears |
 |---|---|---|
-| `needs_photo` | No supplied hero image, or the upload could not be used | Carmen or Chase uploads one in the owned thread |
+| `needs_photo` | No supplied hero image, the upload could not be used, or inspection proved it contradicts the listing | Carmen or Chase uploads one in the owned thread |
 | `needs_template` | No exact request-type design, unsafe structure, unresolved new-template audit, or text that cannot fit legibly | The source is fixed or added, then Carmen or Chase asks in its thread to check again |
 | `needs_info` | A required form or headshot value is missing, or official contact fallback was unavailable, ambiguous, or conflicting | The source record or Head Shots folder is fixed, then the run is rechecked |
-| `needs_review` | Build/readback/photo placement/render inspection could not prove the output is right | Carmen or Chase resolves the named problem and requests a recheck or retry |
+| `needs_review` | A non-source-photo build, readback, placement, or inspection problem could not prove the output is right | Carmen or Chase resolves the named problem and requests a recheck or retry |
 
 `rendered → checked` is the vision pass of ARCHITECTURE.md §4.7b. A post that
 fails it goes back to Carmen (§2.9) rather than forward to `delivered`. Gable
@@ -419,25 +424,21 @@ a timestamp. A listing whose state cannot be explained from that log is a bug.
 ## 7. Rate and cost discipline
 
 - Max `GABLE_MAX_BATCH` (default 25) listings per cycle.
-- Max 1 actual image-model operation per listing, whether generation or
-  real-photo upscaling. A paid edit is never retried automatically. A documented
-  pre-inference rejection may be released only by an operator naming the exact
-  reservation and evidence; runtime never releases it, and spend stays recorded.
+- No image-model operation is connected for property-photo fitting or generation.
 - Never retry a failing listing more than 3 times. Enforced by
   `db.store.start_run`; paused states resume the same run and do not consume a
   new attempt.
 - Sheet reads use bounded exponential backoff with jitter. Paid model and
   Firecrawl calls are not automatically retried, so one failure cannot spend
   again behind the user's back.
-- Log the cost-bearing calls (Firecrawl, conversation, visual inspection, and
-  photo enhancement) with enough detail to
-  reconstruct a bill.
+- Log Firecrawl, conversation, and visual-inspection calls with enough detail
+  to reconstruct a bill.
 
 An agent that can spend money in a loop must have a hard ceiling. Put the
 ceiling in code, not in a comment.
 
-The current paid paths — Firecrawl property research, conversation, visual
-inspection, and real-photo enhancement — all call `spend.guarded_call` before
+The current paid paths — Firecrawl property research, conversation, and visual
+inspection — all call `spend.guarded_call` before
 the vendor. Each reserves a conservative amount and writes it to the spend
 table even if the vendor fails; reaching $50 prevents the call. Image
 generation is not connected and must use the same guard plus its per-listing

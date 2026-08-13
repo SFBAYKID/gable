@@ -31,7 +31,6 @@ from gable.logging_setup import configure_logging
 from gable.pipeline.live import build_runner
 from gable.sheets import repository as repo
 from gable.sheets.client import SheetClient
-from gable.slackapp.runtime import guarded_upscale_photo
 
 logger = logging.getLogger("gable.run_row")
 
@@ -209,20 +208,6 @@ def main(argv: list[str] | None = None) -> int:
             # own returned timestamp, matching the long-running runtime path.
             return str(response.get("ts") or "")
 
-        def upscale_photo(run_id: str, image: bytes, width: int, height: int) -> bytes:
-            """Use the same paid-image guards as a photo resumed from Slack."""
-            return guarded_upscale_photo(
-                connection,
-                run_id,
-                image,
-                width,
-                height,
-                enabled=settings.reprocessing_enabled,
-                max_calls=settings.max_image_calls_per_listing,
-                api_key=settings.openai_image_api_key,
-                model=settings.image_model_hq,
-            )
-
         if args.resume:
             existing = store.latest_run(connection, submission.response_row_id)
             if existing is None:
@@ -246,7 +231,6 @@ def main(argv: list[str] | None = None) -> int:
                 say,
                 hero_photo_url=existing.photo_url,
                 origin_thread_ts=existing.slack_thread_ts,
-                upscale_photo=upscale_photo,
             )
             result = runner.resume(submission, existing.run_id)
         else:
@@ -264,7 +248,6 @@ def main(argv: list[str] | None = None) -> int:
                 drive,
                 slides,
                 say,
-                upscale_photo=upscale_photo,
             )
             result = runner.run(submission)
         logger.info("run %s finished as %s", result.run_id, result.status)

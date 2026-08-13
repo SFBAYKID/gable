@@ -155,11 +155,7 @@ def check_openai_models(env: dict[str, str]) -> Result:
         wanted = {
             env.get("GABLE_CONVERSATION_MODEL", "gpt-5.6-sol"),
             env.get("GABLE_VISION_MODEL", "gpt-5.6-sol"),
-            env.get("GABLE_IMAGE_MODEL_HQ", "gpt-image-2"),
         }
-        # Sort descending so the NEWEST model leads. Sorting ascending once made
-        # gpt-image-1 look like the latest available, which it is not.
-        image_models = sorted((i for i in ids if "image" in i), reverse=True)
         missing = sorted(wanted - ids)
         if not missing:
             return Result(
@@ -170,7 +166,7 @@ def check_openai_models(env: dict[str, str]) -> Result:
         return Result(
             "OpenAI",
             FAIL,
-            f"configured model(s) unavailable: {missing}. Visible image models: {image_models[:4]}",
+            f"configured model(s) unavailable: {missing}",
         )
     return Result("OpenAI", FAIL, f"HTTP {status}: {body.get('error', {}).get('message', body)}")
 

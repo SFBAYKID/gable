@@ -20,7 +20,7 @@ from gable.agents.website import lookup_official_profile
 from gable.config import Settings
 from gable.db import store
 from gable.listings.enrich import default_research
-from gable.photos.fit import assess, fit_locally, image_dimensions
+from gable.photos.fit import assess, fit_locally, fit_small_source, image_dimensions
 from gable.photos.headshots import MAX_HEADSHOT_BYTES
 from gable.photos.headshots import url_for_agent as headshot_url_for
 from gable.photos.store import publish_local, verify_public
@@ -365,7 +365,6 @@ def build_runner(
     hero_photo_url: str = "",
     origin_thread_ts: str = "",
     progress: Callable[[str], None] = lambda _stage: None,
-    upscale_photo: Callable[[str, bytes, int, int], bytes] | None = None,
     approved_template_warning_codes: frozenset[str] = frozenset(),
 ) -> Runner:
     """Assemble a `Runner` that talks to the real services.
@@ -380,7 +379,6 @@ def build_runner(
         hero_photo_url: A fitted, published photo when resuming a paused run.
         origin_thread_ts: Root Slack thread that a resumed run must preserve.
         progress: Names the current stage for Slack's waiting indicator.
-        upscale_photo: One policy and spend-guarded real-photo enlargement.
         approved_template_warning_codes: Exact measured advisory codes Carmen
             or Chase explicitly accepted for this run.
 
@@ -392,8 +390,8 @@ def build_runner(
     """
     # Filled when the aspect-preserved human upload is read for its one frame
     # fit. The final visual gate sees both this source and Google's rendered
-    # flyer, so an enhancement cannot change the house and still pass merely
-    # because the resulting layout is tidy.
+    # flyer, so even a deterministic crop or contained fit cannot hide a
+    # material loss of the supplied property's identity or composition.
     vision_reference = b""
 
     def say(text: str, thread: str | None) -> str:
@@ -626,7 +624,7 @@ def build_runner(
             review rather than posting a letterboxed flyer.
         """
         nonlocal vision_reference
-        used_enhancement = False
+        used_small_source_fit = False
         try:
             store.set_status(
                 connection,
@@ -640,14 +638,12 @@ def build_runner(
             vision_reference = original
             source_width, source_height = image_dimensions(original)
             decision = assess(source_width, source_height, width_px, height_px)
-            if decision.needs_model and upscale_photo is not None:
-                try:
-                    progress("is sharpening and enlarging the photo...")
-                    original = upscale_photo(run_id, original, width_px, height_px)
-                    used_enhancement = True
-                except Exception:
-                    logger.exception("automatic photo enlargement fell back to local fitting")
-            recropped = fit_locally(original, width_px, height_px)
+            if decision.needs_small_source_fit:
+                progress("is fitting the small photo without changing the property...")
+                recropped = fit_small_source(original, width_px, height_px)
+                used_small_source_fit = True
+            else:
+                recropped = fit_locally(original, width_px, height_px)
             url = publish_local(settings.photo_public_root, settings.photo_public_base, recropped)
         except Exception:
             logger.exception("the hero photo could not be recropped to its frame")
@@ -661,11 +657,11 @@ def build_runner(
             run_id,
             "building",
             (
-                "used one fidelity-checked photo enlargement"
-                if used_enhancement
+                "used deterministic small-source photo fitting"
+                if used_small_source_fit
                 else "used local photo fitting"
             ),
-            ai_enhanced=int(used_enhancement),
+            ai_enhanced=0,
         )
         return url
 

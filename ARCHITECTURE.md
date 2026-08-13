@@ -43,8 +43,8 @@ An agent — say **Lolo Simmons** — submits the form.
    reported with the one outcome after render inspection.
 5. **Receive the hero image.** The user drops one image into the owned thread;
    its full composition is preserved until the exact frame is known.
-6. **Fit once.** Pillow crops and resizes to the measured frame. Only enlargement
-   beyond 2x may use one fidelity-gated GPT Image 2 edit.
+6. **Fit once.** Pillow crops and resizes to the measured frame. Beyond 2x it
+   contains the source over a blurred, darkened same-photo fill.
 7. **Render and prove.** A copy is filled, read back, rendered, and compared
    with the supplied photo by `gpt-5.6-sol`. Unavailable or uncertain
    inspection blocks delivery.
@@ -420,23 +420,11 @@ enlargement stays local. Crop loss above 30 percent becomes a note in the one
 post-build outcome; it never creates an approval question. The rendered vision
 gate still blocks delivery if the automatic crop removes important content.
 
-Only a source that would need more than 2x enlargement takes the image-edit
-path in `photos/enhance.py`. Gable first makes the exact deterministic frame
-composition, then sends that derivative to `GABLE_IMAGE_MODEL_HQ` for
-super-resolution with a preservation-only prompt. GPT Image 2 runs at high
-quality and automatic high input fidelity, returns one image, and gets no automatic retry.
-The output must still be large enough and remain within a low-frequency
-composition distance from the supplied photo. Failure falls back to the locally
-resized original; the rendered-flyer vision pass remains the final delivery
-gate. A numeric seam detector was removed after calibration showed that it
-could not distinguish a pasted sky from a normal roofline or treeline.
-
-**Needs verification:** the 0.18 composition-distance threshold has unit coverage
-but no watched live calibration. It is a coarse refusal layer, not certification.
-
-The original Slack upload is never overwritten. SQLite records `ai_enhanced`
-only when the model result survives those checks. The paid edit is limited to
-one attempt per listing and reserves $0.25 under the shared $50 guard.
+When full-frame cover would exceed 2x, Pillow makes a blurred, darkened cover
+from the source and centers a complete foreground copy at no more than 2x. The
+result is the exact frame size, preserves every source edge, invents no property
+detail, makes no provider call, and records `ai_enhanced=0`. The original Slack
+upload is never overwritten; rendered vision remains the delivery gate.
 
 Synthetic property-photo generation is not connected. The database retains the
 disclosure flag required by the runtime contract, but the running system has no
@@ -508,9 +496,10 @@ every API level — valid file, valid image, HTTP 200 throughout — and still b
 obviously wrong to any human who looks at it. The API cannot tell you the
 roofline is cut off. A model looking at the picture can.
 
-A render that fails inspection is not delivered as fine. Neither is a render
-whose inspection was unavailable, malformed, refused, or low-confidence. The
-OpenAI call shares the hard spend ledger; no Anthropic runtime path exists.
+A render that fails inspection is not delivered as fine, nor is one whose
+inspection was unavailable, malformed, refused, or low-confidence. Its strict
+result names a typed remedy. Only a contradiction independently legible in the
+original upload moves the same run to `needs_photo`; all other findings stay `needs_review`.
 
 ### 4.8 Deliver (`slackapp/`)
 
@@ -640,7 +629,8 @@ enlargement of the supplied real photo.
 | Slack disconnect | Bolt reconnects; log it, never exit |
 | Slides mutation is rejected or incomplete | Stop that listing and translate the failure into plain language |
 | Template field is missing or unsafe | Stop before copy and ask for a source-template correction |
-| Image edit outage | Fall back to local fitting; final visual inspection still decides delivery |
+| Very small supplied image | Keep the complete source at no more than 2x over a blurred, darkened same-photo fill |
+| Supplied photo contradicts listing | Keep the rejected draft internal; ask once for the correct image and accept it on the same run |
 | Vision unavailable or inconclusive | Status `needs_review`; never deliver as ready |
 | Drive quota / non-shared drive | Refused at startup by `config.py`, not at render time |
 
@@ -795,3 +785,5 @@ Append to this table. Do not rewrite history — if a decision reverses, add a n
 | 2026-08-13 | **Reverses the pre-build crop approval:** a supplied photo is fitted before Gable asks about layout | Chase's live test reached eighteen messages because every correctable fit became user work. A large center crop now becomes a truthful note in the one outcome after the build; it never asks “run anyway.” Structural defects, missing facts and unreadable text still stop, and the rendered vision inspection remains the fail-closed gate for a crop that removed important property content. |
 | 2026-08-13 | A documented pre-inference image rejection can receive one **append-only operator release** | Reservations remain in the spend total and ordinary failures still consume the listing allowance. Only a human naming the exact spend row and durable evidence may append a release after the provider rejected an invalid request before model execution; runtime never does this automatically. The released reservation is excluded only from the per-listing image-operation count, and a unique database constraint plus an immediate transaction keep the replacement at one actual image-model call. |
 | 2026-08-13 | GPT Image 2 final-photo edits use **high quality and a constraint-valid proportional canvas** | The Mike test exposed a client bug: rounding its 1078×504 frame to 1088×512 produced only 557,056 pixels, below the documented 655,360 minimum, so the API rejected it before inference and local stretching looked visibly pixelated. The chooser now enforces both 16-pixel edges, 3:1, 3,840-pixel, and total-pixel bounds; that frame becomes 1184×560. A vision-rejected draft stays internal rather than giving Slack a link to known-bad work. |
+| 2026-08-13 | A proved source-photo contradiction routes directly back to the same thread's upload state | The strict visual result carries a typed remedy and a source-evidence flag rather than asking runtime code to parse prose. Only a checked, confident `replace_photo` verdict whose contradiction is independently legible in the first human upload, with no separate build/readback problem, becomes `needs_photo`; a detail legible only after enhancement stays `needs_review`. The rejected Drive copy stays internal, the one replacement request resumes the same run, and no web photo is selected. |
+| 2026-08-13 | **Reverses generative real-photo upscaling:** every property-photo fit is deterministic and source-only | The Mike test showed a model can invent a crisp factual detail that was unreadable in the upload. Beyond 2x, Gable now contains the complete source at no more than 2x over a blurred, darkened fill made from that upload, at the exact measured frame size. No image provider, paid reservation, retry, or `ai_enhanced` claim remains on the live path. |

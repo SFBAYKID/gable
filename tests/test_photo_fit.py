@@ -1,8 +1,7 @@
 """Tests for fitting a photo to the hero frame.
 
-The bias is toward the cost decision: `assess` deciding a model is needed when
-one is not costs money on every flyer, and deciding one is not needed when it is
-puts a visibly soft photo in front of a client. Both directions are tested.
+The bias is toward the quality decision: a very small source must keep its full
+composition without stretching its foreground past 2x or inventing detail.
 
 The 1080x1350 frame and the 267x148 source are the real numbers from the first
 end-to-end run, not invented ones.
@@ -11,6 +10,7 @@ end-to-end run, not invented ones.
 from __future__ import annotations
 
 import io
+from typing import cast
 
 import pytest
 from PIL import Image
@@ -20,6 +20,7 @@ from gable.photos.fit import (
     FitAction,
     assess,
     fit_locally,
+    fit_small_source,
     image_dimensions,
 )
 
@@ -35,11 +36,11 @@ def _png(width: int, height: int, colour: tuple[int, int, int] = (200, 120, 60))
 # --- the cost decision ------------------------------------------------------
 
 
-def test_the_real_download_jpg_needs_a_model() -> None:
+def test_the_real_download_jpg_needs_the_small_source_fit() -> None:
     """267x148 is the actual test image Chase supplied, and it is far too small."""
     a = assess(267, 148, FRAME_W, FRAME_H)
-    assert a.action is FitAction.NEEDS_UPSCALE
-    assert a.needs_model is True
+    assert a.action is FitAction.SMALL_SOURCE
+    assert a.needs_small_source_fit is True
     assert a.upscale_factor > MAX_TOLERABLE_UPSCALE
 
 
@@ -48,7 +49,7 @@ def test_a_normal_phone_photo_is_free() -> None:
     a = assess(4032, 3024, FRAME_W, FRAME_H)
     assert a.action is FitAction.CROP
     assert a.is_free is True
-    assert a.needs_model is False
+    assert a.needs_small_source_fit is False
 
 
 def test_exact_frame_is_used_untouched() -> None:
@@ -64,20 +65,20 @@ def test_same_shape_but_larger_only_downscales() -> None:
 
 
 def test_the_upscale_threshold_is_the_boundary() -> None:
-    """Exactly 2x is tolerated; past it a model is required."""
+    """Exactly 2x is tolerated; past it uses the small-source composition."""
     at_limit = assess(FRAME_W // 2, FRAME_H // 2, FRAME_W, FRAME_H)
     assert at_limit.upscale_factor == pytest.approx(MAX_TOLERABLE_UPSCALE)
-    assert at_limit.needs_model is False
+    assert at_limit.needs_small_source_fit is False
     assert at_limit.action is FitAction.LOCAL_ENLARGE
 
     past_limit = assess(FRAME_W // 3, FRAME_H // 3, FRAME_W, FRAME_H)
-    assert past_limit.needs_model is True
+    assert past_limit.needs_small_source_fit is True
 
 
 def test_upscale_is_driven_by_the_binding_axis() -> None:
-    """A photo wide enough but far too short still needs a model."""
+    """A photo wide enough but far too short still needs the small-source fit."""
     a = assess(4000, 200, FRAME_W, FRAME_H)
-    assert a.action is FitAction.NEEDS_UPSCALE
+    assert a.action is FitAction.SMALL_SOURCE
     assert a.upscale_factor == pytest.approx(FRAME_H / 200)
 
 
@@ -153,6 +154,48 @@ def test_fit_handles_a_wide_source() -> None:
 def test_fit_output_is_jpeg_slides_will_accept() -> None:
     out = fit_locally(_png(2000, 2000), FRAME_W, FRAME_H)
     assert out[:3] == b"\xff\xd8\xff"
+
+
+def test_mike_small_source_fit_is_exact_and_keeps_foreground_at_two_x() -> None:
+    """The real 275x183 Mike upload becomes a truthful 1078x504 composition."""
+    source = Image.new("RGB", (275, 183), (210, 120, 30))
+    # A bright boundary proves the contained foreground keeps every source edge.
+    for x in range(source.width):
+        source.putpixel((x, 0), (255, 255, 255))
+        source.putpixel((x, source.height - 1), (255, 255, 255))
+    for y in range(source.height):
+        source.putpixel((0, y), (255, 255, 255))
+        source.putpixel((source.width - 1, y), (255, 255, 255))
+    encoded = io.BytesIO()
+    source.save(encoded, format="PNG")
+
+    result = fit_small_source(encoded.getvalue(), 1078, 504, quality=100)
+
+    assert image_dimensions(result) == (1078, 504)
+    with Image.open(io.BytesIO(result)) as opened:
+        fitted = opened.convert("RGB")
+        # 275x183 at 2x is 550x366, centered at x=264 and y=69.
+        top_left = cast(tuple[int, int, int], fitted.getpixel((264, 69)))
+        bottom_right = cast(tuple[int, int, int], fitted.getpixel((813, 434)))
+        assert top_left[0] > 220
+        assert bottom_right[0] > 220
+        # Outside the contained source is the intentionally dark backdrop.
+        outside = cast(tuple[int, int, int], fitted.getpixel((30, 252)))
+        inside = cast(tuple[int, int, int], fitted.getpixel((539, 252)))
+        assert sum(outside) < sum(inside)
+
+
+def test_small_source_fit_uses_only_pixels_from_the_upload() -> None:
+    """A flat source can yield only its colour and a darker version of it."""
+    result = fit_small_source(_png(120, 80, (180, 100, 40)), 900, 300, quality=100)
+
+    with Image.open(io.BytesIO(result)) as opened:
+        fitted = opened.convert("RGB")
+        foreground = cast(tuple[int, int, int], fitted.getpixel((450, 150)))
+        background = cast(tuple[int, int, int], fitted.getpixel((20, 150)))
+    assert foreground[0] > background[0]
+    assert foreground[1] > background[1]
+    assert foreground[2] > background[2]
 
 
 def test_fit_flattens_transparency_rather_than_failing() -> None:

@@ -203,6 +203,12 @@ confirms all of the following:
 Read the precise Slack explanation and fix the responsible code or source. A
 rejected draft remains recorded in Drive but its link must not appear in Slack.
 
+If inspection confidently proves a contradiction independently visible in the
+original supplied image, expect one message asking for the correct property
+image and status `needs_photo`. A number not legible in the original cannot be
+used as source evidence. Upload one replacement in the owned `needs_photo` thread;
+it must resume the same run and attempt count, then pass before delivery.
+
 ## 7. Repeating live tests
 
 Do not delete run rows or edit the response tab to make a test repeatable. A

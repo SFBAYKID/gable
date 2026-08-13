@@ -260,12 +260,10 @@ call on 2026-08-12:
    element's size and affine transform, including parent groups. OpenAI's model
    catalogue names GPT-5.6 Sol as its flagship and says current models support
    image input; the configured account completed a strict Responses vision
-   request with `gpt-5.6-sol`. GPT Image 2 is the current state-of-the-art
-   OpenAI image editing model and is reserved for one real-photo enlargement
-   beyond 2x, never property invention. Sources:
+   request with `gpt-5.6-sol`. Property-photo fitting is now deterministic and
+   source-only; it does not call an image model. Sources:
    https://developers.google.com/workspace/slides/api/concepts/transforms
    https://developers.openai.com/api/docs/models
-   https://developers.openai.com/api/docs/models/gpt-image-2
 
 Each of these cost a real failure to learn. They are in the decision log with
 their evidence.
@@ -370,9 +368,8 @@ gable/
 │   │   ├── enrich.py            # look up beds, baths, square footage
 │   │   └── review.py            # a client review, read out of what was typed
 │   ├── photos/
-│   │   ├── fit.py               # decides whether a model is needed at all
+│   │   ├── fit.py               # exact crop plus safe small-source composition
 │   │   ├── headshots.py         # the agent's face, from Drive, republished
-│   │   ├── enhance.py           # guarded high-fidelity upscale of a REAL photo only
 │   │   └── store.py             # publish to the droplet over http
 │   ├── slides/
 │   │   ├── edits.py             # one tool per change Carmen can ask for
@@ -457,7 +454,7 @@ decisions about what Carmen wants.
 The connected source is one real property photo Carmen or Chase supplies in the
 owned Slack listing thread. The default and production setting is
 `retrieve_only`; despite its compatibility name it does not perform automatic
-retrieval. `no_ai` additionally disables paid enlargement.
+retrieval. `no_ai` is equivalent for the connected source-only fitting path.
 
 ```
 GABLE_PHOTO_POLICY=retrieve_only | no_ai
@@ -479,10 +476,9 @@ error. Runtime rejects both: there is no synthetic generator, approval action,
 or disclosure workflow. If generation is ever connected, it must carry all
 three `AGENTS.md` disclosure mechanisms or fail closed.
 
-Enhancement and generation are separate. `retrieve_only` permits one
-preservation-only GPT Image 2 enlargement when a real supplied photo needs more
-than 2x scaling. `no_ai` keeps every fit local. Neither policy changes the
-property, replaces a sky, or invents missing content.
+Every fit is local. Beyond 2x, the foreground stays at the safe ceiling over a
+blurred and darkened fill derived only from the same upload. Neither policy
+changes the property, replaces a sky, or invents missing content.
 
 ---
 

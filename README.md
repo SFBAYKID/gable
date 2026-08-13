@@ -23,9 +23,9 @@ engineering constraints and the decision history live in `CLAUDE.md` and
    Readable overflow and photo cropping are corrected automatically, then
    reported in the single outcome after render inspection.
 5. A Slack photo keeps its original composition until the exact frame is known.
-   Gable then crops and resizes once. Enlargement up to 2x is local; beyond 2x,
-   one policy- and spend-gated GPT Image 2 edit may restore resolution while a
-   fidelity check preserves the property and composition.
+   Gable then crops and resizes once. A very small upload remains at no more
+   than 2x over a blurred, darkened fill made only from that same photo; no image
+   model invents property detail.
 6. Gable copies the template, fills standalone fields, reads every value back,
    places the hero and headshot, fits only text it changed, renders a thumbnail,
    and asks the configured vision model to compare the supplied property photo

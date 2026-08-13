@@ -22,6 +22,7 @@ import json
 import logging
 import urllib.request
 from dataclasses import dataclass, field
+from enum import StrEnum
 from typing import Any, Final
 
 from gable.voice import safe
@@ -60,9 +61,29 @@ Report a problem if any of these is true:
 - Something is obviously misaligned or overlapping in a way a designer would fix.
 
 Do NOT report: style preferences, colour choices, or anything you are guessing at.
+For a very small supplied photo, the flyer may deliberately show one contained
+copy at no more than 2x over a blurred and darkened fill made from the same
+photo. Do not report that intentional backdrop as a blurry main property photo;
+judge the contained foreground for identity, clarity, crop, and placement.
+
+Choose exactly one remedy:
+- "none" only when the flyer looks right.
+- "replace_photo" only when the human-supplied property photo itself is
+  provably the wrong image for this listing. The contradiction must be
+  independently legible in the FIRST image, without borrowing any detail from
+  the rendered flyer. Set "source_conflict_visible" true only in that case.
+  If the first image is too small or blurry to read its house number, that is
+  not source evidence, even if the SECOND image shows a conflicting number.
+  A detail changed, invented, or visible only in the second image is an output
+  problem and must use "review". Do not choose "replace_photo" for a crop,
+  enlargement, enhancement drift, or another output problem that can be fixed
+  while keeping the supplied photo.
+- "review" for every other problem, any mixed set of problems, and any case
+  where you are unsure which remedy applies.
 
 Reply as JSON only:
-{"looks_right": true|false, "confident": true|false, "problems": ["..."]}
+{"looks_right": true|false, "confident": true|false, "problems": ["..."],
+ "remedy": "none"|"review"|"replace_photo", "source_conflict_visible": true|false}
 
 Each problem must be one short sentence naming what and where, in plain words a
 designer would use. No coordinates, no element ids, no technical terms.
@@ -87,8 +108,11 @@ photo are allowed in a source template. Do not report them. Do not guess how
 future replacement text will fit; exact box-capacity checks happen separately.
 Do not critique colours, fonts, branding, or subjective design taste.
 
-Reply as JSON only:
-{"looks_right": true|false, "confident": true|false, "problems": ["..."]}
+Reply as JSON only. Use "none" when the template looks right and "review" for
+every problem; a reusable template never uses "replace_photo" and always uses
+false for "source_conflict_visible":
+{"looks_right": true|false, "confident": true|false, "problems": ["..."],
+ "remedy": "none"|"review", "source_conflict_visible": false}
 
 Each problem must be one short sentence naming what and where, in plain words a
 designer would use. No coordinates, no element ids, no technical terms.
@@ -100,10 +124,29 @@ _SCHEMA: Final[dict[str, Any]] = {
         "looks_right": {"type": "boolean"},
         "confident": {"type": "boolean"},
         "problems": {"type": "array", "items": {"type": "string"}},
+        "remedy": {
+            "type": "string",
+            "enum": ["none", "review", "replace_photo"],
+        },
+        "source_conflict_visible": {"type": "boolean"},
     },
-    "required": ["looks_right", "confident", "problems"],
+    "required": [
+        "looks_right",
+        "confident",
+        "problems",
+        "remedy",
+        "source_conflict_visible",
+    ],
     "additionalProperties": False,
 }
+
+
+class InspectionRemedy(StrEnum):
+    """The next safe runtime state after a confident visual verdict."""
+
+    NONE = "none"
+    REVIEW = "review"
+    REPLACE_PHOTO = "replace_photo"
 
 
 @dataclass(frozen=True, slots=True)
@@ -116,6 +159,25 @@ class Inspection:
     #: True when the check itself could not run. Distinct from "it looks wrong",
     #: because the honest response to each is different.
     checked: bool = True
+    #: Defaults to human review for injected/legacy negative verdicts. Only an
+    #: explicit, strict-schema REPLACE_PHOTO result may turn a failed render
+    #: directly back into the photo-upload state.
+    remedy: InspectionRemedy = InspectionRemedy.REVIEW
+    #: True only when the contradiction is independently visible in the first,
+    #: human-supplied image. A detail found only in the rendered derivative is
+    #: never evidence against the source upload.
+    source_conflict_visible: bool = False
+
+    @property
+    def needs_source_replacement(self) -> bool:
+        """Whether this verdict safely authorizes asking for another upload."""
+        return (
+            self.checked
+            and self.confident
+            and not self.looks_right
+            and self.remedy is InspectionRemedy.REPLACE_PHOTO
+            and self.source_conflict_visible
+        )
 
     @property
     def say(self) -> str:
@@ -142,11 +204,13 @@ def _post(payload: dict[str, Any], api_key: str) -> dict[str, Any]:
         return decoded
 
 
-def parse(reply: str) -> Inspection:
+def parse(reply: str, *, has_reference_photo: bool = False) -> Inspection:
     """Read the model's answer, tolerating the ways models wrap JSON.
 
     Args:
         reply: The model's raw text.
+        has_reference_photo: Whether the request actually included the first,
+            human-supplied image needed to prove a source contradiction.
 
     Returns:
         An `Inspection`. An unparseable reply is treated as "could not check"
@@ -169,20 +233,46 @@ def parse(reply: str) -> Inspection:
     looks_right = data.get("looks_right")
     confident = data.get("confident")
     raw_problems = data.get("problems")
+    raw_remedy = data.get("remedy")
+    source_conflict_visible = data.get("source_conflict_visible")
     if (
         not isinstance(looks_right, bool)
         or not isinstance(confident, bool)
         or not isinstance(raw_problems, list)
         or any(not isinstance(problem, str) for problem in raw_problems)
+        or not isinstance(raw_remedy, str)
+        or not isinstance(source_conflict_visible, bool)
     ):
+        return Inspection(looks_right=False, confident=False, checked=False)
+    try:
+        remedy = InspectionRemedy(raw_remedy)
+    except ValueError:
         return Inspection(looks_right=False, confident=False, checked=False)
     problems = [problem.strip() for problem in raw_problems if problem.strip()]
     if looks_right and problems:
         looks_right = False
+        if remedy is InspectionRemedy.NONE:
+            remedy = InspectionRemedy.REVIEW
+    if looks_right:
+        if remedy is not InspectionRemedy.NONE or source_conflict_visible:
+            return Inspection(looks_right=False, confident=False, checked=False)
+    elif remedy is InspectionRemedy.NONE:
+        return Inspection(looks_right=False, confident=False, checked=False)
+    if remedy is InspectionRemedy.REPLACE_PHOTO and (not confident or not problems):
+        return Inspection(looks_right=False, confident=False, checked=False)
+    if remedy is InspectionRemedy.REPLACE_PHOTO and (
+        not source_conflict_visible or not has_reference_photo
+    ):
+        # Preserve the visible problem but refuse to blame the human source
+        # unless the first image was present and independently proved it.
+        remedy = InspectionRemedy.REVIEW
+        source_conflict_visible = False
     return Inspection(
         looks_right=looks_right,
         confident=confident,
         problems=problems,
+        remedy=remedy,
+        source_conflict_visible=source_conflict_visible,
     )
 
 
@@ -254,7 +344,7 @@ def _inspect(
         logger.exception("the vision check could not run")
         return Inspection(looks_right=False, confident=False, checked=False)
 
-    return parse(_output_text(body))
+    return parse(_output_text(body), has_reference_photo=bool(reference_image_bytes))
 
 
 def inspect(
@@ -271,7 +361,7 @@ def inspect(
         model: Override the configured vision model.
         reference_image_bytes: The person's original property photo, when
             available. It is compared with the photo visible in the flyer in
-            the same call, so enhancement drift cannot pass as good layout.
+            the same call, so a bad crop or placement cannot pass as good layout.
 
     Returns:
         An `Inspection`. Never raises: this runs on the delivery path, and a

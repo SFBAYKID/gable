@@ -3,17 +3,13 @@
 The important idea here is a cost one: **most of this needs no AI at all.**
 
 Cropping and resizing an image to a target aspect ratio is deterministic. Pillow
-does it locally, in milliseconds, for nothing. An image model is only needed when
-pixels must be *invented* — when the source is smaller than the frame and
-enlarging it would visibly smear. So the decision this module makes is not "how
-do I fix this photo" but "does this photo need a model at all", and the answer is
-usually no.
+does it locally, in milliseconds, for nothing. When a source is too small to fill
+the frame cleanly, the safe fallback keeps a foreground copy at no more than 2x
+over a blurred, darkened fill made from that same upload. No model invents detail.
 
-`assess` is pure and answers that question. `fit_locally` performs the free path.
-Neither touches the network.
-
-Does not handle: the generative upscale itself (that is `photos/enhance.py`, and
-it is policy-gated), uploading anywhere, or deciding *which* photo to use.
+`assess` is pure and describes the fit. `fit_locally` performs an ordinary cover
+fit; `fit_small_source` performs the source-only fallback. None touches the
+network. This module does not upload or decide *which* photo to use.
 """
 
 from __future__ import annotations
@@ -23,7 +19,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import Final
 
-from PIL import Image, ImageOps
+from PIL import Image, ImageEnhance, ImageFilter, ImageOps
 
 #: Below this, enlarging is visible as softness on a printed flyer. A 1080-wide
 #: frame filled from a 540-wide source is a 2x enlargement, which is the most a
@@ -44,6 +40,12 @@ OUTPUT_QUALITY: Final[int] = 88
 # decoded RGB frame comfortably inside the 1 GB production process.
 MAX_SOURCE_PIXELS: Final[int] = 50_000_000
 
+# Background detail is deliberately suppressed: it exists only to fill the
+# frame behind the untouched-composition foreground, never to look like a
+# second sharp copy of the property.
+SMALL_SOURCE_BLUR_RADIUS: Final[float] = 18.0
+SMALL_SOURCE_BACKGROUND_BRIGHTNESS: Final[float] = 0.55
+
 
 class FitAction(StrEnum):
     """What has to happen to make a photo sit correctly in the frame."""
@@ -56,8 +58,8 @@ class FitAction(StrEnum):
     DOWNSCALE = "downscale"
     #: Wrong shape, enough pixels. Crop to the frame — free.
     CROP = "crop"
-    #: Too few pixels. Enlarging would smear, so a model must invent detail.
-    NEEDS_UPSCALE = "needs_upscale"
+    #: Too few pixels for a full-frame cover. Use the source-only backdrop fit.
+    SMALL_SOURCE = "small_source"
 
 
 @dataclass(frozen=True, slots=True)
@@ -78,14 +80,14 @@ class FitAssessment:
     reason: str
 
     @property
-    def needs_model(self) -> bool:
-        """True only when a paid image call is genuinely unavoidable."""
-        return self.action is FitAction.NEEDS_UPSCALE
+    def needs_small_source_fit(self) -> bool:
+        """True when the source-only contained-over-backdrop fit is required."""
+        return self.action is FitAction.SMALL_SOURCE
 
     @property
     def is_free(self) -> bool:
-        """True when Pillow alone can do it, at no cost and no latency."""
-        return not self.needs_model
+        """True because every current fit is local and deterministic."""
+        return True
 
 
 def assess(
@@ -103,7 +105,8 @@ def assess(
         target_height: Hero frame height in pixels. Must be positive.
 
     Returns:
-        A `FitAssessment`. Check `needs_model` before spending anything.
+        A `FitAssessment`. Check `needs_small_source_fit` to select the safe
+        contained-over-backdrop path.
 
     Raises:
         ValueError: if any dimension is not positive. A zero dimension is a
@@ -138,11 +141,12 @@ def assess(
         crop_loss = 1.0 - (source_aspect / target_aspect)
 
     if upscale > MAX_TOLERABLE_UPSCALE:
-        action = FitAction.NEEDS_UPSCALE
+        action = FitAction.SMALL_SOURCE
         reason = (
             f"the photo is {source_width}x{source_height}, which would have to be "
             f"enlarged {upscale:.1f}x to fill a {target_width}x{target_height} frame. "
-            f"Past {MAX_TOLERABLE_UPSCALE:.0f}x that looks soft, so this one needs a model."
+            f"Past {MAX_TOLERABLE_UPSCALE:.0f}x that looks soft, so the original stays at "
+            "no more than 2x over a source-only blurred fill."
         )
     elif abs(source_aspect - target_aspect) <= ASPECT_EPSILON:
         if upscale > 1.0:
@@ -243,6 +247,71 @@ def fit_locally(
 
         out = io.BytesIO()
         resized.save(out, format="JPEG", quality=quality, optimize=True)
+        return out.getvalue()
+
+
+def fit_small_source(
+    image_bytes: bytes,
+    target_width: int,
+    target_height: int,
+    quality: int = OUTPUT_QUALITY,
+) -> bytes:
+    """Fit a very small source without inventing or excessively stretching detail.
+
+    A cover crop would enlarge the source past the 2x quality ceiling. Instead,
+    this makes a full-frame blurred and darkened background from the same source,
+    then places a contain-fitted foreground at no more than 2x. The foreground
+    keeps the complete source composition and is never sharpened or generated.
+
+    Args:
+        image_bytes: The human-supplied source in any Pillow-readable format.
+        target_width: Exact measured frame width in pixels.
+        target_height: Exact measured frame height in pixels.
+        quality: JPEG quality for the output.
+
+    Returns:
+        JPEG bytes at exactly ``target_width`` by ``target_height``.
+
+    Raises:
+        ValueError: if a target dimension is invalid or the decoded source
+            exceeds the safe pixel limit.
+        OSError: if Pillow cannot read ``image_bytes``.
+    """
+    if target_width <= 0 or target_height <= 0:
+        msg = f"target must be positive, got {target_width}x{target_height}"
+        raise ValueError(msg)
+
+    with Image.open(io.BytesIO(image_bytes)) as opened:
+        if opened.width * opened.height > MAX_SOURCE_PIXELS:
+            msg = "the source image dimensions exceed the safe processing limit"
+            raise ValueError(msg)
+        source = ImageOps.exif_transpose(opened).convert("RGB")
+
+        background = ImageOps.fit(
+            source,
+            (target_width, target_height),
+            method=Image.Resampling.LANCZOS,
+            centering=(0.5, 0.5),
+        )
+        background = background.filter(ImageFilter.GaussianBlur(SMALL_SOURCE_BLUR_RADIUS))
+        background = ImageEnhance.Brightness(background).enhance(SMALL_SOURCE_BACKGROUND_BRIGHTNESS)
+
+        scale = min(
+            MAX_TOLERABLE_UPSCALE,
+            target_width / source.width,
+            target_height / source.height,
+        )
+        foreground_size = (
+            max(1, round(source.width * scale)),
+            max(1, round(source.height * scale)),
+        )
+        foreground = source.resize(foreground_size, Image.Resampling.LANCZOS)
+        left = (target_width - foreground.width) // 2
+        top = (target_height - foreground.height) // 2
+        background.paste(foreground, (left, top))
+
+        out = io.BytesIO()
+        background.save(out, format="JPEG", quality=quality, optimize=True)
         return out.getvalue()
 
 

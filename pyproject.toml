@@ -15,7 +15,6 @@ license = { text = "Proprietary" }
 # Runtime dependencies. Each one is either named explicitly in CLAUDE.md
 # section 2.6 or required by a stage in ARCHITECTURE.md section 4.
 dependencies = [
-    "httpx>=0.27",                    # HTTP with first-class timeouts (5.4)
     "slack-bolt>=1.18",               # Socket Mode app (ARCHITECTURE 2.2)
     "google-api-python-client>=2.130", # Sheets + Drive + Slides
     "google-auth>=2.29",              # service-account credentials

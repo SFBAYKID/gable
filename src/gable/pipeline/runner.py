@@ -41,7 +41,7 @@ from gable.sheets import repository as repo
 from gable.slides import fields as template_fields
 from gable.slides import fitting, preflight
 from gable.slides import manifest as template_manifest
-from gable.voice import safe
+from gable.voice import quote_rail, safe
 
 logger = logging.getLogger("gable.runner")
 
@@ -639,31 +639,51 @@ class Runner:
         verdict = judge(final_text or "", expected, 1)
         seen: Inspection = self.look_at(run_id, self.thumbnail(output_id))
 
-        problems = list(verdict.problems)
+        non_visual_problems = list(verdict.problems)
         if final_text is None:
-            problems.insert(0, "the final text could not be read back for verification")
+            non_visual_problems.insert(0, "the final text could not be read back for verification")
+        if text_fit.unreadable:
+            non_visual_problems.append(
+                f"the {text_fit.unreadable[0].text[:24]} would have to be shrunk so far "
+                "it would be hard to read"
+            )
+
+        problems = list(non_visual_problems)
         if not seen.checked:
             problems.append("the visual inspection could not run")
         elif not seen.confident:
             problems.append("the visual inspection was inconclusive")
         elif not seen.looks_right:
             problems.extend(seen.problems or ["the visual inspection found a problem"])
-        if text_fit.unreadable:
-            problems.append(
-                f"the {text_fit.unreadable[0].text[:24]} would have to be shrunk so far "
-                "it would be hard to read"
-            )
 
         if problems:
+            # A source-photo contradiction has one clear recovery: the next
+            # thread image replaces it on this run. Mixed or non-photo failures
+            # stay in needs_review because a new photo cannot fix them.
+            needs_replacement_photo = not non_visual_problems and seen.needs_source_replacement
+            paused_status = "needs_photo" if needs_replacement_photo else "needs_review"
+            detail = "; ".join(problems)[:400]
+            fields: dict[str, str | int] = {"output_file_id": output_id, "output_url": output_url}
+            if needs_replacement_photo:
+                # Listing context may be shown back to a person. Keep the
+                # model's bounded finding in the internal event detail, while
+                # the mutable reason is fixed, plain, and house-style safe.
+                fields["failure_reason"] = (
+                    "waiting for the correct property image because the supplied photo conflicts "
+                    "with the listing"
+                )
             store.set_status(
                 self.connection,
                 run_id,
-                "needs_review",
-                "; ".join(problems)[:400],
-                output_file_id=output_id,
-                output_url=output_url,
+                paused_status,
+                (
+                    f"replacement supplied photo required: {detail}"
+                    if needs_replacement_photo
+                    else detail
+                )[:400],
+                **fields,
             )
-            result.status = "needs_review"
+            result.status = paused_status
             result.output_url = output_url
             if not seen.checked:
                 spoken = safe("I rendered it, but I could not complete the visual inspection.")
@@ -671,15 +691,20 @@ class Runner:
                 spoken = safe("I rendered it, but the visual inspection was inconclusive.")
             else:
                 spoken = seen.say or verdict.say or safe(f"I rendered it, but {problems[0]}")
-            message = safe(
-                "\n".join(
-                    [
-                        spoken,
-                        "I have not sent it as finished. I kept the supplied image and draft "
-                        "so this run can be retried without starting over.",
-                    ]
+            if needs_replacement_photo:
+                question = "Can you send the correct property image?"
+                message = safe(f"{quote_rail([spoken])}\n\n{question}")
+                result.questions.append(question)
+            else:
+                message = safe(
+                    "\n".join(
+                        [
+                            spoken,
+                            "I have not sent it as finished. I kept the supplied image and draft "
+                            "so this run can be retried without starting over.",
+                        ]
+                    )
                 )
-            )
             result.said.append(message)
             posted_ts = self.say(message, self.origin_thread_ts or None)
             run_reporting.remember_thread(self.connection, run_id, posted_ts, self.origin_thread_ts)

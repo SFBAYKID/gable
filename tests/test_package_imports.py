@@ -28,7 +28,6 @@ def test_package_tree_is_complete() -> None:
         "gable.cli",
         "gable.sheets.client",
         "gable.sheets.repository",
-        "gable.photos.enhance",
         "gable.photos.store",
         "gable.slackapp.app",
         "gable.slackapp.runtime",

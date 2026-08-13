@@ -54,10 +54,6 @@ def _exercise_main(
         db_path=tmp_path / "gable.db",
         slack_bot_token="xoxb-test",
         slack_channel_id="C0B02721MNK",
-        reprocessing_enabled=True,
-        max_image_calls_per_listing=1,
-        openai_image_api_key="image-key",
-        image_model_hq="gpt-image-2",
     )
     intake = SimpleNamespace(
         agent_name="Mike Clunch",
@@ -162,19 +158,12 @@ def test_result_status_controls_the_process_exit_code(
 
 
 @pytest.mark.parametrize("resume", [False, True])
-def test_manual_runs_use_the_guarded_photo_enlargement_path(
+def test_manual_runs_do_not_expose_an_image_model_callback(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     resume: bool,
 ) -> None:
-    """A tiny retained upload gets the same budgeted edit as a Slack handoff."""
-    guarded_calls: list[tuple[object, ...]] = []
-
-    def guarded(*args: object, **kwargs: object) -> bytes:
-        guarded_calls.append((*args, kwargs))
-        return b"enhanced"
-
-    monkeypatch.setattr("tools.run_row.guarded_upscale_photo", guarded)
+    """The operator path cannot invoke the retired generative upscale provider."""
     existing = (
         SimpleNamespace(
             status="needs_template",
@@ -196,16 +185,7 @@ def test_manual_runs_use_the_guarded_photo_enlargement_path(
     assert actual == 0
     assert len(build_calls) == 1
     _args, kwargs = build_calls[0]
-    upscale = cast(Callable[[str, bytes, int, int], bytes], kwargs["upscale_photo"])
-    assert upscale("run-existing", b"small", 1078, 504) == b"enhanced"
-    guarded_args = guarded_calls[0]
-    assert guarded_args[1:5] == ("run-existing", b"small", 1078, 504)
-    assert guarded_args[-1] == {
-        "enabled": True,
-        "max_calls": 1,
-        "api_key": "image-key",
-        "model": "gpt-image-2",
-    }
+    assert "upscale_photo" not in kwargs
     if resume:
         assert kwargs["hero_photo_url"] == "http://images.example/mike-small.jpg"
         assert kwargs["origin_thread_ts"] == "1786605927.301519"

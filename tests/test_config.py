@@ -44,14 +44,12 @@ def test_defaults_match_dotenv_example() -> None:
     assert settings.poll_interval_seconds == 600
     assert settings.poll_busy_interval_seconds == 120
     assert settings.max_batch == 25
-    assert settings.max_image_calls_per_listing == 1
     assert settings.photo_max_edge_px == 2400
     assert settings.photo_jpeg_quality == 85
     assert settings.photo_public_root == Path("/var/www/gable-photos")
     assert settings.photo_public_base == "http://143.110.146.87"
     assert settings.conversation_model == "gpt-5.6-sol"
     assert settings.vision_model == "gpt-5.6-sol"
-    assert settings.image_model_hq == "gpt-image-2"
     assert settings.tab_responses == "Form Responses 1"
     assert settings.db_path == Path("/opt/gable/var/gable.db")
 
@@ -253,11 +251,6 @@ def test_batch_ceiling_is_enforced() -> None:
         _load(GABLE_MAX_BATCH="5000")
 
 
-def test_image_call_allowance_cannot_exceed_one_per_listing() -> None:
-    with pytest.raises(ConfigError, match="GABLE_MAX_IMAGE_CALLS_PER_LISTING"):
-        _load(GABLE_MAX_IMAGE_CALLS_PER_LISTING="2")
-
-
 def test_unknown_enum_lists_the_valid_options() -> None:
     with pytest.raises(ConfigError) as excinfo:
         _load(GABLE_PHOTO_POLICY="generate_sometimes")
@@ -269,20 +262,6 @@ def test_unknown_enum_lists_the_valid_options() -> None:
 # --- photo policy semantics -------------------------------------------------
 
 
-@pytest.mark.parametrize(
-    ("policy", "enhances"),
-    [
-        (PhotoPolicy.RETRIEVE_ONLY, True),
-        (PhotoPolicy.GENERATE_WITH_APPROVAL, True),
-        (PhotoPolicy.GENERATE_FREELY, True),
-        (PhotoPolicy.NO_AI, False),
-    ],
-)
-def test_policy_semantics(policy: PhotoPolicy, enhances: bool) -> None:
-    """Only supplied-photo reprocessing is connected at runtime."""
-    assert policy.allows_reprocessing is enhances
-
-
 @pytest.mark.parametrize("policy", ["generate_with_approval", "generate_freely"])
 def test_generation_policies_are_rejected_because_no_generator_is_connected(
     policy: str,
@@ -290,35 +269,6 @@ def test_generation_policies_are_rejected_because_no_generator_is_connected(
     with pytest.raises(ConfigError) as excinfo:
         _load(GABLE_PHOTO_POLICY=policy)
     assert any("no synthetic-photo generator" in problem for problem in excinfo.value.problems)
-
-
-def test_no_image_key_still_boots() -> None:
-    """A deployment that never touches an image model is a normal state."""
-    settings = _load()
-    assert settings.images_available is False
-    assert settings.reprocessing_enabled is False
-
-
-def test_reprocessing_needs_both_the_flag_and_a_key() -> None:
-    """Reshaping a real photo to fit the frame still calls an image model."""
-    assert _load(GABLE_PHOTO_REPROCESS="true").reprocessing_enabled is False
-    assert (
-        _load(
-            GABLE_PHOTO_REPROCESS="true", OPENAI_IMAGE_API_KEY="sk-abc123def456"
-        ).reprocessing_enabled
-        is True
-    )
-
-
-def test_no_ai_policy_overrides_the_reprocess_flag() -> None:
-    """Policy is authoritative; the flag is subordinate."""
-    settings = _load(
-        GABLE_PHOTO_POLICY="no_ai",
-        GABLE_PHOTO_REPROCESS="true",
-        OPENAI_IMAGE_API_KEY="sk-abc123def456",
-    )
-    assert settings.photo_reprocess is True
-    assert settings.reprocessing_enabled is False
 
 
 def test_live_ai_key_is_read() -> None:

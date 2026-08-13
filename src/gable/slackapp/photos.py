@@ -3,9 +3,9 @@
 Slack's private URL is only a transport. The upload is downloaded with the bot
 token, checked before any authorization header can leave Slack's own hosts,
 normalised without changing its composition, published, verified anonymously,
-and attached to the same paused database run. The exact crop and any necessary
-upscale happen later, after the selected template's real frame is measured, so
-the human photo is never cropped twice. No new run or retry is opened.
+and attached to the same paused database run. The exact deterministic fit happens
+later, after the selected template's real frame is measured, so the human photo
+is never cropped twice. No new run or retry is opened.
 """
 
 from __future__ import annotations
