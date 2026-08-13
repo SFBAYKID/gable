@@ -136,7 +136,7 @@ and update the ones your change made false.** In the same commit, not later.
 
 | If you changed… | Update, in the same commit |
 |---|---|
-| A design decision, or a tradeoff | `ARCHITECTURE.md` — the affected section **and** a new row in the §9 decision log |
+| A design decision, or a tradeoff | `ARCHITECTURE.md` — the affected section **and** a new row in `DECISIONS.md` |
 | A module, a package, or a file's home | The `CLAUDE.md` §6 layout tree |
 | Anything the runtime agent says or does | `AGENTS.md` |
 | A variable the code reads | `.env.example`, with the comment explaining it |
@@ -224,7 +224,7 @@ deleted and a fitted `createImage` replacement is created at the same exact
 size and transform from a public URL. No Enterprise plan, marketplace review,
 or second language is required; the same service account handles it.
 
-Design detail lives in `ARCHITECTURE.md` §2.1 and the §9 decision log. Do not
+Design detail lives in `ARCHITECTURE.md` §2.1 and `DECISIONS.md`. Do not
 re-open Canva without reading both.
 
 ### 4.3 Verified evidence, so build on these
@@ -327,7 +327,8 @@ not the line count.
 ```
 gable/
 ├── CLAUDE.md                    # this file
-├── ARCHITECTURE.md              # system design, data model, decisions
+├── ARCHITECTURE.md              # system design and data model
+├── DECISIONS.md                 # append-only decision log, with reasons
 ├── AGENTS.md                    # runtime agent behavior and Slack contract
 ├── README.md                    # setup and operations
 ├── TESTING.md                   # repeatable unit, integration and live checks
@@ -505,8 +506,7 @@ changes the property, replaces a sky, or invents missing content.
   held in memory only within that bound. Do not add unbounded reads or retain
   images between runs.
 - **Python 3.12.3** on the droplet (confirmed). `mypy` is nonetheless pinned to
-  `python_version = "3.11"` as a deliberate floor — see the `ARCHITECTURE.md`
-  decision log. `systemd` service, not `nohup`. Restart on failure.
+  `python_version = "3.11"` as a deliberate floor — see `DECISIONS.md`. `systemd` service, not `nohup`. Restart on failure.
 - Deploy by git pull plus `systemctl restart`, driven by the `Makefile`. No
   editing files on the server by hand.
 - Logs to `journald`, structured JSON, secrets redacted.

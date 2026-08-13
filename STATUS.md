@@ -2,6 +2,41 @@
 
 Last updated 2026-08-13 by the building agent.
 
+## 2026-08-13 the Louis Smith acceptance test passed end to end
+
+Deployed `00036a4`. Polling stayed off throughout; every run was started
+explicitly with `tools.run_row`.
+
+`Testing_1` row 62 — Louis Smith, Sold, 10205 Douglas Ave, Silver Spring, MD
+20902 — was announced with exactly two messages, Chase uploaded one property
+image in that thread, and the same run delivered one editable Slides link.
+Verified against the live database: `delivered`, **attempts 1**, `ai_enhanced`
+false, **zero image-model spend rows**, one run for the response, zero pending
+notifications, no abandoned photo ingress. The rendered flyer was exported and
+inspected independently: correct house, correct full address, Louis's name,
+Realtor(R), 410.564.6618, louis@cornerhouserealty.com and his own headshot, no
+Kelli sample data, no placeholders or clipping.
+
+Two real defects were found and fixed by that test, neither of which any unit
+test would have caught:
+
+1. **The visual inspection never ran.** Reasoning tokens come out of the same
+   `max_output_tokens` as the answer; at `effort: high` the model spent 886 of
+   1000 thinking and the JSON verdict truncated mid-array. It failed closed, as
+   designed, but reported only "the visual inspection could not run". The
+   ceiling is now 4000 and an exhausted budget is named in the log.
+2. **The agent cut-out was matted onto white.** The portrait was fitted through
+   the JPEG property path, so the transparent cut-out became an opaque white
+   rectangle whose corner covered the address box. Two independent vision calls
+   caught it. Portraits now fit as PNG with alpha intact; the hero photo still
+   mattes, which is correct for a full-bleed image.
+
+The vision gate earned its place here: it refused a flyer that was otherwise
+complete, and it was right both times.
+
+`ARCHITECTURE.md` reached the 800-line ceiling, so the append-only decision log
+moved to `DECISIONS.md`.
+
 ## 2026-08-13 the release candidate's gate is green
 
 `ruff format`, `ruff check`, `mypy --strict` and 1,269 tests all pass locally.
