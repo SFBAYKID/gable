@@ -15,11 +15,16 @@ from sqlite3 import Connection
 from typing import Any, Final
 
 from gable import spend
+from gable.agents.contacts import Contact, ContactsError, append_contact
+from gable.agents.lookup import find_agent
 from gable.config import Settings
+from gable.db import store
+from gable.listings.enrich import default_research
+from gable.listings.intake import Intake
 from gable.photos.headshots import url_for_agent as headshot_url_for
 from gable.photos.store import PhotoHost
 from gable.photos.verify import verify as verify_image
-from gable.pipeline.runner import Runner, default_research
+from gable.pipeline.runner import Runner
 from gable.pipeline.vision import Inspection
 from gable.pipeline.vision import inspect as inspect_flyer
 from gable.slides import fitting
@@ -583,6 +588,69 @@ def build_runner(
         """
         return place_hero_photo(slides, file_id, url, template_label)
 
+    def record_unknown_agent(intake: Intake) -> str:
+        """Find an agent the roster has never seen, write them down, and say so.
+
+        Args:
+            intake: The submission naming them.
+
+        Returns:
+            A sentence naming what was written and the page it came from, or
+            empty when nothing usable was found.
+
+        Raises:
+            Nothing. A flyer built with the office line and an honest note is
+            better than no flyer.
+        """
+        name = intake.agent_name.strip()
+        try:
+            found = spend.guarded_call(
+                connection,
+                spend.Estimate(
+                    service="firecrawl",
+                    model="search",
+                    usd=spend.FIRECRAWL_PER_SEARCH,
+                    detail="agent lookup on the brokerage site",
+                ),
+                lambda: find_agent(name, settings.firecrawl_api_key),
+            )
+        except Exception:
+            logger.exception("the agent lookup did not complete")
+            return ""
+        if not found.is_usable:
+            return (
+                f"I do not have contact details for {name}, so this uses the "
+                "office number. Send me their number and I will record it."
+            )
+        parts = [part for part in name.split() if part]
+        contact = Contact(
+            email=found.email or intake.agent_email,
+            first_name=parts[0] if parts else "",
+            last_name=" ".join(parts[1:]),
+            phone=found.phone,
+        )
+        try:
+            written = append_contact(
+                drive, settings.drive_id, settings.drive_templates_folder_id, contact
+            )
+        except ContactsError:
+            logger.exception("the contact workbook could not be updated")
+            return ""
+        if not written:
+            return ""
+        store.upsert_salesperson(
+            connection,
+            email=contact.email,
+            first_name=contact.first_name,
+            last_name=contact.last_name,
+            phone=contact.phone,
+        )
+        detail = " and ".join(part for part in (contact.phone, contact.email) if part)
+        return (
+            f"I did not have {name}, so I added them from the brokerage site: "
+            f"{detail}. Worth checking before this goes out."
+        )
+
     return Runner(
         connection=connection,
         say=say,
@@ -600,6 +668,7 @@ def build_runner(
         thumbnail=thumbnail,
         hero_photo_url=hero_photo_url,
         origin_thread_ts=origin_thread_ts,
+        record_unknown_agent=record_unknown_agent,
         headshot_for=lambda name: headshot_url_for(
             drive,
             settings.drive_id,

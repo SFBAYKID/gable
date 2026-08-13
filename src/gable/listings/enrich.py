@@ -25,8 +25,12 @@ import json
 import re
 import urllib.error
 import urllib.request
+from collections.abc import Callable
 from dataclasses import dataclass, field
+from sqlite3 import Connection
 from typing import Any, Final
+
+from gable import spend
 
 #: Firecrawl search. https://docs.firecrawl.dev/api-reference/endpoint/search
 _SEARCH_URL: Final[str] = "https://api.firecrawl.dev/v2/search"
@@ -245,3 +249,39 @@ def fill_gaps(known: dict[str, str], found: Facts) -> tuple[dict[str, str], list
         merged[name] = value
         notes.append(name.replace("_", " "))
     return merged, notes
+
+
+def default_research(
+    api_key: str,
+    connection: Connection | None = None,
+) -> Callable[[str], Facts]:
+    """A research function bound to a Firecrawl key.
+
+    Args:
+        api_key: The Firecrawl key. Empty disables lookups, and the run then
+            asks rather than researching.
+        connection: Spend ledger for the live paid path. Tests and offline
+            callers may omit it.
+
+    Returns:
+        A callable taking an address.
+
+    Raises:
+        Nothing.
+    """
+
+    def research(address: str) -> Facts:
+        if connection is None or not api_key:
+            return look_up(address, api_key)
+        estimate = spend.Estimate(
+            service="firecrawl",
+            model="search",
+            usd=spend.FIRECRAWL_PER_SEARCH,
+            detail="one property search reservation",
+        )
+        try:
+            return spend.guarded_call(connection, estimate, lambda: look_up(address, api_key))
+        except spend.BudgetExceededError:
+            return Facts(caveats=["Testing has reached its spending limit"])
+
+    return research

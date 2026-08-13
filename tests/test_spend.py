@@ -8,8 +8,8 @@ import pytest
 
 from gable import spend
 from gable.db.schema import apply_migrations, connect
+from gable.listings import enrich as enrich_module
 from gable.listings.enrich import Facts
-from gable.pipeline import runner as runner_module
 
 
 @pytest.fixture
@@ -94,9 +94,9 @@ def test_live_research_reserves_and_records_one_firecrawl_search(
         calls.append(f"{address}:{api_key}")
         return Facts(beds="4")
 
-    monkeypatch.setattr(runner_module, "look_up", lookup)
+    monkeypatch.setattr(enrich_module, "look_up", lookup)
 
-    found = runner_module.default_research("key", db)("123 Main St")
+    found = enrich_module.default_research("key", db)("123 Main St")
 
     assert found.beds == "4"
     assert calls == ["123 Main St:key"]

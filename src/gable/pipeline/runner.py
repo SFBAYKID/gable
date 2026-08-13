@@ -29,9 +29,8 @@ from dataclasses import dataclass, field
 from sqlite3 import Connection
 from typing import Any, Final
 
-from gable import spend
 from gable.db import store
-from gable.listings.enrich import Facts, look_up
+from gable.listings.enrich import Facts
 from gable.listings.intake import Intake, price_note
 from gable.listings.review import review_values
 from gable.pipeline import audit, people
@@ -149,6 +148,11 @@ class Runner:
     #: Publishes this agent's headshot and returns a URL Slides can fetch.
     #: Empty leaves the design's own face, which is a flyer worth a look.
     headshot_for: Callable[[str], str] = lambda _name: ""
+    #: Records an agent the roster has never seen, by looking them up on the
+    #: brokerage site. Returns the sentence saying what was written, or empty
+    #: when nothing was found — never raises, because a flyer with the office
+    #: number and a note is better than no flyer.
+    record_unknown_agent: Callable[[Intake], str] = lambda _intake: ""
     #: Names the stage being worked on, for Slack's waiting indicator. Cosmetic
     #: by contract: it is called around real work and must never affect it.
     progress: Callable[[str], None] = lambda _stage: None
@@ -268,6 +272,15 @@ class Runner:
                 [],
                 result,
             )
+
+        # 5a. An agent nobody has recorded is looked up and written down. This
+        # happens before the values are built, so the flyer carries their own
+        # number rather than the office line, and what was written is said out
+        # loud with the page it came from so a wrong detail is correctable.
+        added = ""
+        if not repo.find_salesperson(self.connection, intake.agent_email):
+            self.progress("is looking up the agent...")
+            added = self.record_unknown_agent(intake)
 
         # 5b. Ask for the hero photo BEFORE building anything.
         #
@@ -552,10 +565,10 @@ class Runner:
         thread_root = self.origin_thread_ts or posted_ts
         # The link goes first. A flyer that is otherwise complete should not
         # wait on a number the agent can supply in two seconds afterwards.
-        note = price_note(intake, "price" in resolution.fields)
-        if note:
-            result.said.append(safe(note))
-            self.say(safe(note), thread_root or None)
+        for aside in (added, price_note(intake, "price" in resolution.fields)):
+            if aside:
+                result.said.append(safe(aside))
+                self.say(safe(aside), thread_root or None)
         if thread_root:
             store.set_status(
                 self.connection,
@@ -757,39 +770,3 @@ class Runner:
     def _name(self, intake: Intake) -> str:
         """What the finished file is called in Drive, so Carmen can scan for it."""
         return f"{intake.category} — {intake.address} — {intake.agent_name}".strip(" —")
-
-
-def default_research(
-    api_key: str,
-    connection: Connection | None = None,
-) -> Callable[[str], Facts]:
-    """A research function bound to a Firecrawl key.
-
-    Args:
-        api_key: The Firecrawl key. Empty disables lookups, and the run then
-            asks rather than researching.
-        connection: Spend ledger for the live paid path. Tests and offline
-            callers may omit it.
-
-    Returns:
-        A callable taking an address.
-
-    Raises:
-        Nothing.
-    """
-
-    def research(address: str) -> Facts:
-        if connection is None or not api_key:
-            return look_up(address, api_key)
-        estimate = spend.Estimate(
-            service="firecrawl",
-            model="search",
-            usd=spend.FIRECRAWL_PER_SEARCH,
-            detail="one property search reservation",
-        )
-        try:
-            return spend.guarded_call(connection, estimate, lambda: look_up(address, api_key))
-        except spend.BudgetExceededError:
-            return Facts(caveats=["Testing has reached its spending limit"])
-
-    return research
