@@ -248,8 +248,11 @@ def validate(manifest: Manifest, values: dict[str, str]) -> list[Problem]:
             problems.append(
                 Problem(
                     slot.name,
-                    f"The {readable} is {len(value)} characters and this design fits "
-                    f"about {slot.max_chars}. Shall I shorten it, or use a different design?",
+                    # A statement, not a question. Gable does not stop for this
+                    # — the fitter shrinks the text and the flyer is delivered —
+                    # and a question nobody is waiting for an answer to is worse
+                    # than saying nothing.
+                    f"The {readable} is longer than this design's box, so I sized it down to fit.",
                     blocking=False,
                 )
             )

@@ -276,15 +276,12 @@ class PhotoHandoff:
             progress("is building the flyer...")
             runner = self.runner_for(connection, public_url, thread_ts, progress)
             result = runner.resume(_submission(stored), run.run_id)
+            # The run speaks for itself. Adding a line here after it has posted
+            # its outcome and its link gives one event four messages, and the
+            # last one restates what the thread already says.
+            if result.said:
+                return ""
             action = "sharpened, enlarged, and fitted" if ai_enhanced else "resized and fitted"
-            if result.status == "delivered":
-                return f"I {action} the photo and finished the flyer."
-            if result.status == "needs_review":
-                return f"I {action} the photo and resumed the flyer, but it still needs review."
-            if result.needs_a_human:
-                return (
-                    f"I {action} the photo. The flyer is waiting on the other detail I asked for."
-                )
             return f"I {action} the photo, but I could not finish the flyer. I stopped there."
         finally:
             connection.close()

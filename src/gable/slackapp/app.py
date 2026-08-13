@@ -219,7 +219,12 @@ def process_file_share(
         "is building the flyer...",
     ) as waiting:
         try:
-            outcome = safe_reply(handler(event, client, waiting.stage))
+            spoken = handler(event, client, waiting.stage)
+            # An empty outcome means the run already said everything in the
+            # thread. Saying nothing is the correct message then.
+            if not spoken.strip():
+                return
+            outcome = safe_reply(spoken)
         except Exception:
             logger.exception("the photo workflow failed")
             outcome = (

@@ -97,7 +97,11 @@ class FakeRunner:
         """Record a same-run resume without rendering Google Slides."""
         self.seen.extend([submission.response_row_id, run_id])
         store.set_status(self.connection, run_id, "delivered", "test delivered")
-        return RunResult(run_id=run_id, status="delivered")
+        return RunResult(
+            run_id=run_id,
+            status="delivered",
+            said=["Your flyer is ready. <https://slides.test/x|Open the flyer>"],
+        )
 
 
 def _handoff(
@@ -152,7 +156,9 @@ def test_one_thread_image_resumes_the_same_run_without_a_new_attempt(tmp_path: P
 
     said = _handoff(path, seen).handle(_event(), FakeSlackClient())
 
-    assert said == "I resized and fitted the photo and finished the flyer."
+    # Nothing, on purpose: the run posted its own outcome and its link, so a
+    # line here would be a fourth message restating the thread.
+    assert said == ""
     assert seen == ["response-1", run_id]
     connection = connect(path)
     assert store.run_attempt_count(connection, "response-1") == 1
@@ -243,7 +249,8 @@ def test_a_tiny_upload_is_upscaled_automatically_and_resumes_the_run(tmp_path: P
 
     said = _handoff(path, seen, _jpeg(200, 200), upscale).handle(_event(), FakeSlackClient())
 
-    assert said == "I sharpened, enlarged, and fitted the photo and finished the flyer."
+    # The upscale still happened; the run just speaks for itself afterwards.
+    assert said == ""
     assert calls == [(run_id, 1080, 1350)]
     assert seen == ["response-1", run_id]
     connection = connect(path)
@@ -269,7 +276,9 @@ def test_a_failed_ai_upscale_uses_the_original_without_asking_again(tmp_path: Pa
 
     said = _handoff(path, seen, _jpeg(200, 200), fail).handle(_event(), FakeSlackClient())
 
-    assert said == "I resized and fitted the photo and finished the flyer."
+    # Nothing, on purpose: the run posted its own outcome and its link, so a
+    # line here would be a fourth message restating the thread.
+    assert said == ""
     assert seen == ["response-1", run_id]
     connection = connect(path)
     row = connection.execute("SELECT ai_enhanced FROM runs WHERE run_id = ?", (run_id,)).fetchone()

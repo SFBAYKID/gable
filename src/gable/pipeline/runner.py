@@ -349,9 +349,11 @@ class Runner:
         blocking = [item for item in field_problems if item.blocking]
         if blocking:
             return self._ask(run_id, blocking[0].say, [], result)
-        for advisory in field_problems:
-            result.said.append(safe(advisory.say))
-            self.say(result.said[-1], None)
+        # Collected, not spoken here. Anything said mid-run while the run
+        # carries on reads as a question nobody is waiting to answer — Chase,
+        # watching one go past: "it asked a question and never allowed the user
+        # to respond". These are folded into the one message at the end.
+        advisories = [safe(item.say) for item in field_problems]
 
         # An image URL is not checked by ending in .jpg. One flyer put the
         # template's own background illustration in the headshot frame because
@@ -540,12 +542,17 @@ class Runner:
             result.output_url = output_url
             self.progress("")
             spoken = seen.say or verdict.say or safe(f"I rendered it, but {problems[0]}")
-            result.said.append(spoken)
-            posted_ts = self.say(spoken, self.origin_thread_ts or None)
-            self.say(
-                safe(f"Have a look and tell me what to change. <{output_url}|Open it>"),
-                self.origin_thread_ts or posted_ts,
+            message = safe(
+                "\n".join(
+                    [
+                        spoken,
+                        *advisories,
+                        f"Have a look and tell me what to change. <{output_url}|Open it>",
+                    ]
+                )
             )
+            result.said.append(message)
+            posted_ts = self.say(message, self.origin_thread_ts or None)
             self._remember_thread(run_id, posted_ts)
             return result
 
@@ -561,16 +568,25 @@ class Runner:
         result.status = "delivered"
         result.output_url = output_url
         self.progress("")
-        message = safe(f"Your flyer is ready. <{output_url}|Open the flyer>")
+        # One message, carrying the link and everything worth knowing with it.
+        # Four separate messages for one outcome is how a thread stops being
+        # readable, and the last of them looked like a question.
+        message = safe(
+            "\n".join(
+                [
+                    f"Your flyer is ready. <{output_url}|Open the flyer>",
+                    *advisories,
+                    *[
+                        aside
+                        for aside in (added, price_note(intake, "price" in resolution.fields))
+                        if aside
+                    ],
+                ]
+            )
+        )
         result.said.append(message)
         posted_ts = self.say(message, self.origin_thread_ts or None)
         thread_root = self.origin_thread_ts or posted_ts
-        # The link goes first. A flyer that is otherwise complete should not
-        # wait on a number the agent can supply in two seconds afterwards.
-        for aside in (added, price_note(intake, "price" in resolution.fields)):
-            if aside:
-                result.said.append(safe(aside))
-                self.say(safe(aside), thread_root or None)
         if thread_root:
             store.set_status(
                 self.connection,
