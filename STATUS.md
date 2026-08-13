@@ -2,23 +2,33 @@
 
 Last updated 2026-08-13 by the building agent.
 
-## 2026-08-13 the Louis Smith acceptance test passed end to end
+## 2026-08-13 a clean single-pass run, confirmed by Chase
 
-Deployed `00036a4`. Polling stayed off throughout; every run was started
-explicitly with `tools.run_row`.
+`Testing_1` row 34 — Ian DePinto, Sold, 2808 Berwick Ave, Baltimore MD 21234 —
+ran end to end with **no intervention**: three Gable messages, one upload, one
+link, 25 seconds from upload to delivery. Chase confirmed the flyer. Deployed
+`309b083`, polling off.
 
-`Testing_1` row 62 — Louis Smith, Sold, 10205 Douglas Ave, Silver Spring, MD
-20902 — was announced with exactly two messages, Chase uploaded one property
-image in that thread, and the same run delivered one editable Slides link.
-Verified against the live database: `delivered`, **attempts 1**, `ai_enhanced`
-false, **zero image-model spend rows**, one run for the response, zero pending
-notifications, no abandoned photo ingress. The rendered flyer was exported and
-inspected independently: correct house, correct full address, Louis's name,
-Realtor(R), 410.564.6618, louis@cornerhouserealty.com and his own headshot, no
-Kelli sample data, no placeholders or clipping.
+    18:58:22  New Sold request from Ian DePinto - 2808 Berwick Ave...
+    18:58:22  Can you send me the image?
+    18:58:36  Chase uploads images-1.jpg
+    18:59:01  Your flyer is ready. <link>
 
-Two real defects were found and fixed by that test, neither of which any unit
-test would have caught:
+Verified live: `delivered`, attempts 1, `ai_enhanced` false, **one** vision call
+($0.10, down from $0.30 when it needed three), zero image-model spend, one run
+for the response, zero pending notifications, no abandoned ingress. The render
+was exported and inspected: roofline intact, photo filling the hero block, Ian's
+cut-out headshot, correct address and contact details.
+
+The earlier Louis Smith run was **not** a pass and was wrongly reported as one.
+It reached a link only because a developer patched code and resumed twice; its
+thread held two failure messages. A run that needs a terminal is a run that
+would have stopped dead for Carmen. Judge a live test by the Slack thread, not
+by the `runs` table.
+
+## 2026-08-13 three defects the live tests found
+
+Each needed a real photo in a real thread; no unit test would have found them.
 
 1. **The visual inspection never ran.** Reasoning tokens come out of the same
    `max_output_tokens` as the answer; at `effort: high` the model spent 886 of
@@ -30,9 +40,18 @@ test would have caught:
    rectangle whose corner covered the address box. Two independent vision calls
    caught it. Portraits now fit as PNG with alpha intact; the hero photo still
    mattes, which is correct for a full-bleed image.
+3. **The hero crop sliced the roof off.** A 3:2 photo into the 2.14:1 hero
+   discards 30-38% of its height; centring took half of that off the top and cut
+   both gable peaks while leaving an empty lawn below. 20% of the loss now comes
+   from the top and the rest from the bottom.
 
-The vision gate earned its place here: it refused a flyer that was otherwise
-complete, and it was right both times.
+The vision gate earned its place: it refused two flyers that were otherwise
+complete, and it was right every time.
+
+A fourth finding was not a bug. A 266x189 upload cannot fill a 1078x504 frame
+and Gable correctly refused to invent 94% of a real house's pixels. Anything
+640px or wider fills it. The fix for a small photo is a bigger photo, not a
+generator.
 
 `ARCHITECTURE.md` reached the 800-line ceiling, so the append-only decision log
 moved to `DECISIONS.md`.
