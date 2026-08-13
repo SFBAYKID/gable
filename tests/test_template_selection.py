@@ -1,10 +1,9 @@
-"""Tests for notes-aware template purpose and selection."""
+"""The template naming rule: the file is named what the form asked for."""
 
 from __future__ import annotations
 
 from gable.listings.intake import Intake
-from gable.slides.catalog import CATALOG
-from gable.slides.selection import purpose_for, rank, signals_for, template_picker
+from gable.slides.selection import template_picker
 
 
 def _intake(**overrides: str) -> Intake:
@@ -23,66 +22,6 @@ def _intake(**overrides: str) -> Intake:
     }
     values.update(overrides)
     return Intake(**values)
-
-
-def test_every_catalogue_entry_has_human_readable_usage_metadata() -> None:
-    assert len(CATALOG) == 45
-    for entry in CATALOG:
-        purpose = purpose_for(entry)
-        assert purpose.use_when
-        assert entry.category.lower() in purpose.use_when
-        assert purpose.agent_count in {1, 2}
-
-
-def test_plain_new_listing_uses_the_documented_clean_default() -> None:
-    chosen = rank("Just Listed", _intake())
-    assert chosen and chosen[0].slide == 15
-
-
-def test_private_tour_language_in_extra_notes_selects_the_tour_layout() -> None:
-    chosen = rank(
-        "Just Listed",
-        _intake(extra_notes="Please emphasize scheduling a private tour."),
-    )
-    assert chosen and chosen[0].slide == 11
-
-
-def test_two_agents_in_notes_select_the_dual_hosted_open_house_layout() -> None:
-    intake = _intake(
-        request_type="New Listing with Open House",
-        open_house="Saturday at 1 PM",
-        notes="Listed by: Stacey Abbott. Hosted by: Jason Vetter.",
-    )
-    chosen = rank("Just Listed", intake)
-    assert signals_for(intake).agent_count == 2
-    assert chosen and chosen[0].slide == 16
-
-
-def test_single_agent_two_date_open_house_uses_the_sat_and_sun_layout() -> None:
-    intake = _intake(
-        request_type="Open House",
-        open_house="Saturday 12 to 2 and Sunday 1 to 3",
-    )
-    chosen = rank("Open House", intake)
-    assert signals_for(intake).has_two_dates is True
-    assert chosen and chosen[0].slide == 31
-
-
-def test_two_agent_two_date_open_house_uses_the_matching_dual_layout() -> None:
-    intake = _intake(
-        request_type="Open House",
-        open_house="Saturday 12 to 2 and Sunday 1 to 3",
-        post_details="Listed by: Stacey Abbott. Hosted by: Jason Vetter.",
-    )
-    chosen = rank("Open House", intake)
-    assert chosen and chosen[0].slide == 28
-
-
-def test_a_dual_agent_request_never_falls_back_to_a_single_agent_design() -> None:
-    intake = _intake(
-        post_details="Listed by: Stacey Abbott. Hosted by: Jason Vetter.",
-    )
-    assert rank("Just Listed", intake) == ()
 
 
 def test_the_template_named_for_the_request_type_is_the_one_used() -> None:

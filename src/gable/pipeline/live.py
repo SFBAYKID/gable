@@ -10,11 +10,13 @@ from __future__ import annotations
 
 import logging
 import uuid
+from collections.abc import Callable
 from sqlite3 import Connection
 from typing import Any, Final
 
 from gable import spend
 from gable.config import Settings
+from gable.photos.headshots import url_for_agent as headshot_url_for
 from gable.photos.store import PhotoHost
 from gable.photos.verify import verify as verify_image
 from gable.pipeline.runner import Runner, default_research
@@ -313,6 +315,7 @@ def build_runner(
     *,
     hero_photo_url: str = "",
     origin_thread_ts: str = "",
+    progress: Callable[[str], None] = lambda _stage: None,
 ) -> Runner:
     """Assemble a `Runner` that talks to the real services.
 
@@ -325,6 +328,7 @@ def build_runner(
             thread timestamp it landed in.
         hero_photo_url: A fitted, published photo when resuming a paused run.
         origin_thread_ts: Root Slack thread that a resumed run must preserve.
+        progress: Names the current stage for Slack's waiting indicator.
 
     Returns:
         A ready `Runner`.
@@ -596,6 +600,15 @@ def build_runner(
         thumbnail=thumbnail,
         hero_photo_url=hero_photo_url,
         origin_thread_ts=origin_thread_ts,
+        headshot_for=lambda name: headshot_url_for(
+            drive,
+            settings.drive_id,
+            settings.drive_templates_folder_id,
+            name,
+            settings.photo_public_root,
+            settings.photo_public_base,
+        ),
+        progress=progress,
     )
 
 

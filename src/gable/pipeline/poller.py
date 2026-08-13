@@ -47,7 +47,10 @@ class Poller:
     client: ReadsRanges
     connection: Connection
     responses_tab: str
-    salespeople_tab: str
+    #: Refreshes the agent roster before a pass. It lives in a Drive workbook
+    #: now, not a sheet tab, so the poller is handed a callable rather than a
+    #: tab name and never learns which is which.
+    sync_roster: Callable[[], int]
     on_submission: Callable[[repo.Submission], None]
     schedule: PollSchedule = field(default_factory=PollSchedule)
     max_per_pass: int = MAX_PER_PASS
@@ -91,10 +94,16 @@ class Poller:
             transient Sheets error must not stop the watcher.
         """
         try:
-            repo.sync_salespeople(self.client, self.connection, self.salespeople_tab)
+            self.sync_roster()
             submissions = repo.read_submissions(self.client, self.responses_tab)
         except SheetError:
             logger.exception("could not read the sheet this pass")
+            return 0
+        except Exception:
+            # A roster that cannot be read must not look like an empty one:
+            # every flyer would quietly carry the office number and the design's
+            # own face. Skip the pass and say so instead.
+            logger.exception("could not refresh the agent roster this pass")
             return 0
 
         pending = repo.new_submissions(self.connection, submissions)

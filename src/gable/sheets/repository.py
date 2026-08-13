@@ -21,7 +21,6 @@ from typing import Final
 
 from gable.db import store
 from gable.listings.intake import Intake, columns_from_header, from_row, maps_a_response_row
-from gable.listings.normalize import fold_header
 from gable.sheets.client import ReadsRanges, SheetError
 
 #: The full width of the intake form. Reading the whole row keeps the content
@@ -34,15 +33,6 @@ RESPONSES_RANGE: Final[str] = "A1:Z"
 #: `Testing_1` heads row 2 under a blank one, so a tab whose header is not in
 #: the first few rows is a tab this code has not been shown.
 MAX_HEADER_SCAN: Final[int] = 5
-
-#: Read from row 1 and find the header, rather than assuming which row it is.
-#: It has already moved once: this said "A2:G200" because the header sat on row
-#: 2 under a blank row, and when the roster was rebuilt with the header on row 1
-#: the sync read Andy Jang's details as its column names, matched none of them,
-#: and stored **nobody** — silently, because a roster of zero looks the same as
-#: a roster nobody asked about until a flyer prints the office number and the
-#: design's own stock face on a real agent's post. Which it did, on 2026-08-12.
-SALESPEOPLE_RANGE: Final[str] = "A1:G200"
 
 
 @dataclass(frozen=True, slots=True)
@@ -260,89 +250,6 @@ def new_submissions(connection: Connection, submissions: list[Submission]) -> li
             continue
         pending.append(submission)
     return pending
-
-
-def find_roster_header(rows: list[list[str]]) -> tuple[int, list[str]]:
-    """Locate the roster's header row and return its folded column names.
-
-    Args:
-        rows: The roster tab's rows, from row 1.
-
-    Returns:
-        `(index, names)` — where the header sits, and its cells folded for
-        matching.
-
-    Raises:
-        SheetError: when no row in the first few names an email column. A
-            roster nobody can read is reported, because storing zero people
-            silently is what put the office phone on an agent's flyer.
-    """
-    for index, row in enumerate(rows[:MAX_HEADER_SCAN]):
-        folded = [fold_header(cell) for cell in row]
-        if "email" in folded:
-            return index, folded
-    msg = "the roster tab has no header row naming an email column"
-    raise SheetError(msg)
-
-
-def sync_salespeople(client: ReadsRanges, connection: Connection, tab: str) -> int:
-    """Mirror the roster tab into the database.
-
-    Args:
-        client: A read-only sheet client.
-        connection: An open database connection.
-        tab: The roster tab name.
-
-    Returns:
-        How many people were stored.
-
-    Raises:
-        SheetError: if the tab cannot be read.
-        sqlite3.Error: on a write failure.
-    """
-    rows = client.read(f"'{tab}'!{SALESPEOPLE_RANGE}")
-    if not rows:
-        return 0
-    header_index, header = find_roster_header(rows)
-
-    def column(row: list[str], name: str) -> str:
-        try:
-            index = header.index(name)
-        except ValueError:
-            return ""
-        # Every join key is trimmed: the live roster holds "Lolo " with a
-        # trailing space, and untrimmed she never matches herself.
-        return row[index].strip() if len(row) > index else ""
-
-    stored = 0
-    for row in rows[header_index + 1 :]:
-        email = column(row, "email").lower()
-        if not email:
-            continue
-        connection.execute(
-            """
-            INSERT INTO salespeople (email, first_name, last_name, phone, template,
-                                     headshot_url, brokerage_url, synced_at)
-            VALUES (?,?,?,?,?,?,?,?)
-            ON CONFLICT(email) DO UPDATE SET
-                first_name=excluded.first_name, last_name=excluded.last_name,
-                phone=excluded.phone, template=excluded.template,
-                headshot_url=excluded.headshot_url, brokerage_url=excluded.brokerage_url,
-                synced_at=excluded.synced_at
-            """,
-            (
-                email,
-                column(row, "first name"),
-                column(row, "last name"),
-                column(row, "phone"),
-                column(row, "template"),
-                column(row, "headshot url"),
-                column(row, "brokerage url"),
-                datetime.now(UTC).isoformat(),
-            ),
-        )
-        stored += 1
-    return stored
 
 
 def find_salesperson_by_name(connection: Connection, name: str) -> dict[str, str]:

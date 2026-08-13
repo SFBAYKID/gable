@@ -486,6 +486,53 @@ def recall_facts(connection: sqlite3.Connection, address: str) -> dict[str, str]
     return {name: row[name] for name in columns if row[name]}
 
 
+def upsert_salesperson(
+    connection: sqlite3.Connection,
+    *,
+    email: str,
+    first_name: str = "",
+    last_name: str = "",
+    phone: str = "",
+    headshot_url: str = "",
+    brokerage_url: str = "",
+) -> None:
+    """Store or refresh one agent from the roster.
+
+    Args:
+        connection: An open connection.
+        email: The agent's address, which is the key.
+        first_name: Given name, as the roster writes it.
+        last_name: Family name.
+        phone: Their direct line.
+        headshot_url: Only when the roster carries one. The face normally comes
+            from the Head Shots folder at render time instead.
+        brokerage_url: Their page on the brokerage site, when known.
+
+    Raises:
+        sqlite3.Error: on a write failure.
+    """
+    connection.execute(
+        """
+        INSERT INTO salespeople (email, first_name, last_name, phone, template,
+                                 headshot_url, brokerage_url, synced_at)
+        VALUES (?,?,?,?,'',?,?,?)
+        ON CONFLICT(email) DO UPDATE SET
+            first_name=excluded.first_name, last_name=excluded.last_name,
+            phone=excluded.phone, headshot_url=excluded.headshot_url,
+            brokerage_url=excluded.brokerage_url, synced_at=excluded.synced_at
+        """,
+        (
+            email.strip().lower(),
+            first_name.strip(),
+            last_name.strip(),
+            phone.strip(),
+            headshot_url.strip(),
+            brokerage_url.strip(),
+            _now(),
+        ),
+    )
+
+
 def record_spend(
     connection: sqlite3.Connection,
     service: str,

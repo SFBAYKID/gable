@@ -216,22 +216,31 @@ def test_researched_facts_are_cached_for_next_time(db: sqlite3.Connection) -> No
 # --- it asks rather than guessing -------------------------------------------
 
 
-def test_sold_with_no_closing_price_stops_and_asks(db: sqlite3.Connection) -> None:
+def test_sold_with_no_closing_price_builds_and_offers_to_add_it(
+    db: sqlite3.Connection,
+) -> None:
+    """Chase's rule, 2026-08-12: the link first, the missing price after it.
+
+    Stopping first meant a flyer that was otherwise complete — photo, agent,
+    address, design — waited on a number the agent could supply in seconds.
+    """
     submission = _submission(request_type="Sold", rid="rid-sold")
     _record(db, submission)
     rec = Recorder()
-    result = _runner(db, rec).run(submission)
+    runner = _runner(db, rec)
+    runner.hero_photo_url = "http://example.invalid/hero.jpg"
+    result = runner.run(submission)
 
-    assert result.status == "needs_info"
-    assert result.needs_a_human is True
-    assert rec.copied is False, "nothing should be built while a question is open"
-    assert "closing price" in rec.said[0].lower()
+    assert result.status == "delivered"
+    assert rec.copied is True, "a missing price must not stop the build"
+    assert any("no price" in said.lower() for said in result.said)
+    assert any("give me the price" in said.lower() for said in result.said)
 
 
 def test_a_resumed_question_preserves_the_root_thread_timestamp(
     db: sqlite3.Connection,
 ) -> None:
-    submission = _submission(request_type="Sold", rid="rid-question-thread")
+    submission = _submission(address="Google Review", rid="rid-question-thread")
     _record(db, submission)
     runner = _runner(db, Recorder())
     runner.origin_thread_ts = "1786468156.701419"
@@ -317,9 +326,8 @@ def test_a_flyer_that_still_shows_a_placeholder_is_not_delivered(
     ("kwargs", "expected"),
     [
         ({}, "delivered"),
-        ({"request_type": "Sold"}, "needs_info"),
+        ({"request_type": "Sold"}, "delivered"),
         ({"address": "Google Review"}, "needs_info"),
-        ({"request_type": "End of Year Brag Post"}, "needs_info"),
     ],
 )
 def test_every_path_reaches_a_recorded_status(

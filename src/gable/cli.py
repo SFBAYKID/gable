@@ -13,6 +13,7 @@ import logging
 import sys
 from typing import Any, Final
 
+from gable.agents.contacts import sync_contacts
 from gable.config import ConfigError, Settings
 from gable.db.schema import apply_migrations, connect
 from gable.logging_setup import configure_logging
@@ -95,7 +96,9 @@ def main() -> int:
             client=sheet_client,
             connection=connection,
             responses_tab=settings.tab_responses,
-            salespeople_tab=settings.tab_agents,
+            sync_roster=lambda: sync_contacts(
+                drive, connection, settings.drive_id, settings.drive_templates_folder_id
+            ),
             on_submission=on_submission,
             schedule=settings.poll_schedule,
             max_per_pass=settings.max_batch,

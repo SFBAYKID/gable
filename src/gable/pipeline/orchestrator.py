@@ -35,7 +35,6 @@ from gable.listings.intake import (
     named_agents,
     needs_two_agents,
 )
-from gable.slides.catalog import for_category
 
 #: How many times a render is inspected before delivery. Chase asked for two:
 #: one to catch the obvious, a second to catch what the first pass moved.
@@ -95,22 +94,13 @@ def plan(intake: Intake, known_facts: dict[str, str] | None = None) -> Step:
             detail=f"{len(problems)} thing(s) do not add up",
         )
 
-    if not intake.category:
-        return Step(
-            outcome=Outcome.SKIP,
-            say=(
-                f"I do not have a design for a {intake.request_type.lower()} post, "
-                "so I have left this one alone."
-            ),
-            detail="no template category for this request type",
-        )
-
-    if not for_category(intake.category):
-        return Step(
-            outcome=Outcome.SKIP,
-            say=f"I know this is a {intake.category} post but I have no designs filed for it yet.",
-            detail=f"category {intake.category} has no templates",
-        )
+    # No category gate. A design is whatever file in Generic Templates carries
+    # this request type's name, so a request the old catalogue had no category
+    # for — "Postcard Order", "Video Editing Request" — builds the moment
+    # Carmen files a design under that name. When there is no such file the
+    # picker stops the run at `needs_template` and names the file it wanted,
+    # which is a more useful sentence than a category nobody outside this code
+    # has heard of.
 
     outstanding = missing_public_facts(intake, known_facts)
     if outstanding and address_looks_usable(intake.address):

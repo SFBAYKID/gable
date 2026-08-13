@@ -95,7 +95,7 @@ def _poller(db: sqlite3.Connection, sheet: ReadsRanges, seen: list[repo.Submissi
         client=sheet,
         connection=db,
         responses_tab="Form Responses 1",
-        salespeople_tab="Sales_People",
+        sync_roster=lambda: 0,
         on_submission=seen.append,
         schedule=PollSchedule(),
     )
@@ -186,7 +186,7 @@ def test_a_paused_submission_is_not_asked_or_built_again(
         client=sheet,
         connection=db,
         responses_tab="Form Responses 1",
-        salespeople_tab="Sales_People",
+        sync_roster=lambda: 0,
         on_submission=pause,
     )
     sheet.rows.append(_row("8/2/2026", "2 B Rd, Baltimore, MD 21202"))
@@ -212,7 +212,7 @@ def test_a_crashing_submission_stops_reentering_after_three_attempts(
         client=sheet,
         connection=db,
         responses_tab="Form Responses 1",
-        salespeople_tab="Sales_People",
+        sync_roster=lambda: 0,
         on_submission=leave_pending,
     )
     sheet.rows.append(_row("8/2/2026", "2 B Rd, Baltimore, MD 21202"))
@@ -265,7 +265,7 @@ def test_one_bad_submission_does_not_stop_the_batch(db: sqlite3.Connection) -> N
         client=sheet,
         connection=db,
         responses_tab="Form Responses 1",
-        salespeople_tab="Sales_People",
+        sync_roster=lambda: 0,
         on_submission=explode_on_first,
     )
     started = poller.one_pass()

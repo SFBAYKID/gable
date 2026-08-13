@@ -108,7 +108,12 @@ def _handoff(
 ) -> PhotoHandoff:
     supplied = image if image is not None else _jpeg()
 
-    def runner_for(connection: sqlite3.Connection, url: str, thread: str) -> FakeRunner:
+    def runner_for(
+        connection: sqlite3.Connection,
+        url: str,
+        thread: str,
+        _progress: object = None,
+    ) -> FakeRunner:
         assert url == PUBLIC_URL
         assert thread == THREAD
         return FakeRunner(connection, seen)

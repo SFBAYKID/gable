@@ -15,6 +15,7 @@ from sqlite3 import Connection
 from typing import Any
 
 from gable import spend
+from gable.agents.contacts import sync_contacts
 from gable.config import ConfigError, Settings
 from gable.db.schema import apply_migrations, connect
 from gable.logging_setup import configure_logging
@@ -139,7 +140,10 @@ def build_components(settings: Settings) -> RuntimeComponents:
         return str(response.get("ts") or thread_ts or "")
 
     def runner_for_photo(
-        connection_for_event: Connection, photo_url: str, thread_ts: str
+        connection_for_event: Connection,
+        photo_url: str,
+        thread_ts: str,
+        progress: Callable[[str], None] = lambda _stage: None,
     ) -> Runner:
         """Build thread-owned Google clients and a runner for one Slack upload."""
         event_credentials = service_account.Credentials.from_service_account_file(  # type: ignore[no-untyped-call]
@@ -160,6 +164,7 @@ def build_components(settings: Settings) -> RuntimeComponents:
             post_in_origin_thread,
             hero_photo_url=photo_url,
             origin_thread_ts=thread_ts,
+            progress=progress,
         )
 
     def upscale_photo(
@@ -275,7 +280,9 @@ def build_components(settings: Settings) -> RuntimeComponents:
         client=sheet_client,
         connection=connection,
         responses_tab=settings.tab_responses,
-        salespeople_tab=settings.tab_agents,
+        sync_roster=lambda: sync_contacts(
+            drive, connection, settings.drive_id, settings.drive_templates_folder_id
+        ),
         on_submission=on_submission,
         schedule=settings.poll_schedule,
         max_per_pass=settings.max_batch,

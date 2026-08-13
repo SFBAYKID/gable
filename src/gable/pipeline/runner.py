@@ -32,7 +32,7 @@ from typing import Any, Final
 from gable import spend
 from gable.db import store
 from gable.listings.enrich import Facts, look_up
-from gable.listings.intake import Intake
+from gable.listings.intake import Intake, price_note
 from gable.listings.review import review_values
 from gable.pipeline import audit, people
 from gable.pipeline.orchestrator import Outcome, after_research, agent_slots, judge, plan
@@ -146,6 +146,12 @@ class Runner:
     check_photo: Callable[[str, str], tuple[bool, str]] = lambda _url, _slot: (True, "")
     #: Looks up public facts for an address.
     research: Callable[[str], Facts] = lambda _address: Facts()
+    #: Publishes this agent's headshot and returns a URL Slides can fetch.
+    #: Empty leaves the design's own face, which is a flyer worth a look.
+    headshot_for: Callable[[str], str] = lambda _name: ""
+    #: Names the stage being worked on, for Slack's waiting indicator. Cosmetic
+    #: by contract: it is called around real work and must never affect it.
+    progress: Callable[[str], None] = lambda _stage: None
 
     def run(self, submission: repo.Submission) -> RunResult:
         """Take one submission as far as it can go.
@@ -220,6 +226,7 @@ class Runner:
 
         # 4. Research anything public that is missing.
         if step.outcome is Outcome.RESEARCH:
+            self.progress("is looking up the property...")
             found = self.research(intake.address)
             if not found.is_empty:
                 store.remember_facts(
@@ -287,6 +294,7 @@ class Runner:
             )
 
         # 6. Build.
+        self.progress("is choosing the design...")
         template_id, template_label = self.pick_template(step.category, intake)
         if not template_id:
             # Name the file it is looking for, not the category it mapped to.
@@ -439,12 +447,15 @@ class Runner:
             self.say(spoken, None)
             return result
 
+        self.progress("is placing the photo...")
         placed = self.place_photo(output_id, self.hero_photo_url, template_label)
         # The sample face is the most visible thing Gable gets wrong: one agent's
         # name beside another agent's photograph. Best effort — a design with no
         # headshot frame is still a deliverable flyer.
-        if placed and values.get("headshot"):
-            if self.place_headshot(output_id, values["headshot"]):
+        headshot_url = values.get("headshot") or self.headshot_for(values.get("agent_name", ""))
+        if placed and headshot_url:
+            self.progress("is putting the agent's face on it...")
+            if self.place_headshot(output_id, headshot_url):
                 logger.info("replaced the sample headshot for run %s", run_id)
             else:
                 logger.info("kept the design's own headshot for run %s", run_id)
@@ -539,6 +550,12 @@ class Runner:
         result.said.append(message)
         posted_ts = self.say(message, self.origin_thread_ts or None)
         thread_root = self.origin_thread_ts or posted_ts
+        # The link goes first. A flyer that is otherwise complete should not
+        # wait on a number the agent can supply in two seconds afterwards.
+        note = price_note(intake)
+        if note:
+            result.said.append(safe(note))
+            self.say(safe(note), thread_root or None)
         if thread_root:
             store.set_status(
                 self.connection,

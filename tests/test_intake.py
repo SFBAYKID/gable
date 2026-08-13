@@ -20,8 +20,8 @@ from gable.listings.intake import (
     missing_public_facts,
     named_agents,
     needs_two_agents,
+    price_note,
 )
-from gable.slides.catalog import categories
 
 # Row 84, exactly as the sheet returns it.
 ROW_84 = [
@@ -116,13 +116,6 @@ def test_request_type_routes_to_a_category(request_type: str, expected: str) -> 
     assert _intake(request_type=request_type).category == expected
 
 
-def test_every_routed_category_actually_exists_in_the_catalog() -> None:
-    """A category with no designs would route a listing into nothing."""
-    known = set(categories())
-    for value in ("Open House", "Sold", "Under Contract", "New Listing", "Client Review Post"):
-        assert _intake(request_type=value).category in known
-
-
 def test_an_unknown_request_type_routes_nowhere_rather_than_guessing() -> None:
     """'End of Year Brag Post' has no design. Picking a near one would be wrong."""
     assert _intake(request_type="End of Year Brag Post").category == ""
@@ -172,11 +165,21 @@ def test_nothing_is_researched_without_an_address() -> None:
 # --- coherence: contradictions get a question -------------------------------
 
 
-def test_sold_without_a_closing_price_is_asked_about() -> None:
-    """Chase's example, verbatim in intent."""
-    asks = incoherences(_intake(request_type="Sold"))
-    assert any(q.field_name == "closing price" for q in asks)
-    assert any("do you have that" in q.ask.lower() for q in asks)
+def test_sold_without_a_closing_price_no_longer_stops_the_build() -> None:
+    """Chase's rule, 2026-08-12: build it, then offer to add the price.
+
+    This used to be a blocking question. A flyer with a photo, an agent, an
+    address and a design should not wait on a number that can be typed into the
+    thread in two seconds after the link arrives.
+    """
+    assert incoherences(_intake(request_type="Sold")) == []
+    note = price_note(_intake(request_type="Sold"))
+    assert "no price" in note.lower()
+    assert "give me the price" in note.lower()
+
+
+def test_a_sold_post_with_a_price_says_nothing_afterwards() -> None:
+    assert price_note(_intake(request_type="Sold", closing_price="$450,000")) == ""
 
 
 def test_sold_with_a_closing_price_is_not_asked_about() -> None:
@@ -208,9 +211,14 @@ def test_two_prices_at_once_is_a_contradiction() -> None:
     assert any(q.field_name == "price" for q in asks)
 
 
-def test_a_request_type_with_no_design_is_asked_about() -> None:
-    asks = incoherences(_intake(request_type="End of Year Brag Post"))
-    assert any(q.field_name == "template" for q in asks)
+def test_a_request_type_with_no_category_is_not_a_contradiction() -> None:
+    """Whether a design exists is the picker's business, not this module's.
+
+    A template is now whatever file in Generic Templates carries this request
+    type's name, so "End of Year Brag Post" builds the moment Carmen files one
+    and stops with an actionable sentence until she does.
+    """
+    assert incoherences(_intake(request_type="End of Year Brag Post")) == []
 
 
 def test_every_question_is_a_sentence_a_designer_can_answer() -> None:

@@ -29,7 +29,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Final
 
-from gable.listings.normalize import fold_header
+from gable.listings.headers import fold_header
 
 #: Spreadsheet letters to zero-based indices on `Form Responses 1`, so this
 #: module can be read against that tab itself. Only the eleven Chase named.
@@ -445,15 +445,12 @@ def incoherences(intake: Intake) -> list[Question]:
             )
         )
 
-    if intake.is_sold and not intake.closing_price:
-        asks.append(
-            Question(
-                "closing price",
-                f"This one is marked {intake.request_type.lower()} but there is no closing "
-                "price on it. Do you have that?",
-                only_a_human_knows=True,
-            )
-        )
+    # A sold post with no closing price is deliberately **not** here. Chase's
+    # rule, 2026-08-12: build the flyer, post the link, and then say the price
+    # was missing and can still be added. Stopping first meant a flyer that was
+    # otherwise complete — photo, agent, address, design — waited on a number
+    # the agent could supply afterwards in two seconds. `price_note` below is
+    # what the runner says once the link is out.
 
     if intake.request_type.strip().lower() == "price reduction" and not intake.new_price:
         asks.append(
@@ -473,15 +470,9 @@ def incoherences(intake: Intake) -> list[Question]:
             )
         )
 
-    if intake.request_type and not intake.category:
-        asks.append(
-            Question(
-                "template",
-                f"I do not have a design for a {intake.request_type.lower()} post. "
-                "Which template should I use, or should I skip this one?",
-                only_a_human_knows=True,
-            )
-        )
+    # Whether a design exists is not a contradiction in the row, and it is no
+    # longer decided here: the picker looks for a file named after this request
+    # type and says exactly which name is missing when there is none.
 
     if intake.closing_price and intake.new_price:
         asks.append(
@@ -494,6 +485,27 @@ def incoherences(intake: Intake) -> list[Question]:
         )
 
     return asks
+
+
+def price_note(intake: Intake) -> str:
+    """What to say after delivering a flyer whose price was never supplied.
+
+    Args:
+        intake: The submission.
+
+    Returns:
+        Chase's sentence, or empty when the price was there or is not expected
+        for this kind of post.
+
+    Raises:
+        Nothing.
+    """
+    if not intake.is_sold or intake.price:
+        return ""
+    return (
+        "There was no price so I built without the price added. "
+        "If you give me the price I can add it."
+    )
 
 
 #: How a second agent actually arrives. Row 84 of the live sheet reads

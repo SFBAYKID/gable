@@ -148,7 +148,7 @@ class PhotoHandoff:
     target_height: int
     public_root: Path
     public_base: str
-    runner_for: Callable[[Connection, str, str], ResumesRun]
+    runner_for: Callable[..., ResumesRun]
     upscale: UpscalesPhoto | None = None
     download: Callable[[str, str, int], bytes] = download_private_image
     publish: Callable[[Path, str, bytes], str] = publish_local
@@ -274,7 +274,7 @@ class PhotoHandoff:
                 ai_enhanced=int(ai_enhanced),
             )
             progress("is building the flyer...")
-            runner = self.runner_for(connection, public_url, thread_ts)
+            runner = self.runner_for(connection, public_url, thread_ts, progress)
             result = runner.resume(_submission(stored), run.run_id)
             action = "sharpened, enlarged, and fitted" if ai_enhanced else "resized and fitted"
             if result.status == "delivered":

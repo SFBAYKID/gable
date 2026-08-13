@@ -23,6 +23,7 @@ import logging
 import sys
 from typing import Any, Final
 
+from gable.agents.contacts import sync_contacts
 from gable.config import ConfigError, Settings
 from gable.db import store
 from gable.db.schema import apply_migrations, connect
@@ -165,9 +166,10 @@ def main(argv: list[str] | None = None) -> int:
     connection = connect(settings.db_path)
     try:
         apply_migrations(connection)
-        # The roster carries the phone, headshot and profile URL the flyer
-        # needs, so it is synced here for the same reason the poller syncs it.
-        repo.sync_salespeople(client, connection, settings.tab_agents)
+        # The roster carries the phone the flyer needs, so it is refreshed here
+        # for the same reason the poller refreshes it. It lives in the drive
+        # now, beside the templates and the headshots.
+        sync_contacts(drive, connection, settings.drive_id, settings.drive_templates_folder_id)
         store.record_submission(
             connection,
             submission.response_row_id,

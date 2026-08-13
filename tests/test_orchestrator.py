@@ -47,10 +47,10 @@ def test_a_contradiction_outranks_research() -> None:
     assert step.outcome is Outcome.ASK
 
 
-def test_sold_with_no_closing_price_asks_before_anything_else() -> None:
+def test_sold_with_no_closing_price_carries_on() -> None:
+    """The price is offered after the link now, not demanded before the build."""
     step = plan(_intake(request_type="Sold"))
-    assert step.outcome is Outcome.ASK
-    assert "closing price" in step.say.lower()
+    assert step.outcome is not Outcome.ASK
 
 
 def test_a_clean_row_goes_to_research_first() -> None:
@@ -84,11 +84,14 @@ def test_cached_researched_price_prevents_another_lookup() -> None:
     assert step.outcome is Outcome.BUILD
 
 
-def test_a_request_type_with_no_design_is_asked_about_not_guessed() -> None:
-    """Asking beats skipping: Chase's rule is that Gable asks when unsure."""
+def test_a_request_type_the_old_catalogue_had_no_category_for_is_not_refused() -> None:
+    """The design is whatever file carries this request type's name.
+
+    Planning no longer decides whether one exists; the picker does, and it names
+    the missing file rather than a category nobody outside the code has heard of.
+    """
     step = plan(_intake(request_type="End of Year Brag Post"))
-    assert step.outcome is Outcome.ASK
-    assert "which template" in step.say.lower()
+    assert step.outcome is not Outcome.SKIP
 
 
 def test_an_unusable_address_is_not_researched() -> None:
