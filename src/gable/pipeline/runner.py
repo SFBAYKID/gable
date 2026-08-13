@@ -108,8 +108,8 @@ class Runner:
     #: Checks the official brokerage profile only when the refreshed contact
     #: workbook has no complete, exact record. The unit-test default performs
     #: no hidden I/O; ``pipeline.live`` supplies the bounded website client.
-    official_contact_lookup: Callable[[str, str], agent_website.ProfileLookup] = (
-        lambda _name, _email: agent_website.ProfileLookup(
+    official_contact_lookup: Callable[[str, str, str], agent_website.ProfileLookup] = (
+        lambda _name, _email, _phone: agent_website.ProfileLookup(
             problem=(
                 "I could not complete the check against the official Corner House Realty website"
             )
@@ -272,13 +272,13 @@ class Runner:
         contact_gate = ContactGate(self.connection, intake, self.official_contact_lookup)
         contact = contact_gate.check(run_id)
         if not contact.ready:
-            return self._ask(run_id, contact.problem, [], result, status="needs_info")
+            return self._ask(run_id, intake, contact.problem, [], result, status="needs_info")
         # Contradictions are cheap and source-independent. They stop before
         # template reads, web calls, or Slack; property research deliberately
         # waits until the selected source reveals which facts it displays.
         step = plan(intake, required_public_facts=frozenset())
         if step.outcome is Outcome.ASK:
-            return self._ask(run_id, step.say, step.questions, result)
+            return self._ask(run_id, intake, step.say, step.questions, result)
         if step.outcome is Outcome.SKIP:
             store.set_status(self.connection, run_id, "skipped", step.detail)
             result.status = "skipped"
@@ -289,7 +289,7 @@ class Runner:
         # Two agents named with unclear roles is also a question.
         slots = agent_slots(intake)
         if slots.outcome is Outcome.ASK:
-            return self._ask(run_id, slots.say, slots.questions, result)
+            return self._ask(run_id, intake, slots.say, slots.questions, result)
 
         # The parser can prove who is listing and who is hosting, but the
         # generic template contract does not yet identify which text and photo
@@ -300,6 +300,7 @@ class Runner:
         if needs_two_agents(intake):
             return self._ask(
                 run_id,
+                intake,
                 "This request needs two agent placements, but that template layout is not "
                 "certified yet. I cannot prove which text and photo spot belongs to the "
                 "listing agent and which belongs to the hosting agent, so I have not built it.",
@@ -324,6 +325,7 @@ class Runner:
             wanted = intake.request_type.strip() or "this request type"
             return self._ask(
                 run_id,
+                intake,
                 f"I do not have a design named {wanted} in the Generic Templates "
                 "folder, so I have not built anything. Add one with that exact "
                 "name and I will use it.",
@@ -343,11 +345,12 @@ class Runner:
         if "agent_title" in resolution.fields:
             contact = contact_gate.check(run_id, require_title=True)
             if not contact.ready:
-                return self._ask(run_id, contact.problem, [], result, status="needs_info")
+                return self._ask(run_id, intake, contact.problem, [], result, status="needs_info")
         clearance_problem = self.template_clearance(template_id, template_label)
         if clearance_problem:
             return self._ask(
                 run_id,
+                intake,
                 clearance_problem,
                 [],
                 result,
@@ -361,7 +364,7 @@ class Runner:
             lambda: self.progress("is looking up the property..."),
         )
         if step.outcome is Outcome.ASK:
-            return self._ask(run_id, step.say, step.questions, result)
+            return self._ask(run_id, intake, step.say, step.questions, result)
         values = run_values.for_intake(self.connection, intake, known)
         values.update(
             {
@@ -386,7 +389,7 @@ class Runner:
         )
         if measured.blockers:
             issue = measured.blockers[0]
-            return self._ask(run_id, issue.say, [], result, status=issue.status)
+            return self._ask(run_id, intake, issue.say, [], result, status=issue.status)
         # Correctable layout work is Gable's job. Text is fitted to the largest
         # readable size and a supplied photo is center-cropped to the measured
         # frame; neither becomes another Slack question. The notes are folded
@@ -399,6 +402,7 @@ class Runner:
         if not self.hero_photo_url:
             return self._ask(
                 run_id,
+                intake,
                 "Can you send me the image?",
                 [],
                 result,
@@ -421,7 +425,7 @@ class Runner:
         field_problems = template_manifest.validate(manifest, values)
         blocking = [item for item in field_problems if item.blocking]
         if blocking:
-            return self._ask(run_id, blocking[0].say, [], result)
+            return self._ask(run_id, intake, blocking[0].say, [], result)
         # The legacy manifest's character budgets are deliberately not spoken.
         # Exact source-box geometry was measured above; repeating an older
         # hand-entered character estimate can contradict that result. Required
@@ -437,6 +441,7 @@ class Runner:
             if not usable:
                 return self._ask(
                     run_id,
+                    intake,
                     f"I could not use that photo — {why_not}. Could you send another?",
                     [],
                     result,
@@ -763,14 +768,16 @@ class Runner:
     def _ask(
         self,
         run_id: str,
+        intake: Intake,
         question: str,
         questions: list[Any],
         result: RunResult,
         status: str = "needs_info",
         headline: str = "",
     ) -> RunResult:
-        """Persist one question, post it in its owned thread, and confirm the pause."""
+        """Persist one question, announce the listing, and confirm the pause."""
         asked = safe(question or "I need one more thing before I can build this.")
+        opening = headline or people.opening_for(self.connection, intake, self.origin_thread_ts)
         delivery = run_questions.prepare_and_deliver(
             self.connection,
             run_id,
@@ -779,7 +786,7 @@ class Runner:
             self.say,
             post_once=self.post_once,
             reconcile=self.reconcile,
-            headline=safe(headline) if headline else "",
+            headline=safe(opening) if opening else "",
             thread_ts=self.origin_thread_ts,
         )
         result.status = delivery.status

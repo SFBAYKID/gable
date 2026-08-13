@@ -11,6 +11,11 @@ from gable.pipeline.contact_gate import ContactGate
 from tests.runner_support import record, submission
 
 
+def _must_not_be_called(_name: str, _email: str, _phone: str = "") -> ProfileLookup:
+    """A seam that fails the test if the website is consulted at all."""
+    return ProfileLookup(problem="must not be called")
+
+
 def test_missing_contact_and_required_title_share_one_official_lookup(tmp_path: Path) -> None:
     connection = connect(tmp_path / "contact-gate.db")
     apply_migrations(connection)
@@ -23,7 +28,7 @@ def test_missing_contact_and_required_title_share_one_official_lookup(tmp_path: 
     run = store.start_run(connection, item.response_row_id)
     calls: list[tuple[str, str]] = []
 
-    def lookup(name: str, email: str) -> ProfileLookup:
+    def lookup(name: str, email: str, _phone: str = "") -> ProfileLookup:
         calls.append((name, email))
         return ProfileLookup(
             profile=OfficialProfile(
@@ -57,7 +62,7 @@ def test_failed_official_lookup_is_not_retried_in_the_title_phase(tmp_path: Path
     run = store.start_run(connection, item.response_row_id)
     calls = 0
 
-    def unavailable(_name: str, _email: str) -> ProfileLookup:
+    def unavailable(_name: str, _email: str, _phone: str = "") -> ProfileLookup:
         nonlocal calls
         calls += 1
         raise OSError("test official-site outage")
@@ -88,7 +93,7 @@ def test_successful_gate_writes_provenance_without_contact_values(tmp_path: Path
     gate = ContactGate(
         connection,
         item.intake,
-        lambda _name, _email: ProfileLookup(problem="must not be called"),
+        _must_not_be_called,
     )
 
     assert gate.check(run.run_id).ready is True

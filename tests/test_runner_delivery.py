@@ -262,7 +262,7 @@ def test_pixelated_mike_render_is_held_without_exposing_the_bad_flyer(
         template_label="Sold",
     )
     runner = _runner(db, rec)
-    runner.official_contact_lookup = lambda name, email: ProfileLookup(
+    runner.official_contact_lookup = lambda name, email, _phone: ProfileLookup(
         profile=OfficialProfile(
             name=name,
             email=email,
@@ -319,7 +319,7 @@ def test_mike_wrong_property_photo_requests_one_replacement_on_the_same_run(
         template_label="Sold",
     )
     runner = _runner(db, rec)
-    runner.official_contact_lookup = lambda name, email: ProfileLookup(
+    runner.official_contact_lookup = lambda name, email, _phone: ProfileLookup(
         profile=OfficialProfile(
             name=name,
             email=email,

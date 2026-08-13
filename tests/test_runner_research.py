@@ -141,7 +141,7 @@ def test_title_and_headshot_prerequisites_precede_slack(
     )
     runner = _runner(db, rec)
 
-    def official(name: str, email: str) -> ProfileLookup:
+    def official(name: str, email: str, _phone: str = "") -> ProfileLookup:
         order.append("title")
         return ProfileLookup(
             profile=OfficialProfile(

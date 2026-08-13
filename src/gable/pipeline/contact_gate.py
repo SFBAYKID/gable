@@ -24,7 +24,10 @@ class ContactGate:
 
     connection: Connection
     intake: Intake
-    official_lookup: Callable[[str, str], website.ProfileLookup]
+    #: `(name, email, known_phone) -> profile`. The filed phone travels with the
+    #: request so an agent whose official page lists a brokerage address can
+    #: still be proven from a personal one.
+    official_lookup: Callable[[str, str, str], website.ProfileLookup]
     _looked_up: bool = field(default=False, init=False)
     _official_result: website.ProfileLookup = field(
         default_factory=website.ProfileLookup,
@@ -35,8 +38,13 @@ class ContactGate:
         """Return the first official lookup result for every phase of this run."""
         if not self._looked_up:
             self._looked_up = True
+            filed = website.contact_from_record(
+                repo.find_salesperson(self.connection, self.intake.agent_email)
+            )
             try:
-                self._official_result = self.official_lookup(name, email)
+                self._official_result = self.official_lookup(
+                    name, email, filed.phone if filed else ""
+                )
             except Exception:
                 self._official_result = website.ProfileLookup(
                     problem=(

@@ -92,14 +92,14 @@ def test_contact_prerequisites_are_validated_before_the_first_slack_announcement
     rec = Recorder()
     runner = _runner(db, rec)
     runner.hero_photo_url = ""
-    runner.official_contact_lookup = lambda _name, _email: ProfileLookup(
+    runner.official_contact_lookup = lambda _name, _email, _phone: ProfileLookup(
         problem="the official site did not prove this contact"
     )
 
     result = runner.run(submission)
 
     assert result.status == "needs_info"
-    assert len(rec.said) == 1
+    assert len(rec.said) == 2
     assert "Can you send me the image" not in rec.said[0]
     assert rec.copied is False
 
@@ -116,7 +116,7 @@ def test_official_contact_fallback_reaches_values_and_then_asks_for_the_photo(
     rec = Recorder()
     runner = _runner(db, rec)
     runner.hero_photo_url = ""
-    runner.official_contact_lookup = lambda _name, _email: ProfileLookup(
+    runner.official_contact_lookup = lambda _name, _email, _phone: ProfileLookup(
         profile=OfficialProfile(
             name="Mike Kulnich",
             email="mike@cornerhouserealty.com",
@@ -129,7 +129,7 @@ def test_official_contact_fallback_reaches_values_and_then_asks_for_the_photo(
     result = runner.run(submission)
 
     assert result.status == "needs_photo"
-    assert "New New Listing request from Mike Kulnich" in rec.said[0]
+    assert "New Listing request from Mike Kulnich" in rec.said[0]
     assert rec.said[1] == "Can you send me the image?"
     events = db.execute(
         "SELECT detail FROM run_events WHERE run_id = ? ORDER BY id", (result.run_id,)
@@ -157,7 +157,7 @@ def test_sold_title_is_validated_from_official_profile_before_the_photo_question
     runner.hero_photo_url = ""
     calls: list[tuple[str, str]] = []
 
-    def lookup(name: str, email: str) -> ProfileLookup:
+    def lookup(name: str, email: str, _phone: str = "") -> ProfileLookup:
         calls.append((name, email))
         return ProfileLookup(
             profile=OfficialProfile(
@@ -250,7 +250,9 @@ def test_research_that_finds_nothing_asks(db: sqlite3.Connection) -> None:
     result = _runner(db, rec, facts=Facts()).run(submission)
 
     assert result.status == "needs_info"
-    assert "could not find" in rec.said[0].lower()
+    # Every pause announces the listing first, then asks inside that thread.
+    assert "request from" in rec.said[0].lower()
+    assert "could not find" in rec.said[1].lower()
 
 
 def test_one_named_agent_is_not_ambiguous_and_still_builds(db: sqlite3.Connection) -> None:
@@ -748,3 +750,37 @@ def test_a_vision_check_that_could_not_run_blocks_delivery(
     result = runner.run(submission)
     assert result.status == "needs_review"
     assert any("could not complete the visual inspection" in message for message in result.said)
+
+
+def test_every_pause_announces_the_listing_before_asking(db: sqlite3.Connection) -> None:
+    """A bare question at channel level names no listing and cannot be answered.
+
+    Chase saw "I could not find the square feet, list price for this one. Do you
+    have them?" alone in the channel. Only the photo request carried an
+    announcement; every other pause posted its question as the thread root.
+    """
+    submission = _submission(rid="rid-announce-first")
+    _record(db, submission)
+    rec = Recorder()
+
+    result = _runner(db, rec, facts=Facts()).run(submission)
+
+    assert result.status == "needs_info"
+    assert len(rec.said) == 2
+    assert "request from" in rec.said[0].lower(), "the channel must name the listing"
+    assert rec.said[0].endswith("7940 Oakwood Rd, Glen Burnie, MD 21061")
+    assert "could not find" in rec.said[1].lower(), "the question belongs in the thread"
+
+
+def test_a_request_type_beginning_with_new_is_not_announced_twice(
+    db: sqlite3.Connection,
+) -> None:
+    """A request type of New Listing must not become "New New Listing request"."""
+    submission = _submission(rid="rid-new-new")
+    _record(db, submission)
+    rec = Recorder()
+
+    _runner(db, rec, facts=Facts()).run(submission)
+
+    assert rec.said[0].startswith("New Listing request from")
+    assert "New New" not in rec.said[0]

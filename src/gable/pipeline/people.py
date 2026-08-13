@@ -16,6 +16,36 @@ from gable.listings.names import tidy_name
 from gable.sheets import repository as repo
 
 
+def opening_for(connection: Connection, intake: Intake, existing_thread_ts: str) -> str:
+    """The announcement a pause posts before its question, if it needs one.
+
+    Every pause announces the listing and then asks inside that thread. Only
+    the photo request used to do this, so a research gap or a contact problem
+    posted a bare sentence at channel level — "I could not find the square
+    feet, list price for this one. Do you have them?" sitting alone in the
+    channel, naming no listing. A question with no visible subject cannot be
+    answered by anyone who was not already watching.
+
+    Args:
+        connection: An open database connection, for the roster lookup.
+        intake: The submission being paused.
+        existing_thread_ts: The run's current Slack thread root, if it has one.
+
+    Returns:
+        The announcement, or empty when the run already owns a thread. The
+        question store refuses a headline that would replace an existing root,
+        and a thread already about this listing needs no second introduction.
+
+    Raises:
+        Nothing.
+    """
+    if existing_thread_ts:
+        return ""
+    # The submitted name stands in until the contact check proves one, because
+    # the earliest pauses are the contact failures themselves.
+    return announce(connection, intake, "")
+
+
 def announce(connection: Connection, intake: Intake, validated_name: str = "") -> str:
     """How a new submission introduces itself in Slack.
 
@@ -43,7 +73,16 @@ def announce(connection: Connection, intake: Intake, validated_name: str = "") -
     )
     who = tidy_name(validated_name or roster_name or intake.agent_name)
     kind = intake.request_type.strip()
-    headline = f"New {kind} request" if kind else "New request"
+    # Several request types already begin with "New" — "New Listing", "New
+    # Listing with Open House" — and prefixing blindly produced "New New Listing
+    # request from Lolo Simmons", which is the first thing Carmen reads about a
+    # listing. The type keeps its own wording when it already opens with it.
+    if not kind:
+        headline = "New request"
+    elif kind.casefold().startswith("new "):
+        headline = f"{kind} request"
+    else:
+        headline = f"New {kind} request"
     if who:
         headline = f"{headline} from {who}"
     # Tidied for the same reason the flyer tidies it: this is the first thing

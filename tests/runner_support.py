@@ -136,7 +136,7 @@ def runner(db: sqlite3.Connection, rec: Recorder, facts: Facts | None = None) ->
                 identity_verified=True,
             )
         ),
-        official_contact_lookup=lambda name, email: ProfileLookup(
+        official_contact_lookup=lambda name, email, _phone: ProfileLookup(
             profile=OfficialProfile(
                 name=name,
                 email=email,

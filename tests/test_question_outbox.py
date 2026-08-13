@@ -46,7 +46,7 @@ def test_initial_question_never_posts_without_a_confirmed_listing_root(
     assert result.status == "needs_review"
     assert len(calls) == 1
     assert calls[0][1] is None
-    assert "New New Listing request" in calls[0][0]
+    assert "New Listing request" in calls[0][0]
     assert all("send me the image" not in text.lower() for text, _thread, _id in calls)
     current = store.run_by_id(db, result.run_id)
     assert current is not None

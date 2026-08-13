@@ -114,6 +114,40 @@ def _phone_key(value: str) -> str:
     return digits[1:] if len(digits) == 11 and digits.startswith("1") else digits
 
 
+def _is_branded_form_of(submitted: str, profile_title: str) -> bool:
+    """Whether a submitted name is an official name plus a self-branding suffix.
+
+    Agents append a tagline to their own name — "Bobby Carr The Dog Walking
+    Realtor" for an official "Bobby Carr". That is branding, not a different
+    person, and treating it as a mismatch denied him every design that prints a
+    credential.
+
+    The match is a whole-word prefix with a non-empty remainder, so "Bobby Carr"
+    can stand in for the branded form while "Bob" never stands in for "Bobby".
+    It only nominates a candidate; `lookup_official_profile` still proves
+    identity with an email or direct phone from the profile itself.
+
+    Args:
+        submitted: The name on the request or the contact workbook.
+        profile_title: An official-site page title.
+
+    Returns:
+        True when the title is a strict whole-word prefix of the submitted name.
+
+    Raises:
+        Nothing.
+    """
+    submitted_key = _name_key(submitted)
+    title_key = _name_key(profile_title)
+    if not title_key or not submitted_key or title_key == submitted_key:
+        return False
+    # Two words is the floor: a lone first name is not enough to nominate a
+    # profile, even though the contact-detail check would still have to pass.
+    if len(title_key.split()) < 2:
+        return False
+    return submitted_key.startswith(f"{title_key} ")
+
+
 def _partial_workbook_name_matches(submitted: str, contact: Contact) -> bool:
     """Check any populated workbook name component against the submitted name."""
     submitted_key = _name_key(submitted)
@@ -473,14 +507,24 @@ def _title(value: object) -> str:
 def lookup_official_profile(
     agent_name: str,
     agent_email: str,
+    known_phone: str = "",
     *,
     fetch: Fetch = _fetch,
 ) -> ProfileLookup:
-    """Find one exact-name profile and verify its submitted email and phone.
+    """Find one official profile and prove it belongs to this agent.
+
+    The name locates a candidate — exactly, or allowing a self-branding suffix
+    such as "Bobby Carr The Dog Walking Realtor" for an official "Bobby Carr".
+    Identity is then proven by a contact detail on the profile itself: the
+    submitted email, or the filed direct phone when the agent submits from a
+    personal address the brokerage page does not list.
 
     Args:
         agent_name: Name submitted on the request form.
         agent_email: Email submitted on the request form.
+        known_phone: The contact workbook's direct phone for this agent, used
+            as the identity proof when the profile does not show their email.
+            Empty means email is the only accepted proof.
         fetch: Bounded HTTP seam, injectable for hermetic tests.
 
     Returns:
@@ -493,32 +537,50 @@ def lookup_official_profile(
     email_address = agent_email.strip().lower()
     if not name or not email_address:
         return ProfileLookup(problem="the request does not identify one agent by name and email")
-    query = urllib.parse.urlencode(
-        {
-            "search": name,
-            "per_page": "20",
-            "_fields": "link,title",
-        }
-    )
-    api_url = f"{OFFICIAL_PAGES_API}?{query}"
     try:
-        raw, final_api_url = fetch(api_url)
-        if not _official_url(final_api_url):
-            raise ValueError("the page search left the official domain")
-        payload: object = json.loads(raw)
-        if not isinstance(payload, list):
-            raise ValueError("the page search did not return a list")
-        candidates: list[tuple[str, str]] = []
-        for item in payload:
-            if not isinstance(item, Mapping):
-                continue
-            title = _title(item.get("title"))
-            if _name_key(title) != _name_key(name):
-                continue
-            link = item.get("link", "")
-            if isinstance(link, str) and _official_url(link):
-                candidates.append((link, title))
-        candidates = list(dict.fromkeys(candidates))
+
+        def _titles(term: str) -> list[tuple[str, str]]:
+            """Every official-domain page title the site returns for one term."""
+            query = urllib.parse.urlencode(
+                {"search": term, "per_page": "20", "_fields": "link,title"}
+            )
+            raw, final_api_url = fetch(f"{OFFICIAL_PAGES_API}?{query}")
+            if not _official_url(final_api_url):
+                raise ValueError("the page search left the official domain")
+            payload: object = json.loads(raw)
+            if not isinstance(payload, list):
+                raise ValueError("the page search did not return a list")
+            found: list[tuple[str, str]] = []
+            for item in payload:
+                if not isinstance(item, Mapping):
+                    continue
+                link = item.get("link", "")
+                if isinstance(link, str) and _official_url(link):
+                    found.append((link, _title(item.get("title"))))
+            return found
+
+        # WordPress requires every search term to match, so "Bobby Carr The Dog
+        # Walking Realtor" returns nothing at all while "Bobby Carr" returns his
+        # profile. A branded name therefore needs a second, shorter query before
+        # there is anything to match against.
+        results = _titles(name)
+        words = name.split()
+        if not results and len(words) > 2:
+            results = _titles(" ".join(words[:2]))
+
+        exact: list[tuple[str, str]] = []
+        branded: list[tuple[str, str]] = []
+        for link, title in results:
+            if _name_key(title) == _name_key(name):
+                exact.append((link, title))
+            elif _is_branded_form_of(name, title):
+                branded.append((link, title))
+        # An agent who brands themselves — "Bobby Carr The Dog Walking Realtor"
+        # against an official "Bobby Carr" — has no exact profile, and refusing
+        # there denied him every design that prints a credential. The branded
+        # form is only ever a fallback for finding a candidate; identity is
+        # still proven below by a contact detail, never by the name.
+        candidates = list(dict.fromkeys(exact or branded))
         if len(candidates) != 1:
             return ProfileLookup(
                 problem=(
@@ -537,13 +599,24 @@ def lookup_official_profile(
         emails = _unique([value.lower() for value in parser.emails])
         phones = _unique(parser.phones)
         titles = _unique([_clean_name(value) for value in parser.title_parts])
-        if email_address not in emails:
-            return ProfileLookup(
-                problem="the exact official profile does not show the submitted email address"
-            )
         if len(phones) != 1 or not _phone_is_usable(phones[0]):
             return ProfileLookup(
                 problem="the exact official profile does not show one usable direct phone number"
+            )
+        # Identity is proven by a contact detail, not by the name. The email is
+        # the usual proof; the filed direct phone is the fallback for an agent
+        # who submits from a personal address the brokerage page does not list,
+        # which is how Bobby Carr's gmail failed against his official profile.
+        # One of the two must hold — a profile matching on neither is somebody
+        # else, whatever the page is called.
+        if email_address not in emails and (
+            not known_phone or _phone_key(known_phone) != _phone_key(phones[0])
+        ):
+            return ProfileLookup(
+                problem=(
+                    "the official profile does not show the submitted email address "
+                    "or the filed direct phone"
+                )
             )
         return ProfileLookup(
             profile=OfficialProfile(

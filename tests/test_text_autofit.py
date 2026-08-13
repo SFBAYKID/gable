@@ -55,7 +55,7 @@ def test_mike_sold_text_autofits_in_slides_and_still_reads_back(
         template_label="Sold",
     )
 
-    def official_profile(name: str, email: str) -> ProfileLookup:
+    def official_profile(name: str, email: str, _phone: str = "") -> ProfileLookup:
         return ProfileLookup(
             profile=OfficialProfile(
                 name=name,
