@@ -84,9 +84,16 @@ DEFAULT_COLUMNS: Final[dict[str, int]] = {
 HEADER_RULES: Final[tuple[tuple[str, str, str], ...]] = (
     ("agent_email", "exact", "email address"),
     ("agent_name", "exact", "name of agent"),
-    ("agent_first_name", "exact", "first name"),
-    ("agent_last_name", "exact", "second name"),
-    ("agent_last_name", "exact", "last name"),
+    # Prefix, not exact: the live `Form Responses 1` asks "First Name of Agent"
+    # and "Last Name of Agent", while `Testing_1` still carries the older
+    # "First Name" / "Second Name". Requiring exact wording meant production
+    # matched no name column at all, `maps_a_response_row` refused the whole
+    # tab, and polling could not read one real submission — while every test on
+    # `Testing_1` passed. Found 2026-08-13 by running `tools.preview_poll`
+    # against the live form for the first time.
+    ("agent_first_name", "prefix", "first name"),
+    ("agent_last_name", "prefix", "second name"),
+    ("agent_last_name", "prefix", "last name"),
     ("request_type", "exact", "select your request type"),
     ("address", "exact", "property address"),
     ("post_details", "prefix", "include details for post"),

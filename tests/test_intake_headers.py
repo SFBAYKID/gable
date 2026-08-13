@@ -209,3 +209,85 @@ def test_a_row_without_a_timestamp_is_refused() -> None:
 
     with pytest.raises(SheetError, match="no submission timestamp"):
         repo.submission_from_row(row, columns_from_header(TESTING_HEADER), 78)
+
+
+#: The live `Form Responses 1` header row, read from the production tab on
+#: 2026-08-13. Kept verbatim: it is the shape polling must survive.
+PRODUCTION_HEADER: list[str] = [
+    "Timestamp",
+    "Email Address",
+    "First Name of Agent",
+    "Service Guidelines Acknowledgment",
+    "Select your request type",
+    "Please provide the property address for the postcard",
+    "Select postcard category",
+    "Upload photos",
+    "Upload your video assets (For Video Editing Requests only)",
+    "Optional: Include any details/instruction for your video",
+    "Select social media content type",
+    "Property Address",
+    "Upload high-resolution property photos (up to 5 images)",
+    "Include details for post - required for Client Review post",
+    "Open House Date/Time (if applicable)",
+    "New Price (if price improvement)",
+    "Closing Price (for sold posts only):",
+    "Additional notes for social media team",
+    "For sold or under contract posts, were you on the buyer or seller side?",
+    "Last Name of Agent",
+    "Notes",
+]
+
+
+def test_the_live_production_header_is_a_readable_response_tab() -> None:
+    """Polling must read the real form, not only the testing tab.
+
+    `Testing_1` asks "First Name" / "Second Name"; production asks "First Name
+    of Agent" / "Last Name of Agent". Exact matching found no name column on
+    production, so the whole tab was refused and polling could not have read a
+    single genuine submission — while every test on `Testing_1` passed.
+    """
+    columns = columns_from_header(PRODUCTION_HEADER)
+
+    assert maps_a_response_row(columns)
+    assert columns["agent_first_name"] == 2
+    assert columns["agent_last_name"] == 19
+    assert columns["agent_email"] == 1
+    assert columns["request_type"] == 4
+    assert columns["address"] == 11
+
+
+def test_the_older_testing_tab_wording_still_reads() -> None:
+    """The prefix rule must not break the tab every live test has used."""
+    header = [
+        "r",
+        "Email Address",
+        "First Name",
+        "Second Name",
+        "Service Guidelines Acknowledgment",
+        "Select your request type",
+        "Please provide the property address for the postcard",
+        "Select postcard category",
+        "Upload photos",
+        "Upload your video assets (For Video Editing Requests only)",
+        "Optional: Include any details/instruction for your video",
+        "Select social media content type",
+        "Property Address",
+    ]
+
+    columns = columns_from_header(header)
+
+    assert maps_a_response_row(columns)
+    assert columns["agent_first_name"] == 2
+    assert columns["agent_last_name"] == 3
+
+
+def test_a_name_prefix_cannot_swallow_the_address_or_request_columns() -> None:
+    """Loosening to prefix must not let a name rule claim another field."""
+    columns = columns_from_header(PRODUCTION_HEADER)
+
+    assert columns["agent_first_name"] != columns["address"]
+    assert columns["agent_last_name"] != columns["address"]
+    assert columns["agent_first_name"] != columns["request_type"]
+    # "Please provide the property address..." must never win `address`; the
+    # exact "Property Address" column is the one that carries a usable value.
+    assert columns["address"] == 11
