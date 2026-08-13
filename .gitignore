@@ -40,3 +40,12 @@ htmlcov/
 out/
 tmp/
 venv/
+
+# The live SQLite database and its WAL/SHM sidecars. `var/` is the
+# deployed data directory on the droplet, where `git status` otherwise
+# reports it as untracked rather than ignored — one `git add -A` there
+# would commit production data.
+var/
+*.db
+*.db-wal
+*.db-shm
