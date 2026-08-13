@@ -217,10 +217,17 @@ the templates, and **each is found by name, never by position**:
 `agents/contacts.py` reads the workbook — one sheet, `Email | First Name |
 Last Name | Phone` — and mirrors it into the local `salespeople` table on every
 pass. It is a **human-owned working document**: Gable mirrors its exact contents
-atomically and refuses duplicates. A complete exact row ends validation with no
-web request. When that row or one of its name, email, or direct-phone values is
-missing, `agents/website.py` may fill only the blank for that run from one
-exact-name profile whose submitted email appears on `cornerhouserealty.com`.
+atomically and refuses duplicates. When that row or one of its name, email, or
+direct-phone values is missing, `agents/website.py` may fill only the blank for
+that run from one exact-name profile whose submitted email appears on
+`cornerhouserealty.com`.
+
+A **complete** row is not assumed to be a correct one. It is cross-checked
+against that same profile before it is trusted, and only its direct phone is
+compared: the email is already proven twice over, and a name variant is how an
+agent brands themselves rather than an error. A disagreement pauses. A site
+that cannot answer yields to the workbook, because a cross-check that halts
+every listing when a web request fails is worse than the defect it hunts.
 When source text requires an agent title or credential the same exact profile
 must supply it; Gable never infers REALTOR merely from the person's profession.
 It does not write the website result into the workbook or SQLite roster, and a

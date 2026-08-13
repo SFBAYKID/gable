@@ -33,7 +33,13 @@ def _profile(
     )
 
 
-def test_complete_workbook_contact_never_calls_the_website() -> None:
+def test_complete_workbook_contact_is_cross_checked_but_keeps_its_own_values() -> None:
+    """An agreeing profile confirms the row; the workbook still supplies every value.
+
+    This replaces an earlier contract in which a complete row was returned
+    without consulting the website at all. That trusted a filled-in row to be a
+    correct one, which is how a wrong direct line survived to production.
+    """
     calls: list[tuple[str, str]] = []
 
     def lookup(name: str, email: str) -> ProfileLookup:
@@ -50,7 +56,104 @@ def test_complete_workbook_contact_never_calls_the_website() -> None:
     assert checked.ready is True
     assert checked.phone == "410.456.3564"
     assert checked.phone_source == "contact_workbook"
-    assert calls == []
+    assert calls == [("Mike Kulnich", "mike@cornerhouserealty.com")]
+
+
+def test_complete_workbook_row_with_another_agents_phone_is_refused() -> None:
+    """The Sam Johnson defect: a complete row carrying someone else's direct line.
+
+    The row is internally consistent and the submitted name agrees with it, so
+    every pre-existing check passes. Only the official profile reveals that the
+    phone belongs to a different agent.
+    """
+    checked = validate_contact(
+        "Mike Kulnich",
+        "mike@cornerhouserealty.com",
+        Contact("mike@cornerhouserealty.com", "Mike", "Kulnich", "443.509.4299"),
+        lambda _name, _email: _profile(phone="410.456.3564"),
+    )
+
+    assert checked.ready is False
+    assert "does not match the contact-workbook phone" in checked.problem
+    assert checked.phone == "", "a refused check must not hand back either phone"
+
+
+def test_cross_check_yields_to_the_workbook_when_the_site_cannot_answer() -> None:
+    """A site outage must not stop every listing; the workbook stays authoritative."""
+    for outcome in (
+        ProfileLookup(problem="the official website has no exact profile for this agent"),
+        ProfileLookup(problem="I could not complete the check"),
+    ):
+
+        def lookup(_name: str, _email: str, result: ProfileLookup = outcome) -> ProfileLookup:
+            return result
+
+        checked = validate_contact(
+            "Mike Kulnich",
+            "mike@cornerhouserealty.com",
+            Contact("mike@cornerhouserealty.com", "Mike", "Kulnich", "410.456.3564"),
+            lookup,
+        )
+
+        assert checked.ready is True
+        assert checked.phone == "410.456.3564"
+        assert checked.phone_source == "contact_workbook"
+
+
+def test_cross_check_yields_to_the_workbook_when_the_lookup_raises() -> None:
+    """A raising lookup is an unavailable cross-check, not a failed listing."""
+
+    def lookup(_name: str, _email: str) -> ProfileLookup:
+        raise RuntimeError("network down")
+
+    checked = validate_contact(
+        "Mike Kulnich",
+        "mike@cornerhouserealty.com",
+        Contact("mike@cornerhouserealty.com", "Mike", "Kulnich", "410.456.3564"),
+        lookup,
+    )
+
+    assert checked.ready is True
+    assert checked.phone == "410.456.3564"
+
+
+def test_cross_check_ignores_a_branded_name_variant() -> None:
+    """Bobby Carr brands himself; the official profile does not. That is not an error.
+
+    Strict on the direct line, silent on the name. A check that pauses on
+    branding teaches its reader to ignore it.
+    """
+    checked = validate_contact(
+        "Bobby Carr The Dog Walking Realtor",
+        "robertfcarrjr@gmail.com",
+        Contact("robertfcarrjr@gmail.com", "Bobby", "Carr The Dog Walking Realtor", "443.790.4765"),
+        lambda _name, _email: _profile(
+            name="Bobby Carr",
+            email="robertfcarrjr@gmail.com",
+            phone="443.790.4765",
+        ),
+    )
+
+    assert checked.ready is True
+    assert checked.name == "Bobby Carr The Dog Walking Realtor"
+    assert checked.name_source == "contact_workbook"
+
+
+def test_cross_check_accepts_a_matching_phone_written_differently() -> None:
+    """Punctuation is not a conflict: 443-790-4765 and 443.790.4765 are one number."""
+    checked = validate_contact(
+        "Bobby Carr",
+        "robertfcarrjr@gmail.com",
+        Contact("robertfcarrjr@gmail.com", "Bobby", "Carr", "443.790.4765"),
+        lambda _name, _email: _profile(
+            name="Bobby Carr",
+            email="robertfcarrjr@gmail.com",
+            phone="(443) 790-4765",
+        ),
+    )
+
+    assert checked.ready is True
+    assert checked.phone == "443.790.4765", "the workbook's own formatting is preserved"
 
 
 def test_missing_workbook_phone_uses_one_exact_official_profile_for_this_run() -> None:

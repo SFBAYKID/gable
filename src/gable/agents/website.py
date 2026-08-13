@@ -1,11 +1,17 @@
 """Validate an agent contact before a listing reaches Slack.
 
-The Drive workbook remains the first source.  When — and only when — an exact
-workbook row is absent or incomplete, or a selected source requires a credential
-the workbook does not collect, this module checks the one official Corner House
-Realty website for an exact-name profile.  A website value fills that gap for
-the current run; it never overwrites the workbook, changes a submitted value, or
+The Drive workbook remains the first source.  When an exact workbook row is
+absent or incomplete, or a selected source requires a credential the workbook
+does not collect, this module checks the one official Corner House Realty
+website for an exact-name profile.  A website value fills that gap for the
+current run; it never overwrites the workbook, changes a submitted value, or
 resolves a conflict by choosing whichever source looks more plausible.
+
+A *complete* workbook row is also cross-checked against that profile, because a
+complete row is not the same as a correct one.  Only the direct phone is
+compared, and a disagreement pauses rather than picking a winner; see
+`_phone_cross_check` for why the name is deliberately excluded and why an
+unreachable site yields to the workbook instead of stopping every listing.
 
 The official site protects email addresses with Cloudflare's small XOR encoding.
 That encoding is decoded locally from the profile HTML.  Contact extraction is
@@ -118,6 +124,61 @@ def _partial_workbook_name_matches(submitted: str, contact: Contact) -> bool:
     return not last_key or submitted_key == last_key or submitted_key.endswith(f" {last_key}")
 
 
+def _phone_cross_check(
+    label: str,
+    name: str,
+    email: str,
+    workbook: Contact,
+    official_lookup: Callable[[str, str], ProfileLookup],
+) -> str:
+    """Compare a complete workbook row's phone against the official profile.
+
+    A complete workbook row used to be trusted outright, so a row that was
+    filled in but *wrong* was never questioned. That reached production: the
+    row for ``samuel@cornerhouserealty.com`` carried Sam Johnson's name and
+    email beside a different agent's direct line, and nothing in the pipeline
+    could see it. A missing value stops a run; a confidently wrong one prints.
+
+    Only the phone is compared here. The email is already proven by two earlier
+    exact checks — the workbook row's address must equal the submitted one, and
+    ``lookup_official_profile`` returns a profile only when that same address
+    appears on it — so a returned profile is identity-confirmed. The name is
+    deliberately *not* compared: agents brand themselves ("Bobby Carr The Dog
+    Walking Realtor" against an official "Bobby Carr"), those variants are not
+    errors, and a check that pauses on them trains its reader to ignore it.
+
+    Args:
+        label: Human label already chosen for this request's pause messages.
+        name: Cleaned agent name submitted on the form.
+        email: Lowercased agent email submitted on the form.
+        workbook: The exact, complete workbook row for that email.
+        official_lookup: Official-domain profile lookup.
+
+    Returns:
+        A pause message when the two sources give different direct lines, or
+        an empty string when they agree or when no comparison was possible.
+
+    Raises:
+        Nothing. Every lookup failure resolves to an empty string.
+    """
+    try:
+        looked_up = official_lookup(name, email)
+    except Exception:
+        # The workbook remains the designated authority; the website is a
+        # cross-check. An unreachable or reshaped site must not halt every
+        # listing, so a check that cannot run yields to the workbook.
+        return ""
+    profile = looked_up.profile
+    if profile is None:
+        return ""
+    if _phone_key(profile.phone) != _phone_key(workbook.phone):
+        return _pause(
+            label,
+            "the official website profile phone does not match the contact-workbook phone.",
+        )
+    return ""
+
+
 def _pause(label: str, detail: str) -> str:
     """Write one consistent, non-technical contact pause message."""
     return (
@@ -162,9 +223,10 @@ def validate_contact(
         submitted_name: Agent name from the read-only form response.
         submitted_email: Agent email from the read-only form response.
         workbook: Exact-email row from Agents Contact Information, if present.
-        official_lookup: Official-domain fallback. It is called only for a
-            missing or incomplete workbook value or a source-required title,
-            never to resolve a conflict.
+        official_lookup: Official-domain check. It fills a missing or
+            incomplete workbook value or a source-required title, and it
+            cross-checks the direct phone on an otherwise complete row. It
+            never resolves a conflict by choosing a winner.
         require_title: Whether this exact source has an agent-title field. A
             REALTOR credential is never inferred merely because someone is an
             agent; it must appear on the exact official profile.
@@ -212,6 +274,13 @@ def validate_contact(
     email_ready = workbook is not None
     phone_ready = bool(workbook is not None and _phone_is_usable(workbook.phone))
     if name_ready and email_ready and phone_ready and workbook is not None and not require_title:
+        # A complete row is still cross-checked against the official profile
+        # before it is trusted. See `_phone_cross_check`: strict on the direct
+        # line, silent about name variants, and yielding to the workbook when
+        # the site cannot answer.
+        conflict = _phone_cross_check(label, name, email, workbook, official_lookup)
+        if conflict:
+            return ContactCheck(problem=conflict)
         return ContactCheck(
             name=workbook_name,
             email=email,
