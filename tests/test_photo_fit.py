@@ -21,6 +21,7 @@ from gable.photos.fit import (
     MAX_TARGET_EDGE_PX,
     MAX_TOLERABLE_UPSCALE,
     FitAction,
+    _vertical_crop_offset,
     assess,
     fit_bounded_portrait_locally,
     fit_bounded_source_locally,
@@ -620,3 +621,60 @@ def test_an_oversized_portrait_is_bounded_before_it_is_fitted() -> None:
         fit_bounded_portrait_locally(_cutout_png(), 0, 400)
     with pytest.raises(ValueError):
         fit_bounded_portrait_locally(_cutout_png(), 300, 400, max_source_edge_px=0)
+
+
+def test_a_wide_frame_crop_takes_its_loss_from_the_bottom_not_the_roof() -> None:
+    """The 2026-08-13 Dawn Rea failure: centring sliced both gable peaks.
+
+    A 678x452 photo into the Sold design's 1078x504 hero keeps 317 rows. The
+    old centre crop removed 67 from the top, cutting a roof peak that sat about
+    60px down, while leaving a large empty lawn at the bottom.
+    """
+    source_height, kept_height = 452, 317
+    excess = source_height - kept_height
+
+    offset = _vertical_crop_offset(source_height, kept_height)
+
+    assert offset < excess // 2, "the top must lose less than the bottom"
+    assert offset < 60, "a roof peak 60px down must survive the crop"
+    assert offset > 0, "pinning the roof to the frame edge still reads as cropped"
+
+
+def test_the_vertical_crop_never_starts_above_the_image() -> None:
+    """A source shorter than the kept height must not produce a negative box."""
+    assert _vertical_crop_offset(300, 400) == 0
+    assert _vertical_crop_offset(400, 400) == 0
+
+
+def test_a_letterboxed_house_keeps_its_roofline_end_to_end() -> None:
+    """Drive the real fit: a marked roof band must survive into the output."""
+    width, height = 678, 452
+    source = Image.new("RGB", (width, height), (120, 170, 220))
+    # A distinct "roof" band where this photo's gable peaks actually sit.
+    for y in range(58, 78):
+        for x in range(width):
+            source.putpixel((x, y), (10, 10, 10))
+    raw = io.BytesIO()
+    source.save(raw, format="JPEG", quality=95)
+
+    fitted = fit_locally(raw.getvalue(), 1078, 504)
+
+    with Image.open(io.BytesIO(fitted)) as out:
+        assert out.size == (1078, 504)
+        column = [cast(tuple[int, int, int], out.getpixel((539, y))) for y in range(out.height)]
+        assert any(sum(pixel) < 120 for pixel in column), "the roof band was cropped away"
+
+
+def test_side_trimming_stays_centred() -> None:
+    """Horizontal framing is the photographer's; only height is re-anchored."""
+    source = Image.new("RGB", (2000, 400), (30, 30, 30))
+    for y in range(400):
+        source.putpixel((1000, y), (250, 250, 250))
+    raw = io.BytesIO()
+    source.save(raw, format="JPEG", quality=95)
+
+    fitted = fit_locally(raw.getvalue(), 500, 400)
+
+    with Image.open(io.BytesIO(fitted)) as out:
+        middle = cast(tuple[int, int, int], out.getpixel((250, 200)))
+        assert sum(middle) > 600, "the centre column must remain centred"

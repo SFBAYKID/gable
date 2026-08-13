@@ -28,6 +28,12 @@ from PIL import Image, ImageEnhance, ImageFilter, ImageOps
 #: ASSUMPTION: 2x is the tolerable limit. Confirmed by rendering one and looking
 #: at it — see the vision pass in ARCHITECTURE.md §4.7b, which is the backstop.
 MAX_TOLERABLE_UPSCALE: Final[float] = 2.0
+#: Share of a vertical crop's discarded height taken from the top. A house's
+#: roof is the top of the subject and the lawn below it is expendable, so the
+#: loss is weighted to the bottom. Small but non-zero: at zero the roof sits
+#: hard against the frame edge with no headroom, which reads as cropped even
+#: when nothing was cut. See `_vertical_crop_offset`.
+TOP_CROP_SHARE: Final[float] = 0.2
 
 #: Aspect ratios closer than this are treated as equal, so a 1079x1350 photo is
 #: not sent round a crop path for a rounding error.
@@ -279,6 +285,39 @@ def fit_locally(
         return _fit_locally_unlocked(image_bytes, target_width, target_height, quality)
 
 
+def _vertical_crop_offset(source_height: int, kept_height: int) -> int:
+    """Where to start a vertical crop so a roofline survives it.
+
+    The hero frames are wide letterboxes — the Sold design measures 1078x504,
+    or 2.14:1 — while property photos arrive at 3:2 or 4:3. Filling the frame
+    therefore always discards 30-38% of the height, and the only choice is
+    which end loses it.
+
+    Centring splits that loss evenly and cuts through the top of the house. The
+    2026-08-13 Dawn Rea flyer is the worked example: a 678x452 photo keeps 317
+    rows, and centring took 67 from the top, slicing both gable peaks, while
+    leaving a large empty lawn at the bottom. The visual gate caught it and the
+    flyer was refused.
+
+    A house is the subject and its roof is the subject's top edge; the driveway
+    and lawn below it are the expendable part. So take only a small share of
+    the loss from the top — enough to avoid pinning the roof against the frame
+    edge — and the rest from the bottom.
+
+    Args:
+        source_height: Height of the oriented source in pixels.
+        kept_height: Height the crop retains.
+
+    Returns:
+        The top offset for the crop box, never negative.
+
+    Raises:
+        Nothing.
+    """
+    excess = max(0, source_height - kept_height)
+    return int(excess * TOP_CROP_SHARE)
+
+
 def _fit_locally_unlocked(
     image_bytes: bytes,
     target_width: int,
@@ -303,14 +342,15 @@ def _fit_locally_unlocked(
         target_aspect = target_width / target_height
 
         if source_aspect > target_aspect:
-            # Too wide: trim the sides, keep full height.
+            # Too wide: trim the sides, keep full height. Centre is right here —
+            # a house is framed horizontally by the photographer.
             new_width = round(im.height * target_aspect)
             left = (im.width - new_width) // 2
             box = (left, 0, left + new_width, im.height)
         else:
-            # Too tall: trim top and bottom, keep full width.
+            # Too tall: trim height, but not from both ends equally.
             new_height = round(im.width / target_aspect)
-            top = (im.height - new_height) // 2
+            top = _vertical_crop_offset(im.height, new_height)
             box = (0, top, im.width, top + new_height)
 
         cropped = im.crop(box)
