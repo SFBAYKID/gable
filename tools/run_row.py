@@ -21,16 +21,21 @@ from __future__ import annotations
 import argparse
 import logging
 import sys
+from sqlite3 import Connection
 from typing import Any, Final
 
 from gable.agents.contacts import sync_contacts
 from gable.config import ConfigError, Settings
 from gable.db import store
 from gable.db.schema import apply_migrations, connect
+from gable.google_client import build_google_service
 from gable.logging_setup import configure_logging
 from gable.pipeline.live import build_runner
 from gable.sheets import repository as repo
-from gable.sheets.client import SheetClient
+from gable.sheets.client import ReadsRanges, SheetClient
+from gable.slackapp.client import build_web_client
+from gable.slackapp.outbox import SlackOutboxReconciler, notification_blocks
+from gable.voice import is_clean
 
 logger = logging.getLogger("gable.run_row")
 
@@ -41,13 +46,20 @@ GOOGLE_SCOPES: Final[tuple[str, ...]] = (
 )
 
 
-def read_one(client: SheetClient, tab: str, row_number: int) -> repo.Submission:
-    """Read a single row and parse it the way the poller would.
+def read_one(
+    client: ReadsRanges,
+    tab: str,
+    row_number: int,
+    connection: Connection | None = None,
+) -> repo.Submission:
+    """Read one row, reconciling its complete tab before selection when stored.
 
     Args:
         client: A read-only sheet client.
         tab: The tab holding the row.
         row_number: The 1-based sheet row, as a person reads it in the browser.
+        connection: Existing state used to reconcile the complete tab. Omit
+            only for a read-only preview that cannot open or resume work.
 
     Returns:
         The submission, identical to what a poll would have produced.
@@ -56,33 +68,44 @@ def read_one(client: SheetClient, tab: str, row_number: int) -> repo.Submission:
         SheetError: when the tab has no recognisable header row.
         ValueError: when the row is past the end of the tab, or is blank.
     """
-    rows = client.read(f"'{tab}'!A1:Z{row_number}")
-    header_index, columns = repo.find_header(rows)
+    rows = client.read(f"'{tab}'!{repo.RESPONSES_RANGE}")
+    header_index, _columns = repo.find_header(rows)
     if len(rows) < row_number:
         msg = f"{tab} has no row {row_number}"
         raise ValueError(msg)
     if row_number <= header_index + 1:
         msg = f"row {row_number} of {tab} is on or above its header row"
         raise ValueError(msg)
-    row = rows[row_number - 1]
-    if not any(cell.strip() for cell in row):
+    if not any(cell.strip() for cell in rows[row_number - 1]):
         msg = f"row {row_number} of {tab} is empty"
         raise ValueError(msg)
-    return repo.submission_from_row(row, columns, row_number, source_tab=tab)
+    snapshot = repo.parse_submissions(rows, tab)
+    selected_matches = [item for item in snapshot if item.sheet_row == row_number]
+    if len(selected_matches) != 1:
+        msg = f"row {row_number} of {tab} could not be parsed once"
+        raise ValueError(msg)
+    selected = selected_matches[0]
+    if connection is None:
+        return selected
+    current = repo.record_source_snapshot(connection, snapshot, tab)
+    matches = [item for item in current if item.sheet_row == row_number]
+    if len(matches) != 1:
+        msg = f"row {row_number} of {tab} could not be identified once"
+        raise ValueError(msg)
+    return matches[0]
 
 
 def _google_clients(settings: Settings) -> tuple[Any, Any, Any]:
     """Build the Sheets, Drive and Slides clients this run needs."""
     from google.oauth2 import service_account
-    from googleapiclient.discovery import build
 
     credentials = service_account.Credentials.from_service_account_file(  # type: ignore[no-untyped-call]
         str(settings.google_service_account_file), scopes=list(GOOGLE_SCOPES)
     )
     return (
-        build("sheets", "v4", credentials=credentials, cache_discovery=False),
-        build("drive", "v3", credentials=credentials, cache_discovery=False),
-        build("slides", "v1", credentials=credentials, cache_discovery=False),
+        build_google_service("sheets", "v4", credentials),
+        build_google_service("drive", "v3", credentials),
+        build_google_service("slides", "v1", credentials),
     )
 
 
@@ -140,22 +163,21 @@ def main(argv: list[str] | None = None) -> int:
         logger.exception("could not construct the Google clients")
         return 2
     client = SheetClient(spreadsheet_id=settings.sheet_id, service=sheets)
-    try:
-        submission = read_one(client, args.tab, args.row)
-    except Exception:
-        logger.exception("could not read %s row %d", args.tab, args.row)
-        return 2
-
-    intake = submission.intake
-    logger.info(
-        "read %s row %d: %s, %s, %s",
-        args.tab,
-        args.row,
-        intake.agent_name or "no agent named",
-        intake.request_type or "no request type",
-        intake.address or "no address",
-    )
     if args.dry_run:
+        try:
+            submission = read_one(client, args.tab, args.row)
+        except Exception:
+            logger.exception("could not read %s row %d", args.tab, args.row)
+            return 2
+        intake = submission.intake
+        logger.info(
+            "read %s row %d: %s, %s, %s",
+            args.tab,
+            args.row,
+            intake.agent_name or "no agent named",
+            intake.request_type or "no request type",
+            intake.address or "no address",
+        )
         for field in (
             "agent_email",
             "agent_name",
@@ -177,11 +199,24 @@ def main(argv: list[str] | None = None) -> int:
     connection = connect(settings.db_path)
     try:
         apply_migrations(connection)
+        try:
+            submission = read_one(client, args.tab, args.row, connection)
+        except Exception:
+            logger.exception("could not reconcile %s row %d", args.tab, args.row)
+            return 2
+        intake = submission.intake
+        logger.info(
+            "read %s row %d: %s, %s, %s",
+            args.tab,
+            args.row,
+            intake.agent_name or "no agent named",
+            intake.request_type or "no request type",
+            intake.address or "no address",
+        )
         # The roster carries the phone the flyer needs, so it is refreshed here
         # for the same reason the poller refreshes it. It lives in the drive
         # now, beside the templates and the headshots.
         sync_contacts(drive, connection, settings.drive_id, settings.drive_templates_folder_id)
-        submission = repo.reconcile_identity(connection, submission)
         store.record_submission(
             connection,
             submission.response_row_id,
@@ -192,12 +227,14 @@ def main(argv: list[str] | None = None) -> int:
             submission.source_tab,
         )
 
-        from slack_sdk import WebClient
-
-        slack = WebClient(token=settings.slack_bot_token)
+        slack = build_web_client(settings.slack_bot_token)
+        reconcile = SlackOutboxReconciler(slack, settings.slack_channel_id)
 
         def say(text: str, thread_ts: str | None) -> str:
             """Post to Gable's own channel, in thread when there is one."""
+            if not is_clean(text):
+                logger.error("blocked a manual-run Slack message that violates house style")
+                return ""
             response = slack.chat_postMessage(
                 channel=settings.slack_channel_id,
                 text=text,
@@ -206,6 +243,20 @@ def main(argv: list[str] | None = None) -> int:
             # The requested root says where the message was aimed, not whether
             # Slack accepted a new reply. Delivery advances only from Slack's
             # own returned timestamp, matching the long-running runtime path.
+            return str(response.get("ts") or "")
+
+        def post_once(text: str, thread_ts: str | None, client_msg_id: str) -> str:
+            """Post a durable outbox item with the same identity as recovery."""
+            if not is_clean(text):
+                logger.error("blocked a manual-run outbox message that violates house style")
+                return ""
+            response = slack.chat_postMessage(
+                channel=settings.slack_channel_id,
+                text=text,
+                thread_ts=thread_ts,
+                client_msg_id=client_msg_id,
+                blocks=notification_blocks(text, client_msg_id),
+            )
             return str(response.get("ts") or "")
 
         if args.resume:
@@ -220,15 +271,26 @@ def main(argv: list[str] | None = None) -> int:
                     existing.status,
                 )
                 return 2
+            if existing.status == "needs_photo":
+                logger.error(
+                    "row %d is waiting for a property image; upload the new image in its "
+                    "existing Slack thread instead of using --resume",
+                    args.row,
+                )
+                return 2
             # Reuse the photo already fitted and published for this run. A
-            # resumed run must also stay in its own thread, or the answer
-            # arrives in the channel detached from the question.
+            # resumed source/info/review run must also stay in its own thread,
+            # or the answer arrives in the channel detached from the question.
+            # A photo wait is refused above because its stored URL may be the
+            # exact rejected image that prompted the replacement request.
             runner = build_runner(
                 settings,
                 connection,
                 drive,
                 slides,
                 say,
+                post_once=post_once,
+                reconcile=reconcile,
                 hero_photo_url=existing.photo_url,
                 origin_thread_ts=existing.slack_thread_ts,
             )
@@ -248,6 +310,8 @@ def main(argv: list[str] | None = None) -> int:
                 drive,
                 slides,
                 say,
+                post_once=post_once,
+                reconcile=reconcile,
             )
             result = runner.run(submission)
         logger.info("run %s finished as %s", result.run_id, result.status)

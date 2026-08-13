@@ -8,7 +8,6 @@ from dataclasses import dataclass
 from sqlite3 import Connection
 from typing import Any
 
-from gable.db import store
 from gable.slides import fields as template_fields
 from gable.slides import fitting, preflight
 
@@ -92,31 +91,3 @@ def photo_note(connection: Connection, run_id: str) -> str:
     if int(row["ai_enhanced"] or 0):
         return "I sharpened, enlarged, and fitted the photo and finished the flyer."
     return "I resized and fitted the photo and finished the flyer."
-
-
-def remember_thread(
-    connection: Connection,
-    run_id: str,
-    posted_ts: str,
-    origin_thread_ts: str = "",
-) -> None:
-    """Attach a run to the root Slack thread where its outcome was discussed."""
-    root = origin_thread_ts or posted_ts
-    if not root:
-        return
-    store.set_status(
-        connection,
-        run_id,
-        status_of(connection, run_id),
-        "thread recorded",
-        slack_thread_ts=root,
-    )
-
-
-def status_of(connection: Connection, run_id: str) -> str:
-    """Return the current run status, failing closed to human review."""
-    try:
-        row = connection.execute("SELECT status FROM runs WHERE run_id = ?", (run_id,)).fetchone()
-    except Exception:
-        return "needs_review"
-    return str(row["status"]) if row else "needs_review"

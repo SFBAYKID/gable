@@ -37,7 +37,10 @@ def for_intake(
     )
     return {
         "address": intake.address,
-        "price": intake.price or known.get("list_price", ""),
+        # A public list price is not a Sold closing price or a Price Reduction's
+        # new price.  Those request types may use only the form-owned value.
+        "price": intake.price
+        or (known.get("list_price", "") if intake.accepts_public_list_price else ""),
         "beds": known.get("beds", ""),
         "baths": known.get("baths", ""),
         "square_feet": known.get("square_feet", ""),

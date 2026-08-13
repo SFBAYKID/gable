@@ -27,6 +27,7 @@ from gable.db import store
 from gable.db.schema import connect
 from gable.photos.fit import MAX_SOURCE_PIXELS, normalise_for_fitting
 from gable.photos.store import PublishError, publish_local, verify_public
+from gable.pipeline import questions as run_questions
 from gable.pipeline.runner import RunResult
 from gable.sheets import repository as repo
 from gable.slackapp.status import Working
@@ -35,6 +36,9 @@ from gable.voice import safe
 logger = logging.getLogger("gable.slack.photos")
 
 MAX_UPLOAD_BYTES: Final[int] = 25 * 1024 * 1024
+# The durable claim family for one answering upload. Startup recovery reads it
+# to find uploads this process accepted but never finished.
+PHOTO_INGRESS_ROUTE: Final[str] = "file_share"
 _SLACK_HOST_SUFFIXES: Final[tuple[str, ...]] = (".slack.com", ".slack-edge.com")
 _PHOTO_LOCK_STRIPES: Final[int] = 32
 _PHOTO_LOCKS: Final[tuple[threading.Lock, ...]] = tuple(
@@ -44,6 +48,7 @@ _PHOTO_LOCKS: Final[tuple[threading.Lock, ...]] = tuple(
 ProgressReporter = Callable[[str], None]
 SubmissionLoader = Callable[[sqlite3.Connection, store.RunRow], store.StoredSubmission | None]
 FileShareHandler = Callable[[dict[str, Any], Any, ProgressReporter], str]
+NotificationDelivery = Callable[[sqlite3.Connection, store.PendingRunQuestion], None]
 
 
 def _ignore_progress(_stage: str) -> None:
@@ -102,6 +107,7 @@ class ResumesRun(Protocol):
         run_id: str,
         *,
         resume_fields: dict[str, str | int] | None = None,
+        expected_status: str | None = None,
     ) -> RunResult:
         """Continue one existing run."""
         ...
@@ -258,6 +264,7 @@ class PhotoHandoff:
     download: Callable[[str, str, int], bytes] = download_private_image
     publish: Callable[[Path, str, bytes], str] = publish_local
     verify: Callable[[str], tuple[bool, str]] = verify_public
+    deliver_notification: NotificationDelivery | None = None
 
     def handle(
         self,
@@ -303,21 +310,105 @@ class PhotoHandoff:
             run = store.run_for_thread(connection, thread_ts)
             if run is None:
                 return "I could not match this thread to a listing, so I left the upload alone."
-            if run.status != "needs_photo":
+            run_id = run.run_id
+            event_id = str(
+                event.get("client_msg_id") or event.get("event_ts") or event.get("ts") or file_id
+            ).strip()
+            if not event_id:
                 return (
+                    "Slack did not identify that photo message, so I left the listing "
+                    "unchanged. Send it again in this thread."
+                )
+            if run.photo_event_id == event_id or store.has_run_action_notification(
+                connection,
+                run_id,
+                event_id,
+            ):
+                return ""
+
+            def finish(message: str, detail: str) -> str:
+                spoken = message
+                if message:
+                    try:
+                        pending = store.prepare_run_action_notification(
+                            connection,
+                            run_id,
+                            event_id,
+                            safe(message),
+                            thread_ts,
+                        )
+                        if self.deliver_notification is not None:
+                            self.deliver_notification(connection, pending)
+                            # Production has either confirmed the exact message
+                            # or retained it for the process-lifetime worker.
+                            # The Bolt wrapper must never post it a second way.
+                            spoken = ""
+                    except Exception:
+                        logger.exception("could not persist the Slack photo outcome")
+                # Release the durable ingress only once its outcome is stored. A
+                # crash before this line still reads as unfinished, so startup
+                # recovery asks again instead of leaving the listing waiting on
+                # an image that already arrived and was lost.
+                store.complete_slack_event(
+                    connection,
+                    PHOTO_INGRESS_ROUTE,
+                    event_id,
+                    run_id,
+                    detail,
+                )
+                return spoken
+
+            # Retiring the question before refresh/download/publish is what stops
+            # a delivery worker posting it while this upload is still being
+            # fetched. That is only safe because the durable ingress claim below
+            # records that the upload was accepted first: preparation is
+            # content-addressed and safe to repeat, and an abandoned claim is
+            # recovered at startup rather than silently dropping Carmen's photo.
+            with run_questions.run_question_guard(run.run_id):
+                current = store.run_by_id(connection, run.run_id)
+                waiting_for_photo = current is not None and (
+                    current.status == "needs_photo"
+                    or store.has_pending_photo_question(
+                        connection,
+                        current.run_id,
+                        thread_ts,
+                    )
+                )
+                if current is not None:
+                    run = current
+                if waiting_for_photo:
+                    if not store.claim_slack_event(
+                        connection,
+                        PHOTO_INGRESS_ROUTE,
+                        event_id,
+                        run.run_id,
+                        thread_ts,
+                        file_id,
+                    ):
+                        # This exact upload was already accepted here or before a
+                        # restart. Whatever that pass reported still stands.
+                        return ""
+                    store.satisfy_pending_photo_question(connection, run.run_id, thread_ts)
+            if not waiting_for_photo:
+                return finish(
                     "This listing is not waiting for a photo, so I left the current "
-                    "flyer unchanged."
+                    "flyer unchanged.",
+                    "the run was not waiting for a photo",
                 )
             try:
                 stored = self.load_current(connection, run)
             except Exception:
                 logger.exception("the current form row or contact record could not be refreshed")
-                return (
+                return finish(
                     "I could not refresh this listing from its form and contact record, "
-                    "so I left the upload and run unchanged."
+                    "so I left the upload and run unchanged.",
+                    "source refresh failed before photo preparation",
                 )
             if stored is None:
-                return "I found the listing thread but not its request details, so I stopped there."
+                return finish(
+                    "I found the listing thread but not its request details, so I stopped there.",
+                    "stored request details were unavailable",
+                )
 
             try:
                 progress("is reading the photo...")
@@ -325,7 +416,10 @@ class PhotoHandoff:
                 file_info = response.get("file", {})
                 mime_type = str(file_info.get("mimetype") or "")
                 if mime_type and not mime_type.startswith("image/"):
-                    return "That upload is not an image. Please send a photo for the hero."
+                    return finish(
+                        "That upload is not an image. Please send a photo for the hero.",
+                        "the uploaded file was not an image",
+                    )
                 private_url = str(
                     file_info.get("url_private_download") or file_info.get("url_private") or ""
                 )
@@ -339,22 +433,30 @@ class PhotoHandoff:
                 public_url = self.publish(self.public_root, self.public_base, prepared)
                 usable, _detail = self.verify(public_url)
                 if not usable:
-                    return (
+                    return finish(
                         "I prepared the photo, but the flyer service could not fetch it. "
-                        "I left the run paused."
+                        "I left the run paused.",
+                        "the published photo could not be verified",
                     )
             except PublishError:
                 logger.exception("a prepared Slack photo could not be published")
-                return (
+                return finish(
                     "I prepared the photo, but I could not save it to the flyer service. "
-                    "I left this listing paused and reported the problem for repair."
+                    "I left this listing paused and reported the problem for repair.",
+                    "photo publication failed",
                 )
             except (PhotoHandoffError, OSError, ValueError):
                 logger.exception("a Slack photo could not be prepared")
-                return "I could not prepare that photo safely. Please send a different image."
+                return finish(
+                    "I could not prepare that photo safely. Please send a different image.",
+                    "photo preparation failed",
+                )
             except Exception:
                 logger.exception("Slack file metadata could not be read")
-                return "I could not read that Slack upload. Please try sending it again."
+                return finish(
+                    "I could not read that Slack upload. Please try sending it again.",
+                    "Slack file metadata could not be read",
+                )
 
             progress("is building the flyer...")
             runner = self.runner_for(connection, public_url, thread_ts, progress)
@@ -364,15 +466,29 @@ class PhotoHandoff:
                 resume_fields={
                     "photo_url": public_url,
                     "photo_source": "slack_upload",
+                    "photo_event_id": event_id,
                     "ai_enhanced": 0,
                 },
+                expected_status="needs_photo",
             )
             # The run speaks for itself. Adding a line here after it has posted
             # its outcome and its link gives one event four messages, and the
             # last one restates what the thread already says.
             if result.said:
-                return ""
-            return "I prepared the photo, but I could not finish the flyer. I stopped there."
+                return finish("", "the resumed run posted its outcome")
+            current = store.run_by_id(connection, run.run_id)
+            if current is not None and current.photo_event_id == event_id:
+                return finish("", "the resumed run recorded this upload")
+            if current is not None and store.has_pending_run_notification(
+                connection, current.run_id
+            ):
+                # The exact outcome or next question owns its durable Slack
+                # retry. A generic handoff failure here would contradict it.
+                return finish("", "the resumed run persisted a durable outcome")
+            return finish(
+                "I prepared the photo, but I could not finish the flyer. I stopped there.",
+                "the resumed run produced no reportable outcome",
+            )
         finally:
             try:
                 connection.close()

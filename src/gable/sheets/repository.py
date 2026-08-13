@@ -13,15 +13,17 @@ way to get started.
 
 from __future__ import annotations
 
-import hashlib
-from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from sqlite3 import Connection
 from typing import Final
 
 from gable.db import store
-from gable.listings.intake import Intake, columns_from_header, from_row, maps_a_response_row
+from gable.listings.intake import columns_from_header, from_row, maps_a_response_row
 from gable.sheets.client import ReadsRanges, SheetError
+from gable.sheets.identity import Submission as Submission
+from gable.sheets.identity import content_hash, legacy_identity, source_identity
+from gable.sheets.identity import reconcile_submissions as _reconcile_submissions
+from gable.sheets.identity import remember_source_rows as _remember_source_rows
 
 #: The full width of the intake form. Reading the whole row keeps the content
 #: hash meaningful even for columns Gable ignores today. Wider than the form is
@@ -33,41 +35,6 @@ RESPONSES_RANGE: Final[str] = "A1:Z"
 #: `Testing_1` heads row 2 under a blank one, so a tab whose header is not in
 #: the first few rows is a tab this code has not been shown.
 MAX_HEADER_SCAN: Final[int] = 5
-
-
-@dataclass(frozen=True, slots=True)
-class Submission:
-    """One row, ready to act on."""
-
-    response_row_id: str
-    sheet_row: int
-    submitted_at: str
-    intake: Intake
-    content_hash: str
-    source_tab: str = ""
-
-
-def _identity(submitted_at: str, agent_email: str, address: str) -> str:
-    """A stable id for a submission.
-
-    The deployed database already uses this tuple, so changing the formula
-    would reopen every historical row. Row position is deliberately excluded
-    because inserting a row above must not renumber later submissions. An edit
-    to email or address is reconciled to the prior id by timestamp in
-    ``new_submissions`` before anything can be opened as new work.
-    """
-    basis = f"{submitted_at.strip()}|{agent_email.strip().lower()}|{address.strip().lower()}"
-    return hashlib.sha256(basis.encode()).hexdigest()[:16]
-
-
-def _content_hash(row: list[str]) -> str:
-    """A hash of the whole row, so an edit to a submission is detectable.
-
-    The identity deliberately ignores most columns; this does not. A form
-    response edited in place keeps its timestamp and therefore its identity, and
-    without this a substantive correction would be silently swallowed.
-    """
-    return hashlib.sha256("\x1f".join(row).encode()).hexdigest()[:16]
 
 
 def find_header(rows: list[list[str]]) -> tuple[int, dict[str, int]]:
@@ -112,8 +79,9 @@ def submission_from_row(
         source_tab: Exact read-only form tab that supplied the row.
 
     Returns:
-        The submission, with the same content-derived identity a poll gives it,
-        so starting a row by hand and polling it cannot produce two runs.
+        The submission, with the same tab-and-row provisional identity a poll
+        gives it. Complete-snapshot reconciliation makes that identity durable
+        before either polling or a manual start can open work.
 
     Raises:
         Nothing.
@@ -123,13 +91,18 @@ def submission_from_row(
     if not submitted_at:
         msg = f"row {sheet_row} has no submission timestamp, so I cannot identify it safely"
         raise SheetError(msg)
+    clean_tab = source_tab.strip()
     return Submission(
-        response_row_id=_identity(submitted_at, intake.agent_email, intake.address),
+        response_row_id=(
+            source_identity(clean_tab, sheet_row)
+            if clean_tab
+            else legacy_identity(submitted_at, intake.agent_email, intake.address)
+        ),
         sheet_row=sheet_row,
         submitted_at=submitted_at,
         intake=intake,
-        content_hash=_content_hash(row),
-        source_tab=source_tab.strip(),
+        content_hash=content_hash(row),
+        source_tab=clean_tab,
     )
 
 
@@ -148,6 +121,23 @@ def read_submissions(client: ReadsRanges, tab: str) -> list[Submission]:
         SheetError: if the tab cannot be read, or has no recognisable header.
     """
     rows = client.read(f"'{tab}'!{RESPONSES_RANGE}")
+    return parse_submissions(rows, tab)
+
+
+def parse_submissions(rows: list[list[str]], tab: str) -> list[Submission]:
+    """Parse one already-read, internally consistent responses-tab snapshot.
+
+    Args:
+        rows: The complete tab beginning at row one.
+        tab: Exact read-only source tab name.
+
+    Returns:
+        Every nonblank response row in the snapshot.
+
+    Raises:
+        SheetError: If the snapshot has no recognisable header or a response
+            has no timestamp.
+    """
     header_index, columns = find_header(rows)
     out: list[Submission] = []
     # `start` is the 1-based sheet row of the first row after the header, so a
@@ -156,13 +146,6 @@ def read_submissions(client: ReadsRanges, tab: str) -> list[Submission]:
         if not any(cell.strip() for cell in row):
             continue
         out.append(submission_from_row(row, columns, offset, source_tab=tab))
-    timestamps = [submission.submitted_at for submission in out]
-    if len(timestamps) != len(set(timestamps)):
-        msg = (
-            "two response rows have the same submission timestamp, so I cannot "
-            "tell them apart safely"
-        )
-        raise SheetError(msg)
     return out
 
 
@@ -209,6 +192,7 @@ def adopt_backfill(connection: Connection, submissions: list[Submission]) -> int
                 "adopted as backfill on first run; it predates Gable and was not built",
             )
             adopted += 1
+        _remember_source_rows(connection, submissions)
         _mark_backfilled(connection)
         connection.execute("COMMIT")
     except Exception:
@@ -250,12 +234,19 @@ def backfill_adopted(connection: Connection) -> bool:
     return row is not None
 
 
-def new_submissions(connection: Connection, submissions: list[Submission]) -> list[Submission]:
+def new_submissions(
+    connection: Connection,
+    submissions: list[Submission],
+    *,
+    source_tab: str = "",
+) -> list[Submission]:
     """The rows that still need building.
 
     Args:
         connection: An open database connection.
         submissions: Everything currently on the sheet.
+        source_tab: Exact tab read for this complete snapshot. Required when
+            the tab is empty so previously active source-row aliases retire.
 
     Returns:
         Submissions that have never had a run attempt. Paused work resumes only
@@ -269,35 +260,88 @@ def new_submissions(connection: Connection, submissions: list[Submission]) -> li
     if not backfill_adopted(connection):
         return []
     pending: list[Submission] = []
-    for submission in submissions:
-        submission = reconcile_identity(connection, submission)
-        store.record_submission(
-            connection,
-            submission.response_row_id,
-            submission.sheet_row,
-            submission.submitted_at,
-            submission.intake,
-            submission.content_hash,
-            submission.source_tab,
-        )
-        if store.has_been_handled(connection, submission.response_row_id):
-            continue
-        pending.append(submission)
+    connection.execute("SAVEPOINT reconcile_current_submissions")
+    try:
+        reconciled = reconcile_submissions(connection, submissions)
+        seen_ids: set[str] = set()
+        for submission in reconciled:
+            store.record_submission(
+                connection,
+                submission.response_row_id,
+                submission.sheet_row,
+                submission.submitted_at,
+                submission.intake,
+                submission.content_hash,
+                submission.source_tab,
+            )
+            if submission.response_row_id in seen_ids:
+                continue
+            seen_ids.add(submission.response_row_id)
+            if store.has_been_handled(connection, submission.response_row_id):
+                continue
+            pending.append(submission)
+        snapshot_tabs = frozenset({source_tab.strip()} - {""})
+        _remember_source_rows(connection, reconciled, snapshot_tabs)
+        connection.execute("RELEASE reconcile_current_submissions")
+    except Exception:
+        connection.execute("ROLLBACK TO reconcile_current_submissions")
+        connection.execute("RELEASE reconcile_current_submissions")
+        raise
     return pending
 
 
 def reconcile_identity(connection: Connection, submission: Submission) -> Submission:
-    """Preserve the deployed id after editable identity fields are corrected.
+    """Resolve only a source-free legacy row; source tabs require a snapshot.
 
-    Google Forms keeps the submission timestamp stable when an operator edits
-    email or address, while Gable's deployed hash includes both editable
-    fields. Every entry path, including the manual row runner, must therefore
-    resolve the timestamp before storing or opening work.
+    A single physical row cannot reveal whether earlier rows were inserted,
+    deleted, or reordered. Runtime and operator entry points therefore call
+    ``reconcile_submissions`` on the complete tab. This compatibility seam is
+    retained only for historical source-free callers.
     """
-    prior_id = store.response_id_for_timestamp(connection, submission.submitted_at)
-    if prior_id and prior_id != submission.response_row_id:
-        return replace(submission, response_row_id=prior_id)
-    return submission
+    if submission.source_tab:
+        raise SheetError("a sourced response must be reconciled with its complete tab snapshot")
+    return reconcile_submissions(connection, [submission])[0]
+
+
+def reconcile_submissions(
+    connection: Connection,
+    submissions: list[Submission],
+) -> list[Submission]:
+    """Resolve a complete tab before any provisional row id becomes work."""
+    return _reconcile_submissions(connection, submissions)
+
+
+def record_source_snapshot(
+    connection: Connection,
+    submissions: list[Submission],
+    source_tab: str,
+) -> list[Submission]:
+    """Reconcile and persist inert metadata for one complete source snapshot.
+
+    This opens no run and marks nothing handled. The manual row tool uses it so
+    a later poll has the same full-tab identity evidence as the row selection
+    that preceded it.
+    """
+    connection.execute("SAVEPOINT record_source_snapshot")
+    try:
+        reconciled = reconcile_submissions(connection, submissions)
+        for item in reconciled:
+            store.record_submission(
+                connection,
+                item.response_row_id,
+                item.sheet_row,
+                item.submitted_at,
+                item.intake,
+                item.content_hash,
+                item.source_tab,
+            )
+        _remember_source_rows(connection, reconciled, frozenset({source_tab.strip()} - {""}))
+        connection.execute("RELEASE record_source_snapshot")
+    except Exception:
+        connection.execute("ROLLBACK TO record_source_snapshot")
+        connection.execute("RELEASE record_source_snapshot")
+        raise
+    return reconciled
 
 
 def find_salesperson(connection: Connection, email: str) -> dict[str, str]:

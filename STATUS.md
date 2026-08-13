@@ -2,6 +2,75 @@
 
 Last updated 2026-08-13 by the building agent.
 
+## 2026-08-13 the release candidate's gate is green
+
+`ruff format`, `ruff check`, `mypy --strict` and 1,269 tests all pass locally.
+Three failures the previous handoff recorded are fixed: a stale photo question
+could be posted while the answering upload was still downloading, a test still
+imported two names from `slackapp.runtime` after they moved to
+`slackapp.source_refresh`, and two files were unformatted.
+
+The photo race is closed properly rather than papered over. The handoff writes a
+durable `file_share` claim before refreshing sources, downloading and
+publishing, and releases it only once an outcome is stored; retiring the
+question early is safe only because of that claim. `slackapp/recovery.py` reads
+incomplete claims on every notification pass and either releases one whose run
+already recorded the upload or asks for the image once more. Two mutation checks
+confirmed the new tests fail when either half is removed.
+
+`slackapp/runtime.py` was at the 800-line ceiling, so the startup-recovery
+helpers moved into `slackapp/recovery.py` (runtime is now 700). The photo test
+fixtures moved into `tests/photo_support.py` for the same reason.
+
+**Nothing is deployed and polling is still off.** Blockers 2, 3 and 4 below are
+open; none of them fire during the Mike photo-upload resume, which is why that
+acceptance test can proceed first, but each must be closed or explicitly gated
+before the behaviour it guards is switched on.
+
+**`ARCHITECTURE.md` is now exactly 800 lines — the hard ceiling.** The next
+decision-log row requires splitting it first.
+
+## 2026-08-13 release audit after the pixelated Mike run
+
+The current release candidate is not deployed. The playground service remains
+on `c4c6f16`, active with `GABLE_POLL_ENABLED=false`; its database is schema 7.
+Mike's existing run `run-e86567a4fa95` remains `needs_photo` in its original
+thread, waiting for one correct replacement property image. The rejected draft
+is retained for audit, but its link is not a delivery.
+
+The release candidate makes every question, final link, review explanation,
+failure, and interruption notice a durable Slack outbox item. Its retry loop is
+independent of Sheet polling, and an answering owned-thread upload satisfies a
+pending photo request before file preparation begins. A lost acknowledgement is
+confirmed only by one exact Gable-authored match in bounded Slack history. It
+handles small uploads with source-only fitting and fixes form identity for
+duplicate timestamps and movable rows through whole-tab reconciliation and a
+source-row ledger.
+Headshot discovery now recognises both an empty Slides shape and an existing
+portrait image only when that image shares a measured card with a resolved agent
+name and phone, email or title. Logos, QR codes and secondary photos do not
+qualify on shape alone; multiple candidates stop. A read-only walk of all 74
+pages in the static source found three image objects, all icon-sized and none
+misclassified. The live Sold source still has exactly one portrait shape,
+`p1_i20`, and no competing candidate; replacement restores its layer boundary.
+
+Automatic polling is not ready to enable blindly. A read-only preview against a
+fresh dump of the live database reads all 105 production responses and finds
+seven unhandled historical rows. Four are distinct answers that the deployed
+timestamp/email/address key had collapsed into the preceding row: 13
+(`3a86888ecab252cf`), 72 (`bbf229dd34a9154b`), 94
+(`040dde7acebf55fd`) and 103 (`db31f2914f8fbbfe`). The other three are row 46
+(`1d63ec043ba9ccdf`), row 105 (`a233bc6d3ad3ed38`) and row 106
+(`f78a5d67b4cda3cc`). A temporary clone proved this set is deterministic, exact
+adoption marks all seven skipped without repointing any existing run, and two
+subsequent previews both return zero; production was not changed. Chase must
+confirm they are historical. After deploy, `tools.adopt_rows` can assert the
+seven exact row/hash pairs without Slack or flyer work, and
+`tools.preview_poll --expect-none` must return zero before polling is enabled.
+The live template catalogue is also empty because scanning has never run; the
+first enabled scan safely baselines current files before the same poll can start
+listing work.
+
 ## 2026-08-13: natural-language Slack and current release gate
 
 The current review is in `AUDIT_2026-08-13.md`; the exact verification sequence
@@ -17,28 +86,26 @@ The review also fixed a fail-open edge case where a confident negative visual
 verdict with no explanatory items could otherwise leave the problem list empty
 and deliver.
 
-Commit `d406059` is deployed in monarch-bot-playground and the service is active.
-The controlled release target is Testing_1 line 48: Mike Kulnich, Sold,
+Commit `c4c6f16` is deployed in monarch-bot-playground and the service is active.
+The controlled release target remains Testing_1 line 48: Mike Kulnich, Sold,
 703 Perception Way, Aberdeen, MD 21001. The same owned-thread run retains Mike's
-exact contact record, filed headshot, current Sold source, and Test_2.jpg.
+exact contact record, filed headshot, current Sold source, and supplied photo.
 
-The first corrected resume automatically fitted the title and phone and replaced
-the sample headshot, but it did not pass: Test_2.jpg is 275×183, the image edit
-sent an invalid 1088×512 request below GPT Image 2's documented minimum, and the
-local fallback was visibly pixelated. The vision gate correctly left the run in
-`needs_review`, but the old outcome wrongly exposed that bad draft's link.
+Property-photo fitting is now entirely local and deterministic. No image
+generator or enhancement provider is connected. A source needing more than 2x
+enlargement keeps its complete foreground at no more than 2x over a blurred,
+darkened fill derived only from the same upload. Rejected draft links stay out
+of Slack, and a confidently proved source-photo contradiction returns the same
+run to `needs_photo` for one replacement upload.
 
-The next release fixes the exact dimensions to 1184×560, uses high quality,
-keeps a rejected draft's link out of Slack, and adds an append-only operator
-release for the proven pre-inference HTTP 400 without refunding its spend.
-Ruff, strict Mypy over 132 source files, 1,069 tests, Vulture, dependency
-integrity, compileall, diff integrity, and all file ceilings pass. Deployment,
-one evidenced reservation release, and one same-run retry remain before this
-test can be called successful. The prior
-OpenAI exposure remains recorded below, and Slack's settings page also surfaced
-the installed bot token during this audit. Neither secret is repeated or stored
-in the repository. The explicit playground test is using the already-installed
-credentials; rotate both before pointing Gable at the production channel.
+The current repository also composites transparent uploads onto a deterministic
+white matte, serializes memory-heavy image work, downsamples large headshots
+before fitting, and rejects unsafe target dimensions before decoding. The
+275×183 Mike upload can be fitted honestly, but its visible source detail cannot
+be recreated. The release gate is therefore not successful until a supplied
+photo produces a delivered flyer that Chase opens and confirms visually. Prior
+provider experiments and credential exposure remain in the chronological record
+below; they are not descriptions of the current fitting path.
 
 ## 2026-08-12 current quality gate
 
@@ -62,8 +129,9 @@ characters of capacity against the 52-character certification target, recorded
 `needs_template`, and verified the temporary copy in trash. No response-Sheet
 write, Slack post, deployment, or finished-design publication occurred.
 
-All 907 tests, Ruff format and lint, strict Mypy, Vulture, dependency integrity,
-and diff checks pass. The Slack manifest must be reinstalled before deployment.
+At that checkpoint, all 907 tests, Ruff format and lint, strict Mypy, Vulture,
+dependency integrity, and diff checks passed. The Slack manifest still required
+reinstallation then; the current manifest state is recorded in the audit above.
 The OpenAI credential exposed during diagnostics must be rotated first; it is
 not recorded in this repository or repeated here.
 
@@ -141,8 +209,10 @@ choice was forced rather than made. Importing the rest is what turns selection
 from theoretical into real.
 
 `tools/run_row.py` starts one row by tab and number, and `--resume` continues a
-paused run using the photo already attached to it. The poller only ever starts
-rows it has never seen, so a row already on the sheet cannot be run by waiting.
+paused source, information, or review run using its retained supplied photo. It
+refuses `needs_photo`; that state clears only when Carmen or Chase uploads the
+replacement in the owned Slack thread. The poller only ever starts rows it has
+never seen, so a row already on the sheet cannot be run by waiting.
 
 ## Where this actually stands, 2026-08-11 evening
 
@@ -184,10 +254,11 @@ as supplied, a phone number or email belonging to somebody not on the listing,
 and sample content or a malformed price from the design itself. All three are
 deterministic and live in `pipeline/audit.py`.
 
-**The automatic runtime is wired, deployed, active, and watching the Sheet.**
-`slackapp.runtime` constructs the real Google clients, database, `Poller`, and
-`Runner`; Socket Mode connects in the background while the poller runs on the
-main thread. `cli.py` also runs one guarded pass locally without Slack.
+At that checkpoint, the automatic runtime was wired, deployed, active, and
+watching the Sheet. `slackapp.runtime` constructs the real Google clients,
+database, `Poller`, and `Runner`; Socket Mode connects in the background while
+the poller runs on the main thread. Polling is disabled in the audited live
+service described above. `cli.py` also runs one guarded pass locally without Slack.
 
 The Slack photo handoff is built and unit-tested. A
 `file_share` reply is matched to its thread's paused run, downloaded, fitted,
@@ -311,8 +382,9 @@ the exact capability Spike A proved an uploaded Canva file could never carry.
 It needs no Enterprise plan, no marketplace review, and no TypeScript, and it
 reuses the Google service account already required for the Sheet.
 
-`src/gable/slides/renderer.py` is built and tested (36 tests, pure functions, no
-I/O). `src/gable/canva/` was deleted. The options below are kept only as the
+The pure Slides request builders and their concrete `pipeline/live.py` client
+are built and tested. The former `src/gable/slides/renderer.py` and
+`src/gable/canva/` paths were deleted. The options below are kept only as the
 record of what was rejected:
 
 - ~~(a) Text-only Bulk Create~~ — saves the typing, not the photo hunting, and
@@ -337,8 +409,12 @@ mirrors the salesperson roster, and never modifies the response tab.
 **Q1 — RESOLVED.** The form branches across request types and the eleven
 relevant columns are explicitly mapped in `listings/intake.py`.
 
-**Q2 — RESOLVED.** Public property facts are researched and cached. Closing
-price and other genuinely unknowable or contradictory values are asked about.
+**Q2 — RESOLVED.** Selected-source public property gaps are researched only
+when a current result proves the exact street, city, ZIP, and source URL around
+the extracted values. Legacy cached facts predate that proof and remain audit
+records rather than build authority. A Sold closing price and Price Reduction
+new price come only from their respective form columns; missing, unknowable, or
+contradictory values pause rather than borrowing a public list price.
 
 **Q3 — RESOLVED.** SQLite run state, not Sheet formatting, is the idempotency
 authority. Historical rows must be adopted before polling can start.
@@ -356,7 +432,7 @@ value — run it after any `.env` change.
 |---|---|---|
 | Slack app from `slack/manifest.json` → bot + app tokens | Any Slack output | **Done** — `auth.test` ok (team Monarch, bot `@gable`); Socket Mode ticket issued |
 | Firecrawl API key | Agent verification | **Done** — key valid, 2548 credits |
-| OpenAI image key | Reprocessing a real photo; policy-gated generation | **Done** — key valid, **`gpt-image-2`** available (newest: `gpt-image-2-2026-04-21`) |
+| OpenAI API key | Slack intent routing and final source-versus-render inspection | **Done** — the key is valid; the configured model is `gpt-5.6-sol`. Property-photo fitting does not call an image provider. |
 | Anthropic key | Reading requests, drafting copy, Slack change requests | **Done** — key valid |
 | Droplet + SSH key | Running unattended | **Done** — `gable`, Ubuntu 24.04, 1 vCPU / 1 GB, swap active, Python 3.12.3 |
 | **Google service-account JSON + Sheet and shared-drive access** | Reading the sheet — everything depends on it | **Done** — Sheet readable, shared drive writable, Slides round-trip verified; the key is present on the droplet at mode 600. |
@@ -383,10 +459,11 @@ No source file is over 800 lines. `mypy` covers `src`, `tests` and `tools`.
 |---|---|
 | `config.py` | Done. Frozen settings, all problems collected before raising. |
 | `logging_setup.py` | Done. Two-layer secret redaction, filter + formatter. |
-| `models.py` | Done. Domain types; a synthetic photo cannot be built unflagged. |
-| `listings/normalize.py` | Done. Pure parsing; `ColumnMap` makes headers data. |
-| `slackapp/blocks.py` | Done. Every AGENTS.md §2 message shape. |
-| `slides/renderer.py` and `pipeline/live.py` | Concrete Drive and Slides I/O is built. Hero-layer placement is measured for three templates; the remaining 42 refuse placement until visually measured. |
+| `listings/intake.py` + `headers.py` | Done. Header-driven parsing refuses an unrecognisable tab rather than reading fixed positions. |
+| `sheets/identity.py` + `repository.py` | Done. Whole-tab reconciliation keeps stable submission identity across duplicate timestamps and row movement. |
+| `db/question_store.py` + `pipeline/questions.py` | Done. Questions and outcomes are persisted before Slack delivery and retried with stable client identities. |
+| `slackapp/style.py` | Done. Every outgoing message is checked against AGENTS.md §2.0 before posting. |
+| Slides request builders and `pipeline/live.py` | Concrete Drive and Slides I/O is built. Each selected source is measured before it can place a property photo or deliver. |
 | `tools/check_connections.py` | Done. Proves every `.env` credential live, printing identity only. |
 | `deploy/gable.service` + `PROVISION.md` | **Run.** Droplet provisioned and verified; swap active. |
 | `spikes/` | Findings only — `SPIKE_A.md` and `SPIKE_A_RESULT.md`. The generator and its tests were deleted once Spike A was answered. |
@@ -396,25 +473,26 @@ No source file is over 800 lines. `mypy` covers `src`, `tests` and `tools`.
 | Small-photo fitting | The former generative enhancement module is deleted. A source needing more than 2x now stays at no more than 2x over a blurred, darkened fill derived only from that upload, with `ai_enhanced=0`; the exact Mike 275×183 to 1078×504 result was rendered and visually inspected locally. |
 | Former photo-resolver and handler placeholders | Historical only. They were unreachable and have since been removed rather than advertised as built. |
 
-`normalize.py`'s `ColumnMap` can be re-pointed at the real headers above without
-touching logic — that was built before the sheet was seen, and it happens to
-absorb this exact change.
+`listings/intake.py` resolves the real form headers by name, including the
+split-name layout on Testing_1, so a column insertion cannot silently remap a
+listing field.
 
 ---
 
 ## 6. Where the build actually stands
 
-The module graph, automatic trigger, Slack photo resume, core conversational
-edits, and notes-aware template selector are built. The current priority order
-is:
+The module graph, automatic trigger, durable Slack photo resume, core
+conversational edits, and notes-aware template selector are built. The current
+priority order is:
 
-1. Provide Chase's test phone number in the existing listing thread, then resume
-   and inspect the rendered flyer. The photo is already fitted and published.
-2. Calibrate the seam gate against real enlargements; the first live derivative
-   was rejected and the original-photo fallback was used.
-3. Replace the agent headshot and measure the exact hero layer for the remaining
-   42 templates. The three measured templates use explicit object ids; there is
-   no longer a size-based deletion guess.
-4. Certify all 45 templates with real rendered visual inspection. The existing
-   Firecrawl, conversation, and vision calls now share the $50 hard guard and
-   conservative spend ledger.
+1. Pass the complete release gate, deploy with Sheet polling still disabled,
+   and let the database migrate without opening listing work.
+2. Have Chase confirm the seven exact pre-release responses named in the audit,
+   adopt only those asserted rows, then require a read-only zero-work preview.
+3. Run the watched Mike line 48 test with one new property-image upload and open
+   the final editable Slides link. The test is not successful until Chase sees a
+   correct flyer; a rejected draft is not delivery.
+4. Baseline the live template catalogue, certify the remaining source designs,
+   and enable polling only after both the zero-work preview and watched flyer
+   test pass. Firecrawl, conversation, and vision calls remain under the shared
+   $50 spend guard.

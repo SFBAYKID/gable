@@ -34,6 +34,7 @@ from typing import Final, TypeVar
 
 from dotenv import load_dotenv
 
+from gable.photos.fit import MAX_OUTPUT_PIXELS, MAX_TARGET_EDGE_PX
 from gable.pipeline.schedule import PollSchedule
 
 # PEP 695 (`def f[T](...)`) is 3.12+. CLAUDE.md section 9 sets 3.11 as the
@@ -231,8 +232,12 @@ class Settings:
             drive_output_folder_id=reader.required_when(
                 "GABLE_DRIVE_OUTPUT_FOLDER_ID", require_credentials
             ),
-            slide_width_px=reader.int_value("GABLE_SLIDE_WIDTH_PX", 1080, minimum=100),
-            slide_height_px=reader.int_value("GABLE_SLIDE_HEIGHT_PX", 1350, minimum=100),
+            slide_width_px=reader.int_value(
+                "GABLE_SLIDE_WIDTH_PX", 1080, minimum=100, maximum=MAX_TARGET_EDGE_PX
+            ),
+            slide_height_px=reader.int_value(
+                "GABLE_SLIDE_HEIGHT_PX", 1350, minimum=100, maximum=MAX_TARGET_EDGE_PX
+            ),
             firecrawl_api_key=reader.secret("FIRECRAWL_API_KEY", require_credentials),
             photo_policy=reader.enum_value(
                 "GABLE_PHOTO_POLICY", PhotoPolicy, PhotoPolicy.RETRIEVE_ONLY
@@ -287,6 +292,11 @@ def _validate_cross_field(settings: Settings, problems: list[str]) -> None:
         problems.append("GABLE_PHOTO_PUBLIC_BASE must start with http:// or https://")
     if not settings.photo_public_root.is_absolute() or len(settings.photo_public_root.parts) < 3:
         problems.append("GABLE_PHOTO_PUBLIC_ROOT must be a specific absolute directory")
+    if settings.slide_width_px * settings.slide_height_px > MAX_OUTPUT_PIXELS:
+        problems.append(
+            "GABLE_SLIDE_WIDTH_PX and GABLE_SLIDE_HEIGHT_PX exceed the safe "
+            f"{MAX_OUTPUT_PIXELS}-pixel output limit when multiplied"
+        )
 
     # A My Drive folder id would parse fine and then fail on the first render
     # with StorageQuotaExceeded. Shared drive ids start with "0A"; folder ids

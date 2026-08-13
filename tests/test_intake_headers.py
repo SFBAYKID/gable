@@ -160,7 +160,7 @@ def test_find_header_refuses_a_tab_it_does_not_recognise() -> None:
 def test_a_row_read_by_hand_has_the_same_identity_as_a_polled_one() -> None:
     """Otherwise starting a row manually would build a second flyer for it."""
     columns = columns_from_header(TESTING_HEADER)
-    by_hand = repo.submission_from_row(ROW_78, columns, 78)
+    by_hand = repo.submission_from_row(ROW_78, columns, 78, source_tab="Testing_1")
 
     class _Sheet:
         def read(self, _range: str) -> list[list[str]]:
@@ -186,7 +186,7 @@ def test_correcting_identity_fields_changes_the_legacy_tuple_hash() -> None:
     assert corrected.content_hash != original.content_hash
 
 
-def test_two_rows_with_the_same_timestamp_are_refused() -> None:
+def test_two_rows_with_the_same_timestamp_are_read_as_distinct_rows() -> None:
     duplicate = ROW_78.copy()
     duplicate[12] = "900 Different Address"
 
@@ -194,8 +194,13 @@ def test_two_rows_with_the_same_timestamp_are_refused() -> None:
         def read(self, _range: str) -> list[list[str]]:
             return [TESTING_HEADER, ROW_78, duplicate]
 
-    with pytest.raises(SheetError, match="same submission timestamp"):
-        repo.read_submissions(_Sheet(), "Testing_1")
+    submissions = repo.read_submissions(_Sheet(), "Testing_1")
+
+    assert [item.intake.address for item in submissions] == [
+        ROW_78[12],
+        "900 Different Address",
+    ]
+    assert submissions[0].response_row_id != submissions[1].response_row_id
 
 
 def test_a_row_without_a_timestamp_is_refused() -> None:

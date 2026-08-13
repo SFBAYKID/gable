@@ -5,10 +5,10 @@ into an editable Google Slides flyer. It works in Slack with Carmen and Chase,
 never publishes outside the configured Gable channel, and never calls a flyer
 ready unless its deterministic checks and rendered-image inspection both pass.
 
-The current implementation and its limits are documented in
-`AUDIT_2026-08-13.md`. Runtime language and safety rules live in `AGENTS.md`;
-engineering constraints and the decision history live in `CLAUDE.md` and
-`ARCHITECTURE.md`.
+The current implementation and release state are documented in `STATUS.md` and
+`TESTING.md`. `AUDIT_2026-08-13.md` is the dated command-removal audit. Runtime
+language and safety rules live in `AGENTS.md`; engineering constraints and the
+decision history live in `CLAUDE.md` and `ARCHITECTURE.md`.
 
 ## What happens on a listing
 
@@ -55,6 +55,9 @@ alignment, padding, and off-canvas artwork before they are certified.
   and sample-value conventions are resolved by `slides/fields.py`.
 - Keep one separate, unfilled main-photo shape near the top of the slide. Gable
   refuses to infer a frame when more than one candidate is plausible.
+- Keep an agent portrait as one separate shape or image beside the agent name
+  and at least one phone, email, or title field. Gable ignores square images
+  without that contact-card evidence and refuses multiple portrait candidates.
 - Give normal addresses up to 52 average characters, emails up to 42, and agent
   names up to 28 enough room above the 8-point readability limit. These are
   certification targets; each listing is measured again and resized from the
@@ -79,7 +82,8 @@ normally inside the Gable-owned thread. Natural requests such as “can you reru
 this project?” reload the current source and continue the same paused listing;
 ambiguous instructions produce one clarifying question instead of a guess.
 
-Polling starts with the service and follows the configured schedule. A Slack
+Polling starts with the service when `GABLE_POLL_ENABLED=true` and follows the
+configured schedule. A Slack
 user cannot pause it, force it, list internal state, or start arbitrary retries.
 
 ## Setup
@@ -128,10 +132,24 @@ The tool creates one recoverable Drive copy, runs the production triage logic,
 prints the result locally, and moves only that temporary copy to Drive trash in
 a `finally` block.
 
-`tools/reconcile_image_reservation.py` is an exceptional operator-only recovery
-tool for a documented provider rejection before model execution. It previews by
-default and needs an exact spend row, reason, evidence, and explicit `--commit`.
-It never refunds the conservative spend reservation or retries anything itself.
+`tools/reconcile_image_reservation.py` remains only for auditing and reconciling
+historical reservation rows from the retired image-provider experiment. Current
+photo fitting creates no such reservation and never calls the tool.
+
+Before enabling polling on an existing database, deploy and restart once with
+polling disabled so migrations finish, then run the read-only gate:
+
+```bash
+.venv/bin/python -m tools.preview_poll --expect-none
+```
+
+If it reports rows that predate activation, review each timestamp, request and
+address. `tools.adopt_rows` previews a fail-closed `ROW:CONTENT_HASH` assertion
+and writes nothing by default. Re-run the exact same command with `--commit`
+only after every row is confirmed historical; it records terminal `skipped`
+runs but creates no flyer or Slack message. Run `preview_poll --expect-none`
+again, set `GABLE_POLL_ENABLED=true`, restart, and verify the service log. A
+nonempty preview is a stop condition.
 
 ## Important limits
 
@@ -149,6 +167,6 @@ It never refunds the conservative spend reservation or retries anything itself.
   Slides API does not expose final line-break layout. Actual values are measured
   again, text is read back after mutation, and the rendered image is the final
   gate.
-- A hard cumulative $50 ledger guards connected paid calls. A listing gets one
-  actual image-model operation and three fresh run attempts. Only an evidenced,
-  append-only operator release can reconcile a pre-inference request rejection.
+- A hard cumulative $50 ledger guards the connected Firecrawl, conversation,
+  and visual-inspection calls. Property-photo fitting has no image-generation
+  call. A listing still has a hard ceiling of three fresh run attempts.

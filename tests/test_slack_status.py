@@ -6,6 +6,7 @@ long-work stages, follow-up coverage, and cleanup before any live deployment.
 
 from __future__ import annotations
 
+import threading
 import time
 from collections.abc import Callable
 from typing import Any
@@ -134,6 +135,35 @@ def test_broken_native_status_never_breaks_the_response() -> None:
     assert completed is True
 
 
+def test_a_stalled_initial_status_never_delays_the_real_work() -> None:
+    """Cosmetic Slack I/O stays off the event-handler thread during an outage."""
+    entered = threading.Event()
+    release = threading.Event()
+
+    class Stalled(FakeClient):
+        def assistant_threads_setStatus(self, **kwargs: Any) -> None:  # noqa: ANN401, N802
+            entered.set()
+            release.wait(timeout=1)
+            super().assistant_threads_setStatus(**kwargs)
+
+    client = Stalled()
+    started = time.monotonic()
+    waiting = Working(client, "C1", "111.1")
+    waiting.start()
+
+    try:
+        assert entered.wait(timeout=0.2)
+        assert time.monotonic() - started < 0.25
+        assert not waiting._done.is_set()
+    finally:
+        release.set()
+        waiting.stop()
+
+    _wait_until(lambda: bool(client.statuses), seconds=1.0)
+    _wait_until(lambda: _texts(client)[-1:] == [""], seconds=1.0)
+    assert _texts(client) == [status.INITIAL_STATUS, ""]
+
+
 def test_missing_thread_disables_status_instead_of_broadcasting() -> None:
     """Status belongs to a response thread and nowhere else."""
     client = FakeClient()
@@ -227,6 +257,39 @@ def test_follow_up_question_gets_the_same_native_waiting_state() -> None:
 
     assert _texts(client) == ["is thinking...", ""]
     assert said == [{"text": "Send me the property photo.", "thread_ts": "1.1"}]
+
+
+def test_an_action_that_posted_via_the_outbox_is_not_posted_again() -> None:
+    """The listener clears native status without duplicating an outbox message."""
+    from gable.slackapp.app import answer_thread_reply
+    from gable.slackapp.brain import Decision
+
+    client = _ConversationClient()
+    said: list[dict[str, Any]] = []
+
+    answer_thread_reply(
+        {
+            "channel": "C0B02721MNK",
+            "thread_ts": "1.1",
+            "ts": "2.2",
+            "text": "rerun this project",
+            "user": "U9",
+        },
+        lambda **kwargs: said.append(kwargs),
+        client,
+        lambda _message, **_kwargs: Decision(
+            reply="I will rebuild it.",
+            tool="rebuild_flyer",
+            arguments={"mode": "check_updated"},
+        ),
+        action_handler=lambda _decision, _thread, _progress, _action_id: "",
+    )
+
+    # The real stage is set synchronously, but the native status worker may
+    # coalesce it with immediate cleanup when the action finishes instantly.
+    assert _texts(client)[0] == "is thinking..."
+    assert _texts(client)[-1] == ""
+    assert said == []
 
 
 def test_action_decisions_name_the_work_instead_of_staying_generic() -> None:

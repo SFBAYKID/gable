@@ -1,9 +1,7 @@
 # ARCHITECTURE.md — Gable
-
 System design, data model, and the reasoning behind each decision.
 Read `CLAUDE.md` first. This document changes as the design changes — if you
 alter a decision here, update this file in the same commit.
-
 ---
 
 ## 1. What Gable is
@@ -186,7 +184,8 @@ The eleven Gable reads are `Email Address`, `Name of Agent` — or a `First Name
 and `Second Name` pair — `Select your request type`, `Property Address`,
 `Include details for post`, `Open house date/time`, `New price`, `Closing
 price`, `Additional Notes for Social Media Team`, the buyer-or-seller side, and
-`Notes`. Column A is the timestamp and is part of the idempotency key.
+`Notes`. Column A is the timestamp and is reconciliation evidence, but the live
+workbook proves it is not unique: six pairs currently share timestamps.
 
 Position was the original mechanism and it broke on the first tab shaped
 differently: `Testing_1` splits the agent's name across two columns, shifting
@@ -268,9 +267,12 @@ runs are checked for a terminal or paused status. Without this, every poll
 rebuilds every flyer. The mutable run row and its append-only `run_events` entry
 are written atomically; one paused run can be claimed by only one worker.
 
-Do not derive `response_row_id` from the sheet row number — inserting or sorting
-rows would silently reassign identities. The deployed key hashes timestamp,
-email and address; the unique timestamp reconciles corrections to that prior id.
+New rows receive a provisional id from source tab plus physical row, so even
+byte-identical submissions remain distinct. Before new work is recorded, a
+whole-tab reconciliation uses persisted content, location, timestamp and legacy
+tuple evidence to preserve ids across edits and row movement; ambiguity fails
+closed. A source-row alias ledger prevents legacy collapsed duplicates from
+replaying but still detects a later identical response exactly once.
 
 ---
 
@@ -319,14 +321,13 @@ substitutes the office number or writes web findings into the human-owned source
 
 ### 4.3 Research public facts (`listings/enrich.py`)
 
-After the selected source is read, Firecrawl searches by address only when that
-source displays a missing bed, bath, square-footage, or price field. A design
-with none of those fields makes no property-research call. Only sourced,
-plausible values are retained, and submitted values are never overwritten.
-Results are cached by normalised address in SQLite and every paid call crosses
-the shared spend guard. Contact validation is a separate free, official-domain
-prerequisite: it runs only for a missing workbook value, and an unavailable,
-ambiguous, or conflicting profile pauses without mutation.
+Firecrawl searches only for a selected source's missing public field. A bounded
+section proving the exact street, city, ZIP and source URL supplies values;
+submitted values win. Legacy cache rows remain audit evidence but cannot build,
+so one current strict lookup fills a gap or pauses. A public list price never
+fills Sold's closing price or Price Reduction's new price, and each paid call
+crosses the spend guard. Contact fallback separately requires one exact official
+profile; unavailable, ambiguous, or conflicting evidence pauses.
 
 There is no fixed description-length setting. The current source text box and
 the actual replacement are measured before build; a visible rendered result is
@@ -343,7 +344,11 @@ Gable asks in the thread and waits:
 > **New Sold request from Lolo Simmons — 123 Main St**
 > Can you send me the image?
 
-Status is `needs_photo`. A photo a human supplies is **final** — never
+The exact question is persisted before it is posted. Status becomes `needs_photo` only after Slack confirms its timestamp; until then the run stays in notification-pending
+`needs_review`. A dedicated retry loop uses a fresh SQLite connection and remains active
+when Sheet polling is off. An owned-thread upload received during the acknowledgement gap
+atomically satisfies the outbox and claims the run, so no later retry posts a stale request.
+A photo a human supplies is **final** — never
 second-guessed by a confidence score, never overwritten, never "improved" into a
 different subject.
 
@@ -499,18 +504,21 @@ roofline is cut off. A model looking at the picture can.
 A render that fails inspection is not delivered as fine, nor is one whose
 inspection was unavailable, malformed, refused, or low-confidence. Its strict
 result names a typed remedy. Only a contradiction independently legible in the
-original upload moves the same run to `needs_photo`; all other findings stay `needs_review`.
+original upload can request a replacement; any typed mixed finding and every
+other result stays `needs_review`. The replacement question is written to the
+same durable outbox as the initial image question, and only Slack confirmation
+moves the run to `needs_photo`.
 
 ### 4.8 Deliver (`slackapp/`)
 
-Post only to the configured Gable channel, inside the listing's owned thread: a
-plain-language outcome and a descriptive link to the rendered Slides file.
-
-There is no attachment and nothing to download. The link is the deliverable —
-Carmen opens the live Slides file and edits it, or replies in the thread.
-
-Gable never publishes or exports the file. Carmen decides what leaves the
-building.
+Post only to the configured Gable channel, inside the listing's owned thread.
+Every question, review, failure and final linked outcome is persisted before
+posting and retried by the polling-independent notification loop with one stable
+Slack client identity. A verified file stays `building` until Slack confirms
+the exact link; review and failure states keep their named reason while their
+notice is pending. There is no attachment or export: Carmen opens the live
+Slides file and decides what leaves the building. After an acknowledgement loss,
+only one exact Gable-authored text in bounded root/thread history confirms it.
 
 For two or more attempts, one summary counts only `delivered` as ready.
 There is no operator console in Slack. Mentions and owned-thread replies are the
@@ -527,16 +535,15 @@ of the product as the renderer.
 
 An ordinary `message` event is not an invitation merely because it has a
 `thread_ts`. Before a plain reply or shared photo is accepted,
-`slackapp/routing.py` reads the root. Only a root Gable authored or one that
-explicitly mentioned Gable is owned; the bounded cache keys that decision by
-channel and root timestamp.
+`slackapp/routing.py` reads the root. Only a root Gable authored or a root where
+Carmen or Chase explicitly mentioned Gable is owned; the bounded cache keys
+that decision by channel and root timestamp.
 
 Direct `app_mention` events bypass this check, but do not transfer ownership of
 a Monarch Website Watcher thread. Gable-authored listing threads keep automatic
 follow-ups and uploads. If Slack cannot return the root or identify Gable's bot
 user, the lookup fails closed and Gable stays silent; an explicit mention still
 works.
-
 Every interaction is restricted to two stable Slack IDs; names are not authorization.
 
 ### 4A.1 Confirm before acting
@@ -611,8 +618,8 @@ The only connected hero source is **the ask**. Gable stops before rendering and
 requests one image in the listing thread; Carmen's or Chase's reply is prepared,
 published and attached to that same paused run. Form-photo selection, Drive
 selection, brokerage and web lookup, MLS access, and generation are not built.
-The default policy is `retrieve_only`; `no_ai` additionally disables paid
-enlargement of the supplied real photo.
+Both accepted policy names use the same provider-free source-only fitting path;
+neither permits paid enlargement of the supplied real photo.
 
 ---
 
@@ -787,3 +794,7 @@ Append to this table. Do not rewrite history — if a decision reverses, add a n
 | 2026-08-13 | GPT Image 2 final-photo edits use **high quality and a constraint-valid proportional canvas** | The Mike test exposed a client bug: rounding its 1078×504 frame to 1088×512 produced only 557,056 pixels, below the documented 655,360 minimum, so the API rejected it before inference and local stretching looked visibly pixelated. The chooser now enforces both 16-pixel edges, 3:1, 3,840-pixel, and total-pixel bounds; that frame becomes 1184×560. A vision-rejected draft stays internal rather than giving Slack a link to known-bad work. |
 | 2026-08-13 | A proved source-photo contradiction routes directly back to the same thread's upload state | The strict visual result carries a typed remedy and a source-evidence flag rather than asking runtime code to parse prose. Only a checked, confident `replace_photo` verdict whose contradiction is independently legible in the first human upload, with no separate build/readback problem, becomes `needs_photo`; a detail legible only after enhancement stays `needs_review`. The rejected Drive copy stays internal, the one replacement request resumes the same run, and no web photo is selected. |
 | 2026-08-13 | **Reverses generative real-photo upscaling:** every property-photo fit is deterministic and source-only | The Mike test showed a model can invent a crisp factual detail that was unreadable in the upload. Beyond 2x, Gable now contains the complete source at no more than 2x over a blurred, darkened fill made from that upload, at the exact measured frame size. No image provider, paid reservation, retry, or `ai_enhanced` claim remains on the live path. |
+| 2026-08-13 | Every run question and outcome is a durable, Slack-confirmed outbox item | Posting a root or reply and changing SQLite state cannot be one transaction. Gable stores exact wording and target state first, then a process-lifetime loop independent of Sheet polling retries questions, review notices, failures, interruption notices and final links with one stable Slack client identity. After acknowledgement loss, only one exact Gable-authored text in bounded root/thread history confirms delivery. A verified flyer remains `building` until its link is confirmed; Slack loss cannot terminal-fail it or hide review/failure detail. An owned-thread photo atomically satisfies its pending request before preparation. |
+| 2026-08-13 | Duplicate form timestamps and physical row movement are reconciled from a complete source snapshot | The live production tab contains both distinct and apparent duplicate responses with the same timestamp, so rejecting the tab or treating time as identity stops polling. New rows use a tab-and-row provisional id, while whole-tab reconciliation preserves stored ids across inserts, deletes and reorderings. A durable source-row alias ledger carries legacy duplicate multiplicity forward without replay and still lets a later byte-identical response open one new submission. Ambiguous corrections fail closed rather than merge two listings. |
+| 2026-08-13 | Thread ownership requires a Gable root or an allowed person's root mention | The earlier ownership rule did not distinguish a human operator from another app or an unauthorized channel member mentioning Gable. A bot-authored root never transfers ownership, and a human-authored mention root does so only for Carmen or Chase's configured stable ID; direct mentions in foreign threads remain one-turn interactions. |
+| 2026-08-13 | An answering photo upload is claimed durably before it retires its question | Retiring the request before the slow refresh, download and publish is what stops a delivery worker reposting it mid-upload, but on its own it loses Carmen's only image if the process dies during preparation: Slack does not redeliver the file, and nothing is left owed. The handoff now writes a `file_share` claim in `slack_event_claims` before that work and completes it only once an outcome is durable. The process-lifetime notification worker reads incomplete claims every pass, and either releases one whose run already recorded the upload or asks for the image once more in the same thread. It never asks twice, and never speaks over a message the thread is already owed. |

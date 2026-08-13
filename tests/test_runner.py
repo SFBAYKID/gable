@@ -200,14 +200,10 @@ def test_researched_facts_are_cached_for_next_time(db: sqlite3.Connection) -> No
 # --- it asks rather than guessing -------------------------------------------
 
 
-def test_sold_with_no_closing_price_builds_and_offers_to_add_it(
+def test_sold_with_no_closing_price_stops_when_the_design_has_a_price_field(
     db: sqlite3.Connection,
 ) -> None:
-    """Chase's rule, 2026-08-12: the link first, the missing price after it.
-
-    Stopping first meant a flyer that was otherwise complete — photo, agent,
-    address, design — waited on a number the agent could supply in seconds.
-    """
+    """A public list price must never masquerade as the missing sold price."""
     submission = _submission(request_type="Sold", rid="rid-sold")
     _record(db, submission)
     rec = Recorder()
@@ -215,10 +211,9 @@ def test_sold_with_no_closing_price_builds_and_offers_to_add_it(
     runner.hero_photo_url = "http://example.invalid/hero.jpg"
     result = runner.run(submission)
 
-    assert result.status == "delivered"
-    assert rec.copied is True, "a missing price must not stop the build"
-    assert any("no price" in said.lower() for said in result.said)
-    assert any("give me the price" in said.lower() for said in result.said)
+    assert result.status == "needs_info"
+    assert rec.copied is False
+    assert any("price" in said.lower() for said in result.said)
 
 
 def test_a_resumed_question_preserves_the_root_thread_timestamp(
@@ -332,7 +327,7 @@ def test_a_flyer_that_still_shows_a_placeholder_is_not_delivered(
     ("kwargs", "expected"),
     [
         ({}, "delivered"),
-        ({"request_type": "Sold"}, "delivered"),
+        ({"request_type": "Sold"}, "needs_info"),
         ({"address": "Google Review"}, "needs_info"),
     ],
 )
@@ -447,7 +442,7 @@ def test_a_design_without_a_headshot_slot_can_still_be_delivered(
         "UPDATE salespeople SET headshot_url = ? WHERE email = ?",
         ("http://example.invalid/lolo.jpg", "lolo@cornerhouserealty.com"),
     )
-    runner.place_headshot = lambda _file_id, _url: None
+    runner.place_headshot = lambda _file_id, _url, _values: None
 
     result = runner.run(submission)
 
@@ -465,7 +460,7 @@ def test_a_found_headshot_slot_that_fails_to_change_blocks_delivery(
         "UPDATE salespeople SET headshot_url = ? WHERE email = ?",
         ("http://example.invalid/lolo.jpg", "lolo@cornerhouserealty.com"),
     )
-    runner.place_headshot = lambda _file_id, _url: False
+    runner.place_headshot = lambda _file_id, _url, _values: False
 
     result = runner.run(submission)
 
@@ -510,7 +505,6 @@ def test_a_structural_preflight_problem_cannot_be_overridden(db: sqlite3.Connect
     _record(db, submission)
     rec = Recorder()
     runner = _runner(db, rec)
-    runner.approved_template_warning_codes = frozenset({"no_frame"})
     runner.preflight_template = lambda *_args: Report(
         issues=(Issue("no_frame", "I could not identify the photo frame.", blocking=True),)
     )

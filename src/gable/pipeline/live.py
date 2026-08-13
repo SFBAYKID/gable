@@ -20,18 +20,25 @@ from gable.agents.website import lookup_official_profile
 from gable.config import Settings
 from gable.db import store
 from gable.listings.enrich import default_research
-from gable.photos.fit import assess, fit_locally, fit_small_source, image_dimensions
+from gable.photos.fit import (
+    assess,
+    fit_bounded_source_locally,
+    fit_locally,
+    fit_small_source,
+    image_dimensions,
+)
 from gable.photos.headshots import MAX_HEADSHOT_BYTES
 from gable.photos.headshots import url_for_agent as headshot_url_for
 from gable.photos.store import publish_local, verify_public
 from gable.photos.verify import verify as verify_image
+from gable.pipeline.questions import Reconciliation
 from gable.pipeline.runner import Runner
 from gable.pipeline.vision import Inspection
 from gable.pipeline.vision import inspect as inspect_flyer
 from gable.slides import fields as template_fields
 from gable.slides import preflight
 from gable.slides.elements import descendants, text_content
-from gable.slides.hero import find_headshot_frame, find_hero_frame
+from gable.slides.hero import find_hero_frame, headshot_frames
 from gable.slides.library import list_files as list_template_files
 from gable.slides.replacement import confirmed_replacement_count, safe_replacement_requests
 from gable.slides.selection import template_picker
@@ -261,6 +268,7 @@ def place_headshot(
     slides: Any,  # noqa: ANN401 - googleapiclient resource, untyped upstream
     file_id: str,
     url: str,
+    agent_values: dict[str, str] | None = None,
     refit: Callable[[str, int, int], str] = lambda existing, _w, _h: existing,
     slide_px: tuple[int, int] = (1080, 1350),
 ) -> bool | None:
@@ -275,6 +283,8 @@ def place_headshot(
         slides: A Slides v1 resource.
         file_id: The copied presentation to edit.
         url: A public image URL for this agent's headshot.
+        agent_values: Exact current contact values used to recognise an already
+            filled agent card beside an existing Slides image.
         refit: Crops the source once to the measured frame and republishes it.
         slide_px: Pixel dimensions corresponding to the Slides page.
 
@@ -304,10 +314,20 @@ def place_headshot(
         slide_w = presentation.get("pageSize", {}).get("width", {}).get("magnitude", 0)
         slide_h = presentation.get("pageSize", {}).get("height", {}).get("magnitude", 0)
         hero = find_hero_frame(page, slide_w, slide_h)
-        frame = find_headshot_frame(page, slide_w, slide_h, hero.object_id if hero else "")
-        if frame is None:
+        frames = headshot_frames(
+            page,
+            slide_w,
+            slide_h,
+            hero.object_id if hero else "",
+            agent_values,
+        )
+        if not frames:
             logger.info("no headshot frame recognised; leaving the design alone")
             return None
+        if len(frames) != 1:
+            logger.error("headshot placement found %d plausible portrait slots", len(frames))
+            return False
+        frame = frames[0]
         frame_width_px = max(1, round(frame.width / slide_w * slide_px[0]))
         frame_height_px = max(1, round(frame.height / slide_h * slide_px[1]))
         placed_url = refit(url, frame_width_px, frame_height_px)
@@ -362,10 +382,11 @@ def build_runner(
     slides: Any,  # noqa: ANN401
     slack_post: Any,  # noqa: ANN401
     *,
+    post_once: Callable[[str, str | None, str], str] | None = None,
+    reconcile: Callable[[str, str | None, str, str], Reconciliation] | None = None,
     hero_photo_url: str = "",
     origin_thread_ts: str = "",
     progress: Callable[[str], None] = lambda _stage: None,
-    approved_template_warning_codes: frozenset[str] = frozenset(),
 ) -> Runner:
     """Assemble a `Runner` that talks to the real services.
 
@@ -376,11 +397,11 @@ def build_runner(
         slides: A Slides v1 resource.
         slack_post: A callable taking `(text, thread_ts)` and returning the
             thread timestamp it landed in.
+        post_once: Optional Slack outbox seam taking a stable client message id.
+        reconcile: Optional Slack history proof after an acknowledgement loss.
         hero_photo_url: A fitted, published photo when resuming a paused run.
         origin_thread_ts: Root Slack thread that a resumed run must preserve.
         progress: Names the current stage for Slack's waiting indicator.
-        approved_template_warning_codes: Exact measured advisory codes Carmen
-            or Chase explicitly accepted for this run.
 
     Returns:
         A ready `Runner`.
@@ -673,7 +694,13 @@ def build_runner(
             if not original or len(original) > MAX_HEADSHOT_BYTES:
                 logger.error("the filed headshot is empty or too large to fit")
                 return ""
-            fitted = fit_locally(original, width_px, height_px)
+            fitted = fit_bounded_source_locally(
+                original,
+                width_px,
+                height_px,
+                max_source_edge_px=settings.photo_max_edge_px,
+                quality=settings.photo_jpeg_quality,
+            )
             url = publish_local(
                 settings.photo_public_root,
                 settings.photo_public_base,
@@ -701,13 +728,16 @@ def build_runner(
         read_slide_text=read_slide_text,
         copy_template=copy_template,
         fill=fill,
+        post_once=post_once,
+        reconcile=reconcile,
         research=default_research(settings.firecrawl_api_key, connection),
         official_contact_lookup=lookup_official_profile,
         place_photo=place_photo,
-        place_headshot=lambda fid, url: place_headshot(
+        place_headshot=lambda fid, url, values: place_headshot(
             slides,
             fid,
             url,
+            values,
             refit=refit_headshot,
             slide_px=(settings.slide_width_px, settings.slide_height_px),
         ),
@@ -728,5 +758,4 @@ def build_runner(
             settings.photo_public_base,
         ),
         progress=progress,
-        approved_template_warning_codes=approved_template_warning_codes,
     )

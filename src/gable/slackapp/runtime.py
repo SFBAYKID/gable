@@ -19,23 +19,37 @@ from gable.agents.contacts import sync_contacts
 from gable.config import ConfigError, Settings
 from gable.db import store
 from gable.db.schema import apply_migrations, connect
+from gable.google_client import build_google_service
 from gable.logging_setup import configure_logging
 from gable.pipeline.live import build_runner
 from gable.pipeline.poller import BatchOutcome, Poller
+from gable.pipeline.questions import (
+    ReconcilePost,
+    ReconcileState,
+    Reconciliation,
+    RunNotificationRetryLoop,
+    deliver_pending,
+)
 from gable.pipeline.runner import Runner
-from gable.pipeline.template_triage import TemplateTriage
+from gable.pipeline.template_triage import TemplateTriage, drain_template_notifications
 from gable.pipeline.template_vision import inspect_source_template
 from gable.runtime import RuntimeComponents, serve
 from gable.sheets import repository as repo
-from gable.sheets.client import ReadsRanges, SheetClient
+from gable.sheets.client import SheetClient
 from gable.slackapp.app import build_app
 from gable.slackapp.batches import summarize as summarize_batch
 from gable.slackapp.brain import Decision, think
 from gable.slackapp.context import listing_context
 from gable.slackapp.editing import SlideEditor
+from gable.slackapp.outbox import SlackOutboxReconciler, notification_blocks
 from gable.slackapp.photos import PhotoHandoff
+from gable.slackapp.recovery import (
+    notify_interrupted_runs,
+    prepare_pending_notifications,
+)
+from gable.slackapp.source_refresh import SourceRefreshError, refresh_submission_sources
 from gable.slides.library import list_files as list_template_files
-from gable.voice import safe
+from gable.voice import is_clean, safe
 
 logger = logging.getLogger("gable.slack.runtime")
 
@@ -46,111 +60,17 @@ GOOGLE_SCOPES: tuple[str, ...] = (
 )
 
 
-class SourceRefreshError(RuntimeError):
-    """The authoritative roster or original read-only form row could not be refreshed."""
+def _needs_fresh_photo_upload(connection: Connection, run: store.RunRow) -> bool:
+    """Return whether only an owned-thread upload may continue this run.
 
-
-def refresh_submission_sources(
-    connection: Connection,
-    run: store.RunRow,
-    sheet_client: ReadsRanges,
-    drive: Any,  # noqa: ANN401 - googleapiclient resource
-    drive_id: str,
-    templates_folder_id: str,
-) -> store.StoredSubmission:
-    """Reload the contact workbook and exact form tab behind a paused run.
-
-    The form remains read-only. Remembering its tab is what distinguishes, for
-    example, Testing_1 row 48 from production row 48; a row number alone is not
-    an identity.
+    This includes the acknowledgement gap where a durable photo question exists
+    but the run remains needs_review until Slack confirms it.
     """
-    try:
-        sync_contacts(drive, connection, drive_id, templates_folder_id)
-        stored = store.load_submission(connection, run.response_row_id)
-        if stored is None:
-            raise SourceRefreshError("the saved request no longer exists")
-        if not stored.source_tab:
-            # Rows created before source-tab provenance was deployed still get
-            # the current roster. Their form payload remains the last exact
-            # value read, rather than guessing which tab a row number belongs to.
-            return stored
-        matches = [
-            submission
-            for submission in repo.read_submissions(sheet_client, stored.source_tab)
-            if submission.submitted_at == stored.submitted_at
-        ]
-        if len(matches) != 1:
-            raise SourceRefreshError("the original form response could not be identified once")
-        current = repo.reconcile_identity(connection, matches[0])
-        if current.response_row_id != run.response_row_id:
-            raise SourceRefreshError("the refreshed form response did not match this run")
-        store.record_submission(
-            connection,
-            current.response_row_id,
-            current.sheet_row,
-            current.submitted_at,
-            current.intake,
-            current.content_hash,
-            current.source_tab,
-        )
-        refreshed = store.load_submission(connection, run.response_row_id)
-        if refreshed is None:
-            raise SourceRefreshError("the refreshed request could not be saved")
-        return refreshed
-    except SourceRefreshError:
-        raise
-    except Exception as exc:
-        raise SourceRefreshError("the request sources could not be refreshed") from exc
-
-
-def notify_interrupted_runs(
-    connection: Connection,
-    interrupted: tuple[store.RunRow, ...],
-    say: Callable[[str, str | None], str],
-) -> int:
-    """Post durable startup-recovery outcomes and acknowledge confirmations.
-
-    Runs with an owned thread were paused for review and receive the notice in
-    that thread. Runs interrupted before a root existed are failed and receive
-    one channel notice. A failed or unconfirmed Slack call leaves the database
-    marker untouched, so the next startup retries the notice without retrying
-    the flyer or consuming another attempt.
-
-    Returns:
-        Number of notices Slack confirmed and the database acknowledged.
-
-    Raises:
-        Nothing. Startup must continue even while Slack is temporarily down.
-    """
-    confirmed = 0
-    for run in interrupted:
-        try:
-            stored = store.load_submission(connection, run.response_row_id)
-            address = stored.intake.address.strip() if stored is not None else ""
-            listing = address or "This listing"
-            if run.slack_thread_ts:
-                message = safe(
-                    f"{listing} — I was interrupted while building this flyer, so I "
-                    "paused it for review instead of saying it was finished. Tell me to "
-                    "run it again."
-                )
-                thread_ts: str | None = run.slack_thread_ts
-            else:
-                message = safe(
-                    f"{listing} — I was interrupted while building this flyer, and there "
-                    "was no listing thread I could safely resume. I marked that attempt "
-                    "failed so Chase can check it before retrying."
-                )
-                thread_ts = None
-            posted_ts = say(message, thread_ts)
-            if not posted_ts.strip():
-                logger.error("Slack did not confirm an interrupted-run notice")
-                continue
-            if store.acknowledge_interrupted_run(connection, run.run_id, posted_ts):
-                confirmed += 1
-        except Exception:
-            logger.exception("could not report an interrupted run in Slack")
-    return confirmed
+    return run.status == "needs_photo" or store.has_pending_photo_question(
+        connection,
+        run.run_id,
+        run.slack_thread_ts,
+    )
 
 
 def build_components(settings: Settings) -> RuntimeComponents:
@@ -167,7 +87,6 @@ def build_components(settings: Settings) -> RuntimeComponents:
             Startup logs this through the mandatory redacting formatter.
     """
     from google.oauth2 import service_account
-    from googleapiclient.discovery import build
     from slack_bolt.adapter.socket_mode import SocketModeHandler
 
     connection = connect(settings.db_path)
@@ -183,15 +102,33 @@ def build_components(settings: Settings) -> RuntimeComponents:
     )
     # Discovery clients are reused by sequential poll callbacks on the main
     # thread. https://googleapis.github.io/google-api-python-client/docs/epy/googleapiclient.discovery-module.html
-    sheets = build("sheets", "v4", credentials=credentials, cache_discovery=False)
-    drive = build("drive", "v3", credentials=credentials, cache_discovery=False)
-    slides = build("slides", "v1", credentials=credentials, cache_discovery=False)
+    sheets = build_google_service("sheets", "v4", credentials)
+    drive = build_google_service("drive", "v3", credentials)
+    slides = build_google_service("slides", "v1", credentials)
     sheet_client = SheetClient(spreadsheet_id=settings.sheet_id, service=sheets)
 
     app: Any = None
 
+    # Rebound to the configured Slack history reader before any runtime work or
+    # startup notice can invoke a runner.
+    slack_reconcile: ReconcilePost | None = None
+
+    def reconcile_slack(
+        text: str,
+        thread_ts: str | None,
+        created_at: str,
+        notification_id: str,
+    ) -> Reconciliation:
+        """Resolve the history reader lazily after Bolt creates its client."""
+        if slack_reconcile is None:
+            return Reconciliation(ReconcileState.UNKNOWN)
+        return slack_reconcile(text, thread_ts, created_at, notification_id)
+
     def slack_post(text: str, thread_ts: str | None) -> str:
         """Post only to Gable's configured channel and return the message id."""
+        if not is_clean(text):
+            logger.error("blocked a Slack message that violates Gable's house style")
+            return ""
         response = app.client.chat_postMessage(
             channel=settings.slack_channel_id,
             text=text,
@@ -200,6 +137,20 @@ def build_components(settings: Settings) -> RuntimeComponents:
         # A requested root proves where we tried to post, not that Slack
         # accepted the new message. Callers advance delivery state only from
         # the timestamp of the response itself.
+        return str(response.get("ts") or "")
+
+    def slack_post_once(text: str, thread_ts: str | None, client_msg_id: str) -> str:
+        """Post one durable outbox item using its stable Slack identity."""
+        if not is_clean(text):
+            logger.error("blocked a durable Slack message that violates Gable's house style")
+            return ""
+        response = app.client.chat_postMessage(
+            channel=settings.slack_channel_id,
+            text=text,
+            thread_ts=thread_ts,
+            client_msg_id=client_msg_id,
+            blocks=notification_blocks(text, client_msg_id),
+        )
         return str(response.get("ts") or "")
 
     def template_triage_for(
@@ -219,6 +170,8 @@ def build_components(settings: Settings) -> RuntimeComponents:
                 triage_slides.presentations().get(presentationId=file_id).execute()
             ),
             say=slack_post,
+            post_once=slack_post_once,
+            reconcile=reconcile_slack,
             look_at=lambda file_id: inspect_source_template(
                 triage_connection,
                 triage_slides,
@@ -241,29 +194,24 @@ def build_components(settings: Settings) -> RuntimeComponents:
         event_credentials = service_account.Credentials.from_service_account_file(  # type: ignore[no-untyped-call]
             str(settings.google_service_account_file), scopes=list(GOOGLE_SCOPES)
         )
-        event_drive = build("drive", "v3", credentials=event_credentials, cache_discovery=False)
-        event_slides = build("slides", "v1", credentials=event_credentials, cache_discovery=False)
+        event_drive = build_google_service("drive", "v3", event_credentials)
+        event_slides = build_google_service("slides", "v1", event_credentials)
 
         def post_in_origin_thread(text: str, requested_thread: str | None) -> str:
             """Keep every resumed-run message in its originating thread."""
             return slack_post(text, requested_thread or thread_ts)
 
-        run = store.run_for_thread(connection_for_event, thread_ts)
-        approved = (
-            store.decode_warning_codes(run.approved_warning_codes)
-            if run is not None
-            else frozenset()
-        )
         return build_runner(
             settings,
             connection_for_event,
             event_drive,
             event_slides,
             post_in_origin_thread,
+            post_once=slack_post_once,
+            reconcile=slack_reconcile,
             hero_photo_url=photo_url,
             origin_thread_ts=thread_ts,
             progress=progress,
-            approved_template_warning_codes=approved,
         )
 
     def refresh_for_photo(
@@ -274,8 +222,8 @@ def build_components(settings: Settings) -> RuntimeComponents:
         event_credentials = service_account.Credentials.from_service_account_file(  # type: ignore[no-untyped-call]
             str(settings.google_service_account_file), scopes=list(GOOGLE_SCOPES)
         )
-        event_sheets = build("sheets", "v4", credentials=event_credentials, cache_discovery=False)
-        event_drive = build("drive", "v3", credentials=event_credentials, cache_discovery=False)
+        event_sheets = build_google_service("sheets", "v4", event_credentials)
+        event_drive = build_google_service("drive", "v3", event_credentials)
         return refresh_submission_sources(
             event_connection,
             run,
@@ -283,6 +231,18 @@ def build_components(settings: Settings) -> RuntimeComponents:
             event_drive,
             settings.drive_id,
             settings.drive_templates_folder_id,
+        )
+
+    def deliver_photo_notification(
+        event_connection: Connection,
+        pending: store.PendingRunQuestion,
+    ) -> None:
+        deliver_pending(
+            event_connection,
+            pending,
+            slack_post,
+            post_once=slack_post_once,
+            reconcile=reconcile_slack,
         )
 
     photo_handoff = PhotoHandoff(
@@ -295,12 +255,14 @@ def build_components(settings: Settings) -> RuntimeComponents:
         public_base=settings.photo_public_base,
         runner_for=runner_for_photo,
         load_current=refresh_for_photo,
+        deliver_notification=deliver_photo_notification,
     )
 
     def execute_action(
         decision: Decision,
         thread_ts: str,
         progress: Callable[[str], None],
+        action_id: str,
     ) -> str:
         """Use thread-owned clients to apply one conversational edit."""
         action_connection = connect(settings.db_path)
@@ -308,9 +270,7 @@ def build_components(settings: Settings) -> RuntimeComponents:
             action_credentials = service_account.Credentials.from_service_account_file(  # type: ignore[no-untyped-call]
                 str(settings.google_service_account_file), scopes=list(GOOGLE_SCOPES)
             )
-            action_slides = build(
-                "slides", "v1", credentials=action_credentials, cache_discovery=False
-            )
+            action_slides = build_google_service("slides", "v1", action_credentials)
             if decision.tool == "rebuild_flyer":
                 run = store.run_for_thread(action_connection, thread_ts)
                 if run is None:
@@ -325,21 +285,37 @@ def build_components(settings: Settings) -> RuntimeComponents:
                             "This thread is about a source template, not a listing. Update "
                             "the design and tell me to check it again."
                         )
-                    progress("is measuring the updated template...")
-                    action_drive = build(
-                        "drive", "v3", credentials=action_credentials, cache_discovery=False
-                    )
+                    action_drive = build_google_service("drive", "v3", action_credentials)
                     return template_triage_for(
                         action_connection,
                         action_drive,
                         action_slides,
-                    ).recheck(thread_ts, progress)
-                action_drive = build(
-                    "drive", "v3", credentials=action_credentials, cache_discovery=False
+                    ).recheck_action(thread_ts, action_id, progress)
+                pending_before_rebuild = tuple(
+                    item
+                    for item in store.pending_run_questions(action_connection)
+                    if item.run_id == run.run_id
                 )
-                action_sheets = build(
-                    "sheets", "v4", credentials=action_credentials, cache_discovery=False
-                )
+                if pending_before_rebuild:
+                    for item in pending_before_rebuild:
+                        deliver_pending(
+                            action_connection,
+                            item,
+                            slack_post,
+                            post_once=slack_post_once,
+                            reconcile=reconcile_slack,
+                        )
+                    return ""
+                if _needs_fresh_photo_upload(action_connection, run):
+                    # The retained URL is audit evidence for the rejected or
+                    # superseded image, not permission to reuse it.  Only the
+                    # next Slack upload may atomically replace that provenance
+                    # and clear this exact pause.
+                    if run.photo_url:
+                        return "Send me the correct property image in this thread."
+                    return "Send me the property image in this thread."
+                action_drive = build_google_service("drive", "v3", action_credentials)
+                action_sheets = build_google_service("sheets", "v4", action_credentials)
                 try:
                     stored = refresh_submission_sources(
                         action_connection,
@@ -356,12 +332,12 @@ def build_components(settings: Settings) -> RuntimeComponents:
                         "so I left the run paused without rebuilding it."
                     )
                 mode = str(decision.arguments.get("mode") or "")
-                if mode not in {"check_updated", "run_anyway"}:
+                if mode != "check_updated":
                     return (
-                        "Tell me whether you updated the template or want me to use the "
-                        "current design as it is."
+                        "I only rebuild this way after the source design is updated. I left "
+                        "the current flyer unchanged."
                     )
-                if mode == "check_updated" and run.template_file_id:
+                if run.template_file_id:
                     # The person has said the source changed. Always reload its
                     # current Drive revision; a stored ready verdict may belong
                     # to the version from one second before this reply, before
@@ -381,31 +357,17 @@ def build_components(settings: Settings) -> RuntimeComponents:
                     captured.append(text)
                     return thread_ts
 
-                approved = store.decode_warning_codes(run.approved_warning_codes)
-                resume_fields: dict[str, str | int] = {"pending_warning_code": ""}
-                if mode == "run_anyway":
-                    if not run.pending_warning_code:
-                        return (
-                            "There is no current template warning waiting for approval, so I "
-                            "left the listing unchanged."
-                        )
-                    approved = approved | {run.pending_warning_code}
-                else:
-                    # An edited source is new evidence. Old geometry approvals
-                    # do not transfer to it.
-                    approved = frozenset()
-                resume_fields["approved_warning_codes"] = store.encode_warning_codes(approved)
-
                 runner = build_runner(
                     settings,
                     action_connection,
                     action_drive,
                     action_slides,
                     capture,
+                    post_once=slack_post_once,
+                    reconcile=slack_reconcile,
                     hero_photo_url=run.photo_url,
                     origin_thread_ts=thread_ts,
                     progress=progress,
-                    approved_template_warning_codes=approved,
                 )
                 submission = repo.Submission(
                     response_row_id=stored.response_row_id,
@@ -415,16 +377,146 @@ def build_components(settings: Settings) -> RuntimeComponents:
                     content_hash=stored.content_hash,
                     source_tab=stored.source_tab,
                 )
-                result = runner.resume(submission, run.run_id, resume_fields=resume_fields)
+                result = runner.resume(submission, run.run_id)
                 if captured:
                     return captured[-1]
+                if result.said:
+                    # Durable questions post through their idempotent outbox
+                    # seam so SQLite can confirm the exact Slack timestamp.
+                    # The outer listener must not post that same text again.
+                    return ""
+                if store.has_pending_run_notification(action_connection, run.run_id):
+                    # A verified rebuild whose Slack acknowledgement was lost
+                    # owns an exact durable outcome. Never contradict it with
+                    # the generic unchanged-flyer fallback below.
+                    return ""
                 return (
                     "I rechecked the template, but the run did not produce an outcome I "
                     "could report. I left the listing paused."
                     if result.needs_a_human
                     else "I could not finish the rebuild, so I left the current flyer unchanged."
                 )
-            return SlideEditor(action_connection, action_slides).execute(decision, thread_ts)
+            run = store.run_for_thread(action_connection, thread_ts)
+            if run is None:
+                return "I could not match this thread to a listing, so I have not changed anything."
+            pending_before_edit = tuple(
+                item
+                for item in store.pending_run_questions(action_connection)
+                if item.run_id == run.run_id
+            )
+            if pending_before_edit:
+                for item in pending_before_edit:
+                    deliver_pending(
+                        action_connection,
+                        item,
+                        slack_post,
+                        post_once=slack_post_once,
+                        reconcile=reconcile_slack,
+                    )
+                return ""
+            if action_id and store.has_run_action_notification(
+                action_connection,
+                run.run_id,
+                action_id,
+            ):
+                return ""
+            if (
+                decision.tool == "replace_photo"
+                and str(decision.arguments.get("which") or "").strip().casefold() == "hero"
+            ):
+                pending_action = store.prepare_photo_replacement_action(
+                    action_connection,
+                    run.run_id,
+                    action_id,
+                    thread_ts,
+                )
+                if pending_action is None:
+                    return ""
+                deliver_pending(
+                    action_connection,
+                    pending_action,
+                    slack_post,
+                    post_once=slack_post_once,
+                    reconcile=reconcile_slack,
+                )
+                return ""
+            if (
+                decision.tool == "replace_photo"
+                and str(decision.arguments.get("which") or "").strip().casefold() == "headshot"
+            ):
+                action_submission = store.load_submission(
+                    action_connection,
+                    run.response_row_id,
+                )
+                agent = (
+                    action_submission.intake.agent_name
+                    if action_submission is not None
+                    else "the agent"
+                )
+                instruction = (
+                    f"Replace {agent}'s image in Head Shots, then tell me to rebuild the flyer."
+                )
+                pending_action = store.prepare_headshot_replacement_action(
+                    action_connection,
+                    run.run_id,
+                    action_id,
+                    thread_ts,
+                    instruction,
+                )
+                if pending_action is None:
+                    return ""
+                deliver_pending(
+                    action_connection,
+                    pending_action,
+                    slack_post,
+                    post_once=slack_post_once,
+                    reconcile=reconcile_slack,
+                )
+                return ""
+            if decision.tool != "report_status":
+                # Geometry/content edits are deliberately rejected before any
+                # Slides request until copy-render-inspect-promote is connected.
+                # They need no mutation claim because this path cannot mutate.
+                return SlideEditor(action_connection, action_slides).execute(
+                    decision,
+                    thread_ts,
+                )
+            before_event = int(
+                action_connection.execute(
+                    "SELECT COALESCE(MAX(id), 0) FROM run_events WHERE run_id = ?",
+                    (run.run_id,),
+                ).fetchone()[0]
+            )
+            outcome = SlideEditor(action_connection, action_slides).execute(decision, thread_ts)
+            after_event = int(
+                action_connection.execute(
+                    "SELECT COALESCE(MAX(id), 0) FROM run_events WHERE run_id = ?",
+                    (run.run_id,),
+                ).fetchone()[0]
+            )
+            if after_event == before_event:
+                return outcome
+            try:
+                pending_action = store.prepare_run_action_notification(
+                    action_connection,
+                    run.run_id,
+                    action_id,
+                    safe(outcome),
+                    thread_ts,
+                )
+                deliver_pending(
+                    action_connection,
+                    pending_action,
+                    slack_post,
+                    post_once=slack_post_once,
+                    reconcile=reconcile_slack,
+                )
+            except Exception:
+                # Slides/state already changed and the audit event proves it.
+                # A false "unchanged" fallback is worse than an honest pending
+                # repair, so suppress the outer conversational post.
+                logger.exception("could not persist a verified conversational change outcome")
+            return ""
         except Exception:
             logger.exception("a Slack edit could not construct its Google client")
             return "I could not open the flyer to make that change, so I left it unchanged."
@@ -503,7 +595,15 @@ def build_components(settings: Settings) -> RuntimeComponents:
 
     def on_submission(submission: repo.Submission) -> str:
         """Give one new submission a fresh runner bound to the live clients."""
-        runner = build_runner(settings, connection, drive, slides, slack_post)
+        runner = build_runner(
+            settings,
+            connection,
+            drive,
+            slides,
+            slack_post,
+            post_once=slack_post_once,
+            reconcile=slack_reconcile,
+        )
         return runner.run(submission).status
 
     def on_batch(outcomes: tuple[BatchOutcome, ...]) -> None:
@@ -535,29 +635,48 @@ def build_components(settings: Settings) -> RuntimeComponents:
         thinker=guarded_think,
         context_provider=conversation_context,
     )
+    slack_reconcile = SlackOutboxReconciler(app.client, settings.slack_channel_id)
     if interrupted:
-        notified = notify_interrupted_runs(connection, interrupted, slack_post)
+        notified = notify_interrupted_runs(
+            connection,
+            interrupted,
+            slack_post,
+            slack_post_once,
+            slack_reconcile,
+        )
         if notified != len(interrupted):
             logger.warning(
                 "%d interrupted-run notice(s) remain pending",
                 len(interrupted) - notified,
             )
     socket = SocketModeHandler(app, settings.slack_app_token)
+    notification_retries = RunNotificationRetryLoop(
+        settings.db_path,
+        slack_post,
+        slack_post_once,
+        reconcile=slack_reconcile,
+        prepare_pending=prepare_pending_notifications,
+        drain_additional=lambda retry_connection: drain_template_notifications(
+            retry_connection,
+            slack_post,
+            slack_post_once,
+            reconcile_slack,
+        ),
+    )
     return RuntimeComponents(
         poller=poller,
         socket=socket,
         connection=connection,
+        notifications=notification_retries,
         poll_enabled=settings.poll_enabled,
     )
 
 
 def main() -> int:
-    """Validate configuration, build clients, and start the production process."""
+    """Validate configuration and start the production process."""
     try:
         settings = Settings.load()
     except ConfigError as exc:
-        # ConfigError never includes secret values. Logging is not configured
-        # yet because log settings are part of the object that failed to load.
         print(str(exc), file=sys.stderr)
         return 2
 

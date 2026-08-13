@@ -142,7 +142,11 @@ class Poller:
             return 0
 
         try:
-            pending = repo.new_submissions(self.connection, submissions)
+            pending = repo.new_submissions(
+                self.connection,
+                submissions,
+                source_tab=self.responses_tab,
+            )
         except Exception:
             logger.exception("could not reconcile the current sheet rows this pass")
             return 0

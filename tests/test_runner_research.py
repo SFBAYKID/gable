@@ -71,6 +71,7 @@ def test_only_the_selected_source_s_missing_public_fields_trigger_research(
             square_feet="1,804",
             source_url="https://example.test/property",
             confidence=0.95,
+            identity_verified=True,
         )
 
     runner.research = research
@@ -159,7 +160,12 @@ def test_title_and_headshot_prerequisites_precede_slack(
     def research(_address: str, fields: frozenset[str]) -> Facts:
         order.append("research")
         assert fields == frozenset({"beds"})
-        return Facts(beds="4", source_url="https://example.test/property", confidence=0.8)
+        return Facts(
+            beds="4",
+            source_url="https://example.test/property",
+            confidence=0.8,
+            identity_verified=True,
+        )
 
     runner.official_contact_lookup = official
     runner.headshot_for = headshot

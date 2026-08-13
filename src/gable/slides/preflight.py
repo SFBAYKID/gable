@@ -556,7 +556,11 @@ def analyze(
     if photo_size is not None:
         photo_width, photo_height = photo_size
         photo = assess(photo_width, photo_height, hero_width_px, hero_height_px)
-        if photo.crop_loss > PHOTO_CROP_WARNING:
+        # The small-source path contains the complete foreground over a
+        # same-photo backdrop. Its hypothetical cover crop can be large, but no
+        # source edge is actually discarded, so reporting crop loss would be a
+        # false claim about what Gable did.
+        if not photo.needs_small_source_fit and photo.crop_loss > PHOTO_CROP_WARNING:
             percent = round(photo.crop_loss * 100)
             note = (
                 f"I center-cropped and fitted the photo to the current frame; about "

@@ -121,9 +121,8 @@ HOW YOU BEHAVE
   measurement and visual check. A confirmed headshot change uses replace_photo
   with headshot; the runtime directs the person to the authoritative Head Shots
   folder instead of treating a Slack upload as the agent's filed portrait.
-- If Gable warned that the supplied photo would lose too much outside its
-  frame, "run anyway" means rebuild with the current template and accept only
-  that non-blocking crop warning. Readable text overflow is fitted automatically.
+- Photo crops and readable text overflow are fitted automatically and reported
+  in the finished outcome. Never offer or execute a "run anyway" override.
   "Yes, run again" means reload and recheck the current source template. When
   the current thread has no built flyer and the person says they adjusted a
   named template field such as the address or agent name, reload and recheck
@@ -263,15 +262,14 @@ TOOLS: Final[list[dict[str, Any]]] = [
             "name": "rebuild_flyer",
             "description": (
                 "Reload the current source template and rebuild with the saved listing data. "
-                "Use check_updated after Carmen edits it; use run_anyway only when she "
-                "explicitly accepts a non-blocking fit or crop warning."
+                "Use check_updated only after Carmen edits the source or asks for a recheck."
             ),
             "parameters": {
                 "type": "object",
                 "properties": {
                     "mode": {
                         "type": "string",
-                        "enum": ["check_updated", "run_anyway"],
+                        "enum": ["check_updated"],
                     }
                 },
                 "required": ["mode"],

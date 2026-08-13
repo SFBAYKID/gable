@@ -26,15 +26,21 @@ Hence the rule below: the largest sane, textless, full-width shape anchored in
 the upper half. It reproduces both hand-measurements that were right and
 corrects the one that was wrong.
 
-Does not handle: designs whose photo is not a top band, and designs with no
-photo at all. Both return None, which the caller must treat as "ask" rather
-than "guess" — a wrong frame puts the house behind the text.
+Does not handle: designs whose hero photo is not a top band, and designs with
+no hero photo at all. Both return None, which the caller must treat as "ask"
+rather than "guess" — a wrong frame puts the house behind the text. Agent
+portrait slots are separate: an imported empty shape or an existing Slides
+image can be replaced only when its measured geometry is unambiguous.
 """
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any, Final
+
+from gable.slides import fields
+from gable.slides.elements import text_content
 
 #: How much of the slide width a photo well spans. Measured across all 45
 #: designs rather than assumed: this began at 0.60 on the belief that the hero
@@ -340,12 +346,91 @@ _HEADSHOT_ASPECT: Final[tuple[float, float]] = (0.60, 1.70)
 _HEADSHOT_MIN_WIDTH_FRACTION: Final[float] = 0.10
 _HEADSHOT_MAX_WIDTH_FRACTION: Final[float] = 0.60
 
+# An existing Slides image is not self-describing. Logos, QR codes and
+# secondary property photos can all be square and portrait-sized, so geometry
+# alone cannot authorize deleting one. A sample portrait must sit in the same
+# measured contact-card region as a recognised agent name and at least one
+# phone, email or title field.
+_AGENT_CARD_FIELDS: Final[frozenset[str]] = frozenset(
+    {"agent_name", "agent_phone", "agent_email", "agent_title"}
+)
+_AGENT_CARD_SECONDARY_FIELDS: Final[frozenset[str]] = _AGENT_CARD_FIELDS - {"agent_name"}
+_AGENT_CARD_MAX_HORIZONTAL_GAP: Final[float] = 0.15
+_AGENT_CARD_MAX_VERTICAL_GAP: Final[float] = 0.18
+_AGENT_CARD_MAX_WIDTH: Final[float] = 0.65
+_AGENT_CARD_MAX_HEIGHT: Final[float] = 0.45
+
+
+def _rectangle_gap(left: HeroFrame, right: HeroFrame) -> tuple[float, float]:
+    """Return the horizontal and vertical edge gaps between two boxes."""
+    horizontal = max(right.x - (left.x + left.width), left.x - (right.x + right.width), 0.0)
+    vertical = max(right.y - (left.y + left.height), left.y - (right.y + right.height), 0.0)
+    return horizontal, vertical
+
+
+def _same_agent_card(
+    page: dict[str, Any],
+    candidate: HeroFrame,
+    slide_width: float,
+    slide_height: float,
+    agent_values: Mapping[str, str] | None,
+) -> bool:
+    """Require deterministic agent-field context before replacing an image."""
+    boxes = absolute_boxes(page.get("pageElements", []))
+    written = [text_content(element) for element, *_ in boxes if text_content(element)]
+    resolution = fields.resolve(written)
+    literal_fields: dict[str, str] = {}
+    for field_name in _AGENT_CARD_FIELDS:
+        primary = resolution.fields.get(field_name)
+        if primary:
+            literal_fields[primary] = field_name
+        for literal in resolution.also.get(field_name, ()):
+            literal_fields[literal] = field_name
+        expected = (agent_values or {}).get(field_name, "").strip()
+        if expected:
+            normal_expected = " ".join(expected.split())
+            for literal in written:
+                if " ".join(literal.split()) == normal_expected:
+                    literal_fields[literal] = field_name
+
+    nearby: list[tuple[str, HeroFrame]] = []
+    for element, x, y, width, height in boxes:
+        matched_field = literal_fields.get(text_content(element))
+        if not matched_field or width <= 0 or height <= 0:
+            continue
+        field_box = HeroFrame(str(element.get("objectId") or ""), x, y, width, height)
+        horizontal, vertical = _rectangle_gap(candidate, field_box)
+        if (
+            horizontal <= slide_width * _AGENT_CARD_MAX_HORIZONTAL_GAP
+            and vertical <= slide_height * _AGENT_CARD_MAX_VERTICAL_GAP
+        ):
+            nearby.append((matched_field, field_box))
+
+    roles = {field_name for field_name, _box in nearby}
+    if "agent_name" not in roles or not roles.intersection(_AGENT_CARD_SECONDARY_FIELDS):
+        return False
+
+    relevant = [
+        box
+        for field_name, box in nearby
+        if field_name == "agent_name" or field_name in _AGENT_CARD_SECONDARY_FIELDS
+    ]
+    left = min([candidate.x, *(box.x for box in relevant)])
+    top = min([candidate.y, *(box.y for box in relevant)])
+    right = max([candidate.x + candidate.width, *(box.x + box.width for box in relevant)])
+    bottom = max([candidate.y + candidate.height, *(box.y + box.height for box in relevant)])
+    return (
+        right - left <= slide_width * _AGENT_CARD_MAX_WIDTH
+        and bottom - top <= slide_height * _AGENT_CARD_MAX_HEIGHT
+    )
+
 
 def headshot_frames(
     page: dict[str, Any],
     slide_width: float,
     slide_height: float,
     exclude_object_id: str = "",
+    agent_values: Mapping[str, str] | None = None,
 ) -> tuple[HeroFrame, ...]:
     """Return every safe, plausible agent-headshot well on one slide.
 
@@ -360,6 +445,9 @@ def headshot_frames(
         slide_height: Slide height in EMU.
         exclude_object_id: The hero frame, so the photo well is not mistaken for
             a face on designs where the hero is itself square.
+        agent_values: Exact filled contact values when reading a copied flyer.
+            Source placeholders are resolved directly; filled real names are
+            accepted only when they equal the current run's known values.
 
     Returns:
         All plausible frames, largest first. The caller may act only when there
@@ -374,14 +462,21 @@ def headshot_frames(
 
     candidates: list[HeroFrame] = []
     for element in page.get("pageElements", []):
-        if "shape" not in element or "elementGroup" in element:
+        # Imported sources represent an agent slot in either of two ways: an
+        # empty shape or the sample portrait itself as a Slides image. A group
+        # remains unsafe because a newly created image cannot be put back at a
+        # child's exact group-local z-order boundary.
+        is_image = "image" in element
+        is_shape = "shape" in element
+        if (not is_shape and not is_image) or "elementGroup" in element:
             continue
         if element.get("objectId") == exclude_object_id:
             continue
-        if element.get("shape", {}).get("shapeType") == "TEXT_BOX":
-            continue
-        if _carries_text(element) or _is_filled(element):
-            continue
+        if is_shape:
+            if element.get("shape", {}).get("shapeType") == "TEXT_BOX":
+                continue
+            if _carries_text(element) or _is_filled(element):
+                continue
         if not _axis_aligned_positive(element):
             continue
 
@@ -399,6 +494,14 @@ def headshot_frames(
             continue
 
         candidate = HeroFrame(element["objectId"], x, y, width, height)
+        if is_image and not _same_agent_card(
+            page,
+            candidate,
+            slide_width,
+            slide_height,
+            agent_values,
+        ):
+            continue
         # A frame with artwork sitting on top of it is not the headshot well.
         # Replacing one covered the decorative speech-tail on the Just Sold
         # design, because the face was drawn over the thing that was drawn over
@@ -414,9 +517,16 @@ def find_headshot_frame(
     slide_width: float,
     slide_height: float,
     exclude_object_id: str = "",
+    agent_values: Mapping[str, str] | None = None,
 ) -> HeroFrame | None:
     """Return the one unambiguous headshot well, or None."""
-    candidates = headshot_frames(page, slide_width, slide_height, exclude_object_id)
+    candidates = headshot_frames(
+        page,
+        slide_width,
+        slide_height,
+        exclude_object_id,
+        agent_values,
+    )
     return candidates[0] if len(candidates) == 1 else None
 
 

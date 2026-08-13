@@ -130,6 +130,13 @@ Run these only in monarch-bot-playground.
 Every visible reply must contain no emoji, raw errors, pasted URL, placeholder,
 or machine-facing field name.
 
+Before enabling automatic form watching, deploy once with polling disabled and
+run `.venv/bin/python -m tools.preview_poll --expect-none` on the droplet. It is
+read-only and must report zero unhandled rows. If it does not, review and
+explicitly adopt only confirmed historical `ROW:CONTENT_HASH` pairs with
+`tools.adopt_rows`; preview first, commit the same assertions, and repeat the
+zero-candidate gate. Do not enable polling on a nonempty or failed preview.
+
 ## 6. Full form-to-Slides test
 
 This is the release gate. Leave the Gable service running so Socket Mode can
@@ -169,7 +176,8 @@ a new channel message. The owned-thread upload should automatically:
 
 1. download the Slack file without altering the original;
 2. retain its composition until the `Sold` hero frame has been measured;
-3. crop and resize once to that frame, using at most one guarded enlargement;
+3. fit once to that frame; beyond 2x, keep the complete foreground at no more
+   than 2x over a blurred, darkened fill made from the same upload;
 4. reload the exact `Sold` source from Generic Templates;
 5. fill the address and Mike's roster-backed contact and headshot fields;
 6. preserve the template's original layering around the replacement images;
@@ -216,17 +224,10 @@ submission has a hard three-attempt ceiling, including its adopted historical
 attempt. Use a fresh dedicated test response once a row reaches the limit. This
 is intentional protection against duplicate flyers and paid retry loops.
 
-A provider failure normally consumes the one image-operation allowance because
-its billing state is unknown. Only when durable evidence proves a request was
-rejected before inference may an operator preview and append a release:
-
-```bash
-sudo -u gable .venv/bin/python -m tools.reconcile_image_reservation \
-  --db /opt/gable/var/gable.db --spend-id SPEND_ID \
-  --reason invalid_request_dimensions --evidence "specific observed evidence"
-```
-
-Verify the preview identifies the exact run, model, and upscale marker, then
-repeat with `--commit`. The original reservation remains in the $50 total, the
-runtime never releases or retries automatically, and the same paused run may
-then be resumed once through `tools.run_row --resume`.
+Property-photo fitting never calls an image provider and does not create an
+image-operation reservation. Historical reservation rows from the retired
+provider experiment remain append-only evidence; they are not part of repeating
+a current test. Resume a paused source, information, or review run through its
+owned Slack thread. `tools.run_row --resume` refuses `needs_photo`: upload the
+new property image in that owned thread so the rejected audit image cannot be
+silently reused.

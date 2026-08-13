@@ -16,8 +16,11 @@ license = { text = "Proprietary" }
 # section 2.6 or required by a stage in ARCHITECTURE.md section 4.
 dependencies = [
     "slack-bolt>=1.18",               # Socket Mode app (ARCHITECTURE 2.2)
+    "slack-sdk>=3.43",                # explicit bounded Web API transport
     "google-api-python-client>=2.130", # Sheets + Drive + Slides
     "google-auth>=2.29",              # service-account credentials
+    "google-auth-httplib2>=0.2",      # explicit authorized HTTP timeout
+    "httplib2>=0.22",                 # bounded Google HTTP transport
     "openpyxl>=3.1",                  # the agent roster workbook in Drive
     "pillow>=10.3",                   # photo normalize: JPEG, resize, EXIF strip
     "python-dotenv>=1.0",             # load .env once in config.py
@@ -100,6 +103,8 @@ disallow_any_unimported = true
 module = [
     "googleapiclient.*",
     "google.oauth2.*",
+    "google_auth_httplib2",
+    "httplib2",
     "slack_bolt.*",
     "slack_sdk.*",
 ]

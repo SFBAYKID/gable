@@ -344,6 +344,8 @@ gable/
 ├── tools/
 │   ├── check_connections.py     # prove every .env credential works, live
 │   ├── adopt_backfill.py        # mark existing rows as history, build none
+│   ├── adopt_rows.py            # assert and adopt named historical rows only
+│   ├── preview_poll.py           # read-only preview of work polling would open
 │   ├── reconcile_image_reservation.py # evidence-gated pre-inference release
 │   ├── run_row.py               # start one row by tab and number, or resume it
 │   └── template_smoke_test.py   # recoverable live new-template path
@@ -355,10 +357,12 @@ gable/
 │   │   └── website.py           # official-domain fallback for workbook blanks
 │   ├── sheets/
 │   │   ├── client.py            # Google Sheets API wrapper
+│   │   ├── identity.py          # whole-tab identity and source-row aliases
 │   │   └── repository.py        # tab reads/writes, idempotency
 │   ├── db/
 │   │   ├── schema.py            # tables and migrations (SQLite)
 │   │   ├── store.py             # submissions, facts, roster, spend + reexports
+│   │   ├── question_store.py    # durable Slack question and outcome outbox
 │   │   ├── run_store.py         # attempts, states, latest counts, event writes
 │   │   └── template_store.py    # source catalogue and triage verdicts
 │   ├── listings/
@@ -390,13 +394,17 @@ gable/
 │   │   ├── brain.py             # reads intent, picks a tool, asks when unsure
 │   │   ├── context.py           # bounded owned-thread turns + listing facts
 │   │   ├── editing.py           # execute edits on the thread's Slides file
+│   │   ├── outbox.py            # conservative proof of lost Slack acknowledgements
 │   │   ├── photos.py            # Slack upload to fitted same-run resume
+│   │   ├── recovery.py          # interrupted runs and accepted-but-unfinished uploads
 │   │   ├── routing.py           # keep ordinary replies inside Gable-owned threads
 │   │   ├── runtime.py           # production Slack + poller assembly
+│   │   ├── source_refresh.py    # re-read the exact sources behind a paused run
 │   │   ├── status.py            # a working indicator that cannot break the work
 │   │   └── style.py             # the house style, enforced
 │   ├── pipeline/
 │   │   ├── contact_gate.py      # pre-Slack agent values + one cached site lookup
+│   │   ├── questions.py         # persist, post, confirm and retry run notices
 │   │   ├── runner.py            # one complete listing, every exit recorded
 │   │   ├── live.py              # concrete Google, photo, research and vision seams
 │   │   ├── schedule.py          # when to poll: busy hours vs quiet
@@ -439,9 +447,12 @@ Natural-language replies in a Gable-owned thread refresh the current Sheet,
 roster, and source template before continuing the same paused run; there is no
 operator command queue or Slack service-control surface.
 
-**Before the poller runs against the live Sheet**, `tools/adopt_backfill.py`
-must be run once. There are 99 historical rows and `Poller.ready()` refuses
-until they are adopted.
+**Before live polling is enabled**, preview it against the deployed database.
+The current audit found three exact pre-release rows not recorded as handled;
+Chase must confirm them, `tools/adopt_rows.py` must adopt only their asserted row
+and content hashes, and `tools/preview_poll.py --expect-none` must then prove no
+historical work would open. `adopt_backfill.py` remains only for bootstrapping a
+genuinely fresh database from an entirely historical source snapshot.
 
 ### Phase 2 — after Phase 1 has run for a week on real listings
 

@@ -21,6 +21,7 @@ from typing import Any
 from gable.config import ConfigError, Settings
 from gable.db import store
 from gable.db.schema import apply_migrations, connect
+from gable.google_client import build_google_service
 from gable.pipeline.template_triage import TemplateTriage
 from gable.pipeline.template_vision import inspect_source_template
 from gable.pipeline.vision import Inspection
@@ -35,14 +36,13 @@ GOOGLE_SCOPES: tuple[str, ...] = (
 def _clients(settings: Settings) -> tuple[Any, Any]:
     """Build Drive and Slides clients from the configured service account."""
     from google.oauth2 import service_account
-    from googleapiclient.discovery import build
 
     credentials = service_account.Credentials.from_service_account_file(  # type: ignore[no-untyped-call]
         str(settings.google_service_account_file), scopes=list(GOOGLE_SCOPES)
     )
     return (
-        build("drive", "v3", credentials=credentials, cache_discovery=False),
-        build("slides", "v1", credentials=credentials, cache_discovery=False),
+        build_google_service("drive", "v3", credentials),
+        build_google_service("slides", "v1", credentials),
     )
 
 

@@ -125,7 +125,7 @@ def _database(path: Path) -> sqlite3.Connection:
     return connection
 
 
-def test_font_size_edit_resolves_price_and_waits_for_google_confirmation(tmp_path: Path) -> None:
+def test_font_size_edit_is_refused_before_google_mutation(tmp_path: Path) -> None:
     connection = _database(tmp_path / "gable.db")
     slides = FakeSlides(_presentation())
     decision = Decision(
@@ -136,8 +136,10 @@ def test_font_size_edit_resolves_price_and_waits_for_google_confirmation(tmp_pat
 
     said = SlideEditor(connection, slides).execute(decision, THREAD)
 
-    assert said == "Done. I changed the price text to 32 points."
-    assert slides.requests[0]["updateTextStyle"]["objectId"] == "price-shape"
+    assert "Post-delivery flyer edits are paused" in said
+    assert "left the flyer unchanged" in said
+    assert slides.operation == ""
+    assert slides.requests == []
     connection.close()
 
 
@@ -152,8 +154,10 @@ def test_confirmed_hero_replacement_pauses_for_one_upload_without_touching_old_f
         before.run_id,
         "delivered",
         "prior warning approvals",
-        approved_warning_codes=store.encode_warning_codes({"tight_address", "large_photo_crop"}),
-        pending_warning_code="large_photo_crop",
+    )
+    connection.execute(
+        "UPDATE runs SET approved_warning_codes = ?, pending_warning_code = ? WHERE run_id = ?",
+        ('["large_photo_crop","tight_address"]', "large_photo_crop", before.run_id),
     )
     slides = FakeSlides(_presentation())
     decision = Decision(
@@ -171,10 +175,10 @@ def test_confirmed_hero_replacement_pauses_for_one_upload_without_touching_old_f
     assert current.output_file_id == before.output_file_id == "deck-1"
     assert current.output_url == before.output_url
     assert current.failure_reason == "Send me the new property photo."
-    assert store.decode_warning_codes(current.approved_warning_codes) == frozenset(
-        {"tight_address"}
-    )
-    assert current.pending_warning_code == ""
+    # Migration-era approval columns remain append-only history. Runtime no
+    # longer reads or updates them because photo fitting has no override path.
+    assert current.approved_warning_codes == '["large_photo_crop","tight_address"]'
+    assert current.pending_warning_code == "large_photo_crop"
     assert slides.operation == ""
     assert slides.requests == []
     # The Slack upload seam can claim this exact existing run once. A duplicate
@@ -248,7 +252,30 @@ def test_an_ambiguous_target_is_not_ranked_or_changed(tmp_path: Path) -> None:
 
     said = SlideEditor(connection, slides).execute(decision, THREAD)
 
-    assert "exactly one price element" in said
+    assert "Post-delivery flyer edits are paused" in said
+    assert slides.requests == []
+    connection.close()
+
+
+def test_a_legacy_cached_public_fact_cannot_select_an_edit_target(tmp_path: Path) -> None:
+    connection = _database(tmp_path / "gable.db")
+    store.remember_facts(
+        connection,
+        "123 Main St, Baltimore, MD 21201",
+        {"beds": "9"},
+        "https://example.test/wrong-property",
+        0.9,
+    )
+    slides = FakeSlides(_presentation(_shape("unlabelled-number", "9")))
+    decision = Decision(
+        reply="Making the bedrooms bigger.",
+        tool="set_font_size",
+        arguments={"target": "bedrooms", "points": 32},
+    )
+
+    said = SlideEditor(connection, slides).execute(decision, THREAD)
+
+    assert "Post-delivery flyer edits are paused" in said
     assert slides.requests == []
     connection.close()
 
@@ -264,10 +291,9 @@ def test_hero_resize_targets_the_inserted_hero_object(tmp_path: Path) -> None:
 
     said = SlideEditor(connection, slides).execute(decision, THREAD)
 
-    assert said == "Done. I resized the hero photo."
-    request = slides.requests[0]["updatePageElementTransform"]
-    assert request["objectId"] == "gableHero_abc123"
-    assert request["applyMode"] == "ABSOLUTE"
+    assert "Post-delivery flyer edits are paused" in said
+    assert slides.operation == ""
+    assert slides.requests == []
     connection.close()
 
 
@@ -282,8 +308,9 @@ def test_a_single_literal_field_correction_checks_occurrence_count(tmp_path: Pat
 
     said = SlideEditor(connection, slides).execute(decision, THREAD)
 
-    assert said == "Done. I corrected that field."
-    assert slides.requests[0]["replaceAllText"]["containsText"]["text"] == "$525,000"
+    assert "Post-delivery flyer edits are paused" in said
+    assert slides.operation == ""
+    assert slides.requests == []
     connection.close()
 
 
@@ -298,11 +325,9 @@ def test_move_hero_photo_executes_the_nudge_chase_asked_for(tmp_path: Path) -> N
 
     said = SlideEditor(connection, slides).execute(decision, THREAD)
 
-    assert said == "Done. I moved the hero photo."
-    request = slides.requests[0]["updatePageElementTransform"]
-    assert request["objectId"] == "gableHero_abc123"
-    assert request["applyMode"] == "RELATIVE"
-    assert request["transform"]["translateX"] == 4
+    assert "Post-delivery flyer edits are paused" in said
+    assert slides.operation == ""
+    assert slides.requests == []
     connection.close()
 
 
@@ -318,7 +343,62 @@ def test_incomplete_google_reply_is_never_reported_as_success(tmp_path: Path) ->
     said = SlideEditor(connection, slides).execute(decision, THREAD)
 
     assert not said.startswith("Done")
-    assert "did not confirm" in said
+    assert "Post-delivery flyer edits are paused" in said
+    assert slides.operation == ""
+    assert slides.requests == []
+    connection.close()
+
+
+def test_mutation_is_refused_when_post_edit_verification_is_not_connected(
+    tmp_path: Path,
+) -> None:
+    connection = _database(tmp_path / "gable.db")
+    slides = FakeSlides(_presentation())
+
+    said = SlideEditor(connection, slides).execute(
+        Decision(
+            reply="Moving the hero photo.",
+            tool="move_element",
+            arguments={"target": "hero photo", "dx_points": 4, "dy_points": 0},
+        ),
+        THREAD,
+    )
+
+    assert "verify a separate draft" in said
+    assert "left the flyer unchanged" in said
+    assert slides.requests == []
+    connection.close()
+
+
+def test_pending_ready_outcome_blocks_a_later_edit_before_slides(tmp_path: Path) -> None:
+    connection = _database(tmp_path / "gable.db")
+    run = store.run_for_thread(connection, THREAD)
+    assert run is not None
+    connection.execute(
+        "UPDATE runs SET status = 'building' WHERE run_id = ?",
+        (run.run_id,),
+    )
+    store.prepare_run_outcome(
+        connection,
+        run.run_id,
+        "delivered",
+        "Your flyer is ready. <https://docs.example/deck-1|Open the flyer>",
+        pending_status="building",
+        thread_ts=THREAD,
+    )
+    slides = FakeSlides(_presentation())
+
+    said = SlideEditor(connection, slides).execute(
+        Decision(
+            reply="Moving the hero photo.",
+            tool="move_element",
+            arguments={"target": "hero photo", "dx_points": 4, "dy_points": 0},
+        ),
+        THREAD,
+    )
+
+    assert "still confirming the last outcome" in said
+    assert slides.requests == []
     connection.close()
 
 

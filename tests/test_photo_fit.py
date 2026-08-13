@@ -10,18 +10,23 @@ end-to-end run, not invented ones.
 from __future__ import annotations
 
 import io
+import threading
 from typing import cast
 
 import pytest
 from PIL import Image
 
 from gable.photos.fit import (
+    MAX_OUTPUT_PIXELS,
+    MAX_TARGET_EDGE_PX,
     MAX_TOLERABLE_UPSCALE,
     FitAction,
     assess,
+    fit_bounded_source_locally,
     fit_locally,
     fit_small_source,
     image_dimensions,
+    normalise_for_fitting,
 )
 
 FRAME_W, FRAME_H = 1080, 1350
@@ -133,6 +138,38 @@ def test_non_positive_dimensions_are_refused(sw: int, sh: int, tw: int, th: int)
         assess(sw, sh, tw, th)
 
 
+def test_target_edge_limit_is_checked_before_decode() -> None:
+    with pytest.raises(ValueError, match="target edge exceeds"):
+        fit_locally(b"not an image", MAX_TARGET_EDGE_PX + 1, 1)
+
+
+def test_target_area_limit_is_checked_before_decode() -> None:
+    with pytest.raises(ValueError, match="output limit"):
+        fit_small_source(b"not an image", 5001, 5000)
+
+
+def test_assessment_rejects_an_oversized_target() -> None:
+    with pytest.raises(ValueError, match="output limit"):
+        assess(1, 1, 5001, 5000)
+
+
+def test_bounded_headshot_fit_rejects_an_oversized_target_before_decode() -> None:
+    with pytest.raises(ValueError, match="output limit"):
+        fit_bounded_source_locally(b"not an image", 5001, 5000)
+
+
+def test_target_pixel_limit_boundary_is_accepted_by_assessment() -> None:
+    target_width = MAX_TARGET_EDGE_PX
+    target_height = MAX_OUTPUT_PIXELS // target_width
+    result = assess(1, 1, target_width, target_height)
+    assert result.target_width * result.target_height == MAX_OUTPUT_PIXELS
+
+
+def test_normalisation_edge_limit_is_checked_before_decode() -> None:
+    with pytest.raises(ValueError, match="max edge exceeds"):
+        normalise_for_fitting(b"not an image", max_edge_px=MAX_TARGET_EDGE_PX + 1)
+
+
 # --- the free path actually works -------------------------------------------
 
 
@@ -198,12 +235,245 @@ def test_small_source_fit_uses_only_pixels_from_the_upload() -> None:
     assert foreground[2] > background[2]
 
 
-def test_fit_flattens_transparency_rather_than_failing() -> None:
-    """A PNG with alpha would otherwise refuse to save as JPEG."""
+def test_fit_composites_semitransparent_pixels_over_white() -> None:
+    """Discarding alpha would turn a translucent dark pixel fully opaque."""
     buf = io.BytesIO()
-    Image.new("RGBA", (2000, 2000), (10, 20, 30, 128)).save(buf, format="PNG")
-    out = fit_locally(buf.getvalue(), FRAME_W, FRAME_H)
-    assert image_dimensions(out) == (FRAME_W, FRAME_H)
+    Image.new("RGBA", (200, 200), (10, 20, 30, 128)).save(buf, format="PNG")
+
+    out = fit_locally(buf.getvalue(), 200, 200, quality=100)
+
+    with Image.open(io.BytesIO(out)) as fitted:
+        pixel = cast(tuple[int, int, int], fitted.convert("RGB").getpixel((100, 100)))
+    assert pixel == pytest.approx((132, 137, 142), abs=3)
+
+
+def test_runtime_normalisation_does_not_reveal_fully_transparent_rgb() -> None:
+    """Hidden RGB in a transparent Slack PNG must not become flyer content."""
+    buf = io.BytesIO()
+    Image.new("RGBA", (275, 183), (255, 0, 0, 0)).save(buf, format="PNG")
+
+    prepared = normalise_for_fitting(buf.getvalue(), quality=100)
+    fitted = fit_small_source(prepared, 1078, 504, quality=100)
+
+    with Image.open(io.BytesIO(fitted)) as opened:
+        rgb = opened.convert("RGB")
+        centre = cast(tuple[int, int, int], rgb.getpixel((539, 252)))
+        backdrop = cast(tuple[int, int, int], rgb.getpixel((20, 252)))
+    assert centre == pytest.approx((255, 255, 255), abs=3)
+    assert backdrop == pytest.approx((140, 140, 140), abs=3)
+
+
+def test_palette_png_transparency_uses_the_same_white_matte() -> None:
+    """Indexed PNG transparency must not bypass the alpha-safe conversion."""
+    source = Image.new("P", (20, 20), 0)
+    source.putpalette([255, 0, 0, *([0, 0, 0] * 255)])
+    buf = io.BytesIO()
+    source.save(buf, format="PNG", transparency=0)
+
+    prepared = normalise_for_fitting(buf.getvalue(), quality=100)
+
+    with Image.open(io.BytesIO(prepared)) as opened:
+        pixel = cast(tuple[int, int, int], opened.convert("RGB").getpixel((10, 10)))
+    assert pixel == pytest.approx((255, 255, 255), abs=3)
+
+
+def test_large_transparent_png_is_downsampled_without_revealing_hidden_rgb() -> None:
+    """The memory-saving early thumbnail retains alpha semantics."""
+    source = Image.new("RGBA", (800, 400), (255, 0, 0, 0))
+    buf = io.BytesIO()
+    source.save(buf, format="PNG")
+
+    prepared = normalise_for_fitting(buf.getvalue(), max_edge_px=400, quality=100)
+
+    assert image_dimensions(prepared) == (400, 200)
+    with Image.open(io.BytesIO(prepared)) as opened:
+        pixel = cast(tuple[int, int, int], opened.convert("RGB").getpixel((200, 100)))
+    assert pixel == pytest.approx((255, 255, 255), abs=3)
+
+
+def test_concurrent_normalisation_has_one_memory_heavy_decode(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Different listing threads cannot decode two large uploads at once."""
+    started = threading.Barrier(3)
+    both_attempting = threading.Event()
+    entered = threading.Event()
+    release = threading.Event()
+    state_lock = threading.Lock()
+    attempts = 0
+    active = 0
+    maximum_active = 0
+
+    def guarded_work(_data: bytes, _edge: int, _quality: int) -> bytes:
+        nonlocal active, maximum_active
+        with state_lock:
+            active += 1
+            maximum_active = max(maximum_active, active)
+            entered.set()
+        try:
+            assert release.wait(timeout=2)
+            return b"prepared"
+        finally:
+            with state_lock:
+                active -= 1
+
+    monkeypatch.setattr("gable.photos.fit._normalise_for_fitting_unlocked", guarded_work)
+
+    results: list[bytes] = []
+
+    def worker() -> None:
+        nonlocal attempts
+        started.wait()
+        with state_lock:
+            attempts += 1
+            if attempts == 2:
+                both_attempting.set()
+        results.append(normalise_for_fitting(b"source"))
+
+    threads = [threading.Thread(target=worker) for _ in range(2)]
+    for thread in threads:
+        thread.start()
+    started.wait()
+    assert both_attempting.wait(timeout=1)
+    assert entered.wait(timeout=1)
+    # Both workers called the public boundary. The first holds the process-wide
+    # lock inside guarded_work, so the second cannot enter the heavy section.
+    with state_lock:
+        assert active == 1
+        assert maximum_active == 1
+    release.set()
+    for thread in threads:
+        thread.join(timeout=2)
+        assert not thread.is_alive()
+    assert results == [b"prepared", b"prepared"]
+    assert maximum_active == 1
+
+
+def test_normalisation_failure_releases_the_decode_guard(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """One corrupt upload cannot strand every later listing behind the guard."""
+    calls = 0
+
+    def fail_once(_data: bytes, _edge: int, _quality: int) -> bytes:
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            raise OSError("unreadable")
+        return b"prepared"
+
+    monkeypatch.setattr("gable.photos.fit._normalise_for_fitting_unlocked", fail_once)
+
+    with pytest.raises(OSError, match="unreadable"):
+        normalise_for_fitting(b"first")
+    assert normalise_for_fitting(b"second") == b"prepared"
+
+
+def test_fifty_megapixel_headshot_is_downsampled_before_cover_fit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A compressed Drive headshot cannot become a 50 MP RGB fit input."""
+    from gable.photos import fit as fit_module
+
+    source = Image.new("RGB", (10_000, 5_000), (90, 130, 170))
+    buf = io.BytesIO()
+    source.save(buf, format="JPEG", quality=70)
+    observed_edges: list[int] = []
+    original_flatten = fit_module._flatten_visible_pixels
+
+    def observe_flatten(image: Image.Image) -> Image.Image:
+        observed_edges.append(max(image.size))
+        return original_flatten(image)
+
+    monkeypatch.setattr(fit_module, "_flatten_visible_pixels", observe_flatten)
+
+    fitted = fit_bounded_source_locally(
+        buf.getvalue(),
+        162,
+        162,
+        max_source_edge_px=2400,
+    )
+
+    assert image_dimensions(fitted) == (162, 162)
+    assert observed_edges
+    assert max(observed_edges) <= 2400
+
+
+def test_concurrent_headshots_share_the_image_processing_guard(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Two portrait replacements cannot enter their heavy decode concurrently."""
+    started = threading.Barrier(3)
+    entered = threading.Event()
+    release = threading.Event()
+    state_lock = threading.Lock()
+    active = 0
+    maximum_active = 0
+
+    def guarded_normalise(_data: bytes, _edge: int, _quality: int) -> bytes:
+        nonlocal active, maximum_active
+        with state_lock:
+            active += 1
+            maximum_active = max(maximum_active, active)
+            entered.set()
+        try:
+            assert release.wait(timeout=2)
+            return b"prepared"
+        finally:
+            with state_lock:
+                active -= 1
+
+    monkeypatch.setattr(
+        "gable.photos.fit._normalise_for_fitting_unlocked",
+        guarded_normalise,
+    )
+    monkeypatch.setattr(
+        "gable.photos.fit._fit_locally_unlocked",
+        lambda _data, _width, _height, _quality: b"fitted",
+    )
+    results: list[bytes] = []
+
+    def worker() -> None:
+        started.wait()
+        results.append(fit_bounded_source_locally(b"source", 162, 162))
+
+    threads = [threading.Thread(target=worker) for _ in range(2)]
+    for thread in threads:
+        thread.start()
+    started.wait()
+    assert entered.wait(timeout=1)
+    with state_lock:
+        assert active == 1
+        assert maximum_active == 1
+    release.set()
+    for thread in threads:
+        thread.join(timeout=2)
+        assert not thread.is_alive()
+    assert results == [b"fitted", b"fitted"]
+    assert maximum_active == 1
+
+
+def test_failed_headshot_decode_releases_the_image_processing_guard(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls = 0
+
+    def fail_once(_data: bytes, _edge: int, _quality: int) -> bytes:
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            raise OSError("unreadable")
+        return b"prepared"
+
+    monkeypatch.setattr("gable.photos.fit._normalise_for_fitting_unlocked", fail_once)
+    monkeypatch.setattr(
+        "gable.photos.fit._fit_locally_unlocked",
+        lambda _data, _width, _height, _quality: b"fitted",
+    )
+
+    with pytest.raises(OSError, match="unreadable"):
+        fit_bounded_source_locally(b"first", 162, 162)
+    assert fit_bounded_source_locally(b"second", 162, 162) == b"fitted"
 
 
 def test_fit_crops_from_the_centre() -> None:
@@ -262,6 +532,16 @@ def _portrait_stored_landscape() -> bytes:
 
 def test_dimensions_are_reported_as_displayed_not_as_stored() -> None:
     assert image_dimensions(_portrait_stored_landscape()) == (3000, 4000)
+
+
+def test_dimensions_do_not_decode_the_pixel_frame(monkeypatch: pytest.MonkeyPatch) -> None:
+    source = _portrait_stored_landscape()
+
+    def reject_decode(_image: Image.Image) -> None:
+        raise AssertionError("pixel frame was decoded")
+
+    monkeypatch.setattr(Image.Image, "load", reject_decode)
+    assert image_dimensions(source) == (3000, 4000)
 
 
 def test_a_rotated_photo_is_cropped_on_the_right_axis() -> None:

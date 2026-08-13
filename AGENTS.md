@@ -289,6 +289,37 @@ same run to `needs_photo` and posts one request, not a troubleshooting conversat
 Can you send the correct property image?
 ```
 
+The question is a durable second step. Until Slack returns the exact message
+timestamp, the run remains `needs_review` with a pending notification. If the
+question is already visible and its single requested image arrives in that
+confirmed owned thread first, the upload atomically satisfies the pending
+question and resumes the same run; it is never discarded over an acknowledgement
+race. Otherwise a process-lifetime retry loop, independent of Sheet polling,
+retries the stored message with the same Slack client identity and never reruns
+the flyer merely to recreate the question.
+
+That upload is claimed durably before Gable refreshes its sources, downloads,
+and publishes it, and the claim is released only once an outcome is stored. So
+if Gable is restarted while preparing the image, it does not pretend the photo
+arrived and it does not wait forever on one Slack will not send again. It says
+so, in the same thread, and asks once more:
+
+```
+I was interrupted while preparing the image you sent, so it never reached
+this flyer. Please send it once more here.
+```
+
+It never asks a second time for the same interrupted upload, and never says
+this over a message that thread is already owed.
+
+The same durable boundary applies to every final, review, and failure outcome.
+A verified flyer remains `building` until Slack confirms its exact linked
+message; a review or failure keeps its truthful state while its notice is
+pending. The process-lifetime loop retries the stored wording with the same
+Slack client identity. After a lost acknowledgement, one exact Gable-authored
+text in a bounded root or thread history proves delivery; no or multiple matches
+stay pending instead of creating a second link or a contradictory outcome.
+
 The next single image in that owned thread replaces the rejected upload and
 resumes the same run. Gable never searches for or substitutes a web photo.
 

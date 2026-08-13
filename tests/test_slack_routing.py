@@ -137,7 +137,7 @@ def test_follow_up_to_a_human_root_that_called_gable_remains_owned() -> None:
         }
     )
 
-    route = ThreadOwnership().route(
+    route = ThreadOwnership(allowed_user_ids=frozenset({"UCHASE", "UCARMEN"})).route(
         _event(parent_user_id="UCHASE", text="What do you need from me?"),
         client,
         bot_user_id=GABLE_USER,
@@ -145,6 +145,50 @@ def test_follow_up_to_a_human_root_that_called_gable_remains_owned() -> None:
     )
 
     assert route is MessageRoute.THREAD_REPLY
+
+
+def test_a_foreign_bot_root_that_mentions_gable_does_not_transfer_ownership() -> None:
+    """One mention in another agent's root authorizes no later plain replies."""
+    client = RootClient(
+        {
+            "1786.1": {
+                "user": "UMONARCH",
+                "bot_id": "BMONARCH",
+                "app_id": "AMONARCH",
+                "text": "A Monarch result for <@UGABLE> to inspect",
+            }
+        }
+    )
+
+    route = ThreadOwnership(allowed_user_ids=frozenset({"UCHASE", "UCARMEN"})).route(
+        _event(parent_user_id="UMONARCH", text="yes"),
+        client,
+        bot_user_id=GABLE_USER,
+        bot_id=GABLE_BOT,
+    )
+
+    assert route is MessageRoute.IGNORE
+
+
+def test_an_unauthorized_human_root_cannot_create_an_owned_gable_thread() -> None:
+    """Visible mention text is not a substitute for the stable-user allowlist."""
+    client = RootClient(
+        {
+            "1786.1": {
+                "user": "UOTHER",
+                "text": "<@UGABLE> help me with this listing",
+            }
+        }
+    )
+
+    route = ThreadOwnership(allowed_user_ids=frozenset({"UCHASE", "UCARMEN"})).route(
+        _event(parent_user_id="UOTHER", text="continue"),
+        client,
+        bot_user_id=GABLE_USER,
+        bot_id=GABLE_BOT,
+    )
+
+    assert route is MessageRoute.IGNORE
 
 
 def test_an_unaddressed_human_thread_is_also_foreign() -> None:

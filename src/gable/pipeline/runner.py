@@ -1,24 +1,7 @@
-"""Joining every piece into one run, from a sheet row to a link in Slack.
+"""Run one form submission through prerequisite checks, build, vision, and Slack.
 
-`orchestrator.py` decides; this performs. It is the only module that both talks
-to the outside world and knows the order of the steps, which keeps every other
-module testable in isolation and puts all the I/O in one reviewable place.
-
-The sequence Chase specified:
-
-    identify the agent -> work out the request type -> gather the columns
-    -> research what is public -> ask what is not -> build -> check twice
-    -> post the link
-
-Two properties worth stating, because they are what make it safe to run
-unattended:
-
-* **Every exit is recorded.** A run reaches a status in the database whatever
-  happens, including the failure paths, so `AGENTS.md` §6's rule — that a
-  listing's state be explainable from the log — holds even when things break.
-* **It never guesses.** Anything contradictory or genuinely unknowable stops the
-  run at `needs_info` with a question posted, rather than being filled with
-  something plausible.
+Every exit is recorded. Contradictory or unknowable source data pauses rather
+than being guessed; correctable layout work is handled automatically.
 """
 
 from __future__ import annotations
@@ -34,6 +17,7 @@ from gable.db import store
 from gable.listings.enrich import Facts
 from gable.listings.intake import Intake, needs_two_agents, price_note
 from gable.pipeline import audit, people, research_gate, run_reporting, run_values
+from gable.pipeline import questions as run_questions
 from gable.pipeline.contact_gate import ContactGate
 from gable.pipeline.orchestrator import Outcome, agent_slots, judge, plan
 from gable.pipeline.vision import Inspection, inspect
@@ -41,9 +25,14 @@ from gable.sheets import repository as repo
 from gable.slides import fields as template_fields
 from gable.slides import fitting, preflight
 from gable.slides import manifest as template_manifest
-from gable.voice import quote_rail, safe
+from gable.voice import safe
 
 logger = logging.getLogger("gable.runner")
+
+
+def _ignore_headshot(_file_id: str, _url: str, _values: dict[str, str]) -> None:
+    """Default test seam for designs without a live Slides client."""
+    return
 
 
 @dataclass
@@ -78,6 +67,10 @@ class Runner:
     copy_template: Callable[[str, str], tuple[str, str]]
     #: Applies find/replace pairs to a presentation.
     fill: Callable[[str, dict[str, str]], int]
+    #: Posts one durable outbox item with Slack's stable client message id.
+    #: Local/test runners may omit it and use the ordinary posting seam.
+    post_once: run_questions.PostOnce | None = None
+    reconcile: run_questions.ReconcilePost | None = None
     #: Refuses a source whose proactive template audit is still unresolved.
     #: Empty means the source is cleared for listing-specific preflight.
     template_clearance: Callable[[str, str], str] = lambda _fid, _label: ""
@@ -103,10 +96,9 @@ class Runner:
     origin_thread_ts: str = ""
     #: Places the hero photo into a rendered flyer.
     place_photo: Callable[[str, str, str, str], bool] = lambda _run, _fid, _url, _template: False
-    #: Puts the agent's own face where the sample face was. Returns False when
-    #: the design has no recognisable headshot frame, which is a flyer worth a
-    #: look rather than a failure.
-    place_headshot: Callable[[str, str], bool | None] = lambda _fid, _url: None
+    #: Puts the agent's own face where the sample face was. None means the
+    #: design has no recognisable slot; False means a known slot was unsafe.
+    place_headshot: Callable[[str, str, dict[str, str]], bool | None] = _ignore_headshot
     #: Proves that the photo URL is usable for the target slot. The live
     #: builder supplies the network checker; the runner itself performs no
     #: hidden I/O.
@@ -129,9 +121,6 @@ class Runner:
     #: Names the stage being worked on, for Slack's waiting indicator. Cosmetic
     #: by contract: it is called around real work and must never affect it.
     progress: Callable[[str], None] = lambda _stage: None
-    #: Legacy warning approvals retained while older paused rows are migrated.
-    #: Correctable text and photo fitting no longer waits for an approval.
-    approved_template_warning_codes: frozenset[str] = frozenset()
 
     def run(self, submission: repo.Submission) -> RunResult:
         """Take one submission as far as it can go.
@@ -150,17 +139,10 @@ class Runner:
             run = store.start_run(self.connection, submission.response_row_id)
         except store.RunAlreadyActiveError:
             latest = store.latest_run(self.connection, submission.response_row_id)
-            result = RunResult(
+            return RunResult(
                 run_id=latest.run_id if latest else "",
                 status=latest.status if latest else "failed",
             )
-            spoken = safe(
-                "This listing is already being worked on, so I did not start a second "
-                "copy of the same work."
-            )
-            result.said.append(spoken)
-            self.say(spoken, latest.slack_thread_ts if latest else None)
-            return result
         except store.RunLimitReachedError:
             latest = store.latest_run(self.connection, submission.response_row_id)
             result = RunResult(
@@ -183,6 +165,7 @@ class Runner:
         run_id: str,
         *,
         resume_fields: dict[str, str | int] | None = None,
+        expected_status: str | None = None,
     ) -> RunResult:
         """Continue an existing paused run after Carmen supplies its photo.
 
@@ -191,6 +174,9 @@ class Runner:
             run_id: The existing run to continue; no new attempt is opened.
             resume_fields: Photo provenance or other run fields that must be
                 committed atomically with the paused-run claim.
+            expected_status: Optional exact paused state required by the claim.
+                Photo uploads use ``needs_photo`` so a stale file event cannot
+                resume a run that has since paused for another reason.
 
         Returns:
             What the resumed run did.
@@ -199,12 +185,39 @@ class Runner:
             Nothing. The same failure boundary as a new run records problems.
         """
         fields = {"failure_reason": "", **(resume_fields or {})}
-        if not store.claim_paused_run(self.connection, run_id, fields):
+        if expected_status == "needs_photo" and self.origin_thread_ts:
+            with run_questions.run_question_guard(run_id):
+                claimed = store.claim_run_for_photo(
+                    self.connection,
+                    run_id,
+                    self.origin_thread_ts,
+                    fields,
+                )
+        else:
+            claimed = store.claim_paused_run(
+                self.connection,
+                run_id,
+                fields,
+                expected_status=expected_status,
+            )
+        if not claimed:
             current = store.run_by_id(self.connection, run_id)
             result = RunResult(
                 run_id=run_id,
                 status=current.status if current is not None else "failed",
             )
+            event_id = str((resume_fields or {}).get("photo_event_id") or "")
+            if (
+                expected_status == "needs_photo"
+                and event_id
+                and current is not None
+                and current.photo_event_id == event_id
+            ):
+                # Two deliveries of the same Slack file may both perform the
+                # idempotent preparation. The one atomic DB claim owns the
+                # build; the loser is a silent duplicate, not a contradictory
+                # "already rechecked" message beside the eventual ready link.
+                return result
             spoken = safe(
                 "This listing is already being rechecked or is no longer waiting, so I "
                 "did not start another copy of the same work."
@@ -221,39 +234,36 @@ class Runner:
             return self._sequence(run_id, intake, result)
         except Exception:
             logger.exception("run %s failed", run_id)
-            try:
-                store.set_status(
-                    self.connection,
-                    run_id,
-                    "failed",
-                    "unhandled error during the run",
-                    failure_reason="a processing step failed before an outcome was confirmed",
-                )
-            except Exception:
-                # Preserve Runner.run's no-raise boundary even if recording fails.
-                logger.exception("could not record failure for run %s", run_id)
-            result.status = "failed"
+            current = store.run_by_id(self.connection, run_id)
+            if current is not None and store.has_pending_run_notification(self.connection, run_id):
+                result.status = current.status
+                result.output_url = current.output_url
+                return result
             spoken = safe(
                 "I could not finish building this flyer because one of its processing "
                 "steps failed. I stopped without sending it as finished."
             )
             try:
-                posted_ts = self.say(spoken, self.origin_thread_ts or None)
+                return self._outcome(
+                    run_id,
+                    spoken,
+                    result,
+                    status="failed",
+                    detail="a processing step failed before an outcome was confirmed",
+                )
             except Exception:
-                # Slack may be both the original failure and unavailable notice path.
-                logger.exception("could not post failure notice for run %s", run_id)
-            else:
-                if posted_ts:
-                    result.said.append(spoken)
-                    try:
-                        run_reporting.remember_thread(
-                            self.connection,
-                            run_id,
-                            posted_ts,
-                            self.origin_thread_ts,
-                        )
-                    except Exception:
-                        logger.exception("could not record the failure thread for run %s", run_id)
+                logger.exception("could not persist the failure outcome for run %s", run_id)
+                try:
+                    store.set_status(
+                        self.connection,
+                        run_id,
+                        "failed",
+                        "unhandled error during the run",
+                        failure_reason="a processing step failed before an outcome was confirmed",
+                    )
+                except Exception:
+                    logger.exception("could not record failure for run %s", run_id)
+            result.status = "failed"
             return result
 
     def _sequence(self, run_id: str, intake: Intake, result: RunResult) -> RunResult:
@@ -445,20 +455,11 @@ class Runner:
             # no property. Reporting that as a field failing to match sends
             # whoever reads it looking for a text bug that is not there.
             nothing_matched = not pairs
-            store.set_status(
-                self.connection,
-                run_id,
-                "needs_review",
-                (
-                    "this design has no fields Gable knows how to fill"
-                    if nothing_matched
-                    else "the template text did not match each intended field exactly once"
-                ),
-                output_file_id=output_id,
-                output_url=output_url,
+            detail = (
+                "this design has no fields Gable knows how to fill"
+                if nothing_matched
+                else "the template text did not match each intended field exactly once"
             )
-            result.status = "needs_review"
-            result.output_url = output_url
             spoken = safe(
                 "I do not know how to fill this design — none of its text matches "
                 "anything I recognise. It may need a kind of information I do not "
@@ -467,10 +468,15 @@ class Runner:
                 else "I copied the design, but one of its fields did not match exactly "
                 "once. I stopped before changing any text."
             )
-            result.said.append(spoken)
-            posted_ts = self.say(spoken, self.origin_thread_ts or None)
-            run_reporting.remember_thread(self.connection, run_id, posted_ts, self.origin_thread_ts)
-            return result
+            return self._outcome(
+                run_id,
+                spoken,
+                result,
+                status="needs_review",
+                detail=detail,
+                output_file_id=output_id,
+                output_url=output_url,
+            )
 
         # Read the flyer back and require every value to appear exactly as it
         # was supplied. A delivered flyer once carried "$460,0000" — four zeros
@@ -484,24 +490,19 @@ class Runner:
         # produce, so this is deterministic rather than a judgement.
         readback = run_reporting.read_back(self.read_slide_text, output_id)
         if readback is None:
-            store.set_status(
-                self.connection,
-                run_id,
-                "needs_review",
-                "the filled flyer could not be read back for verification",
-                output_file_id=output_id,
-                output_url=output_url,
-            )
-            result.status = "needs_review"
-            result.output_url = output_url
             spoken = safe(
                 "I filled the design, but Google Slides did not let me read it back to "
                 "verify the values. I have not sent it as finished."
             )
-            result.said.append(spoken)
-            posted_ts = self.say(spoken, self.origin_thread_ts or None)
-            run_reporting.remember_thread(self.connection, run_id, posted_ts, self.origin_thread_ts)
-            return result
+            return self._outcome(
+                run_id,
+                spoken,
+                result,
+                status="needs_review",
+                detail="the filled flyer could not be read back for verification",
+                output_file_id=output_id,
+                output_url=output_url,
+            )
 
         sent = {value for value in pairs.values() if value.strip()}
         wrong = audit.values_missing_from(readback, values, sent)
@@ -519,20 +520,11 @@ class Runner:
             # and it is deterministic.
             stray = audit.foreign_content_in(readback, values, run_values.OFFICE_PHONE)
         if wrong or stray:
-            store.set_status(
-                self.connection,
-                run_id,
-                "needs_review",
-                (
-                    f"a filled value did not read back correctly: {wrong[0]}"
-                    if wrong
-                    else f"contact details that are not this listing's: {stray[0]}"
-                )[:400],
-                output_file_id=output_id,
-                output_url=output_url,
-            )
-            result.status = "needs_review"
-            result.output_url = output_url
+            detail = (
+                f"a filled value did not read back correctly: {wrong[0]}"
+                if wrong
+                else f"contact details that are not this listing's: {stray[0]}"
+            )[:400]
             # Two different problems, two different sentences. Reading Gable's
             # own words in Slack caught these being spliced together into "the
             # phone number 410.456.6868 is not this listing's on it does not
@@ -544,10 +536,15 @@ class Runner:
                 if wrong
                 else f"I built the flyer but the {stray[0]}, so I have not sent it as finished."
             )
-            result.said.append(spoken)
-            posted_ts = self.say(spoken, self.origin_thread_ts or None)
-            run_reporting.remember_thread(self.connection, run_id, posted_ts, self.origin_thread_ts)
-            return result
+            return self._outcome(
+                run_id,
+                spoken,
+                result,
+                status="needs_review",
+                detail=detail,
+                output_file_id=output_id,
+                output_url=output_url,
+            )
 
         self.progress("is placing the photo...")
         placed = self.place_photo(run_id, output_id, self.hero_photo_url, template_label)
@@ -558,7 +555,7 @@ class Runner:
         headshot_failed = False
         if placed and headshot_url:
             self.progress("is putting the agent's face on it...")
-            headshot_result = self.place_headshot(output_id, headshot_url)
+            headshot_result = self.place_headshot(output_id, headshot_url, values)
             if headshot_result is True:
                 logger.info("replaced the sample headshot for run %s", run_id)
             elif headshot_result is False:
@@ -569,43 +566,33 @@ class Runner:
         if not placed:
             # The photo is the point of the flyer. Delivering without it, after
             # being given one, is worse than stopping.
-            store.set_status(
-                self.connection,
-                run_id,
-                "needs_review",
-                "the hero photo could not be placed",
-                output_file_id=output_id,
-                output_url=output_url,
-            )
-            result.status = "needs_review"
-            result.output_url = output_url
             spoken = safe(
                 "I built the flyer but could not get the photo onto it. "
                 "I have not sent it as finished."
             )
-            result.said.append(spoken)
-            posted_ts = self.say(spoken, self.origin_thread_ts or None)
-            run_reporting.remember_thread(self.connection, run_id, posted_ts, self.origin_thread_ts)
-            return result
-        if headshot_failed:
-            store.set_status(
-                self.connection,
+            return self._outcome(
                 run_id,
-                "needs_review",
-                "the agent headshot could not be placed",
+                spoken,
+                result,
+                status="needs_review",
+                detail="the hero photo could not be placed",
                 output_file_id=output_id,
                 output_url=output_url,
             )
-            result.status = "needs_review"
-            result.output_url = output_url
+        if headshot_failed:
             spoken = safe(
                 "I built the flyer but could not replace the sample headshot with the "
                 "agent's own photo. I have not sent it as finished."
             )
-            result.said.append(spoken)
-            posted_ts = self.say(spoken, self.origin_thread_ts or None)
-            run_reporting.remember_thread(self.connection, run_id, posted_ts, self.origin_thread_ts)
-            return result
+            return self._outcome(
+                run_id,
+                spoken,
+                result,
+                status="needs_review",
+                detail="the agent headshot could not be placed",
+                output_file_id=output_id,
+                output_url=output_url,
+            )
 
         # 7a. Fit the text to its boxes. Slides cannot autofit over the API —
         # verified: "Autofit types other than NONE are not supported" — so a
@@ -661,29 +648,7 @@ class Runner:
             # thread image replaces it on this run. Mixed or non-photo failures
             # stay in needs_review because a new photo cannot fix them.
             needs_replacement_photo = not non_visual_problems and seen.needs_source_replacement
-            paused_status = "needs_photo" if needs_replacement_photo else "needs_review"
             detail = "; ".join(problems)[:400]
-            fields: dict[str, str | int] = {"output_file_id": output_id, "output_url": output_url}
-            if needs_replacement_photo:
-                # Listing context may be shown back to a person. Keep the
-                # model's bounded finding in the internal event detail, while
-                # the mutable reason is fixed, plain, and house-style safe.
-                fields["failure_reason"] = (
-                    "waiting for the correct property image because the supplied photo conflicts "
-                    "with the listing"
-                )
-            store.set_status(
-                self.connection,
-                run_id,
-                paused_status,
-                (
-                    f"replacement supplied photo required: {detail}"
-                    if needs_replacement_photo
-                    else detail
-                )[:400],
-                **fields,
-            )
-            result.status = paused_status
             result.output_url = output_url
             if not seen.checked:
                 spoken = safe("I rendered it, but I could not complete the visual inspection.")
@@ -692,34 +657,48 @@ class Runner:
             else:
                 spoken = seen.say or verdict.say or safe(f"I rendered it, but {problems[0]}")
             if needs_replacement_photo:
-                question = "Can you send the correct property image?"
-                message = safe(f"{quote_rail([spoken])}\n\n{question}")
-                result.questions.append(question)
-            else:
-                message = safe(
-                    "\n".join(
-                        [
-                            spoken,
-                            "I have not sent it as finished. I kept the supplied image and draft "
-                            "so this run can be retried without starting over.",
-                        ]
-                    )
+                delivery = run_questions.prepare_and_deliver(
+                    self.connection,
+                    run_id,
+                    run_questions.replacement_message(spoken),
+                    "needs_photo",
+                    self.say,
+                    post_once=self.post_once,
+                    reconcile=self.reconcile,
+                    question_label=run_questions.PHOTO_REPLACEMENT_QUESTION,
+                    thread_ts=self.origin_thread_ts,
+                    confirmed_reason=store.PHOTO_REPLACEMENT_WAITING,
+                    confirmation_detail="replacement property photo request confirmed in Slack",
+                    transition_detail=f"replacement supplied photo required: {detail}",
+                    output_file_id=output_id,
+                    output_url=output_url,
                 )
-            result.said.append(message)
-            posted_ts = self.say(message, self.origin_thread_ts or None)
-            run_reporting.remember_thread(self.connection, run_id, posted_ts, self.origin_thread_ts)
-            return result
+                result.status = delivery.status
+                result.said.extend(delivery.said)
+                result.questions.extend(delivery.questions)
+                return result
+            message = safe(
+                "\n".join(
+                    [
+                        spoken,
+                        "I have not sent it as finished. I kept the supplied image and draft "
+                        "so this run can be retried without starting over.",
+                    ]
+                )
+            )
+            return self._outcome(
+                run_id,
+                message,
+                result,
+                status="needs_review",
+                detail=detail,
+                output_file_id=output_id,
+                output_url=output_url,
+            )
 
-        # `delivered` is persisted only after Slack confirms the link message.
-        store.set_status(
-            self.connection,
-            run_id,
-            "building",
-            "flyer verified and waiting for its Slack delivery message",
-            output_file_id=output_id,
-            output_url=output_url,
-        )
-        result.output_url = output_url
+        # The verified file and exact link message are persisted before Slack.
+        # Until Slack confirms the post the run remains building and the
+        # process-lifetime outbox retries without rebuilding the flyer.
         photo_note = run_reporting.photo_note(self.connection, run_id)
         missing_price_note = price_note(intake, "price" in resolution.fields)
         # Keep every useful outcome detail in the one link message.
@@ -734,22 +713,51 @@ class Runner:
                 ]
             )
         )
-        posted_ts = self.say(message, self.origin_thread_ts or None)
-        if not posted_ts.strip():
-            raise RuntimeError("Slack did not confirm the delivery message")
-        thread_root = self.origin_thread_ts or posted_ts
-        store.set_status(
-            self.connection,
+        return self._outcome(
             run_id,
-            "delivered",
-            "Slack confirmed the delivery message",
+            message,
+            result,
+            status="delivered",
+            pending_status="building",
+            detail="flyer verified and waiting for its Slack delivery message",
+            confirmation_detail="Slack confirmed the delivery message",
             output_file_id=output_id,
             output_url=output_url,
-            slack_thread_ts=thread_root,
-            failure_reason="",
         )
-        result.status = "delivered"
-        result.said.append(message)
+
+    def _outcome(
+        self,
+        run_id: str,
+        message: str,
+        result: RunResult,
+        *,
+        status: str,
+        detail: str,
+        pending_status: str | None = None,
+        confirmation_detail: str = "Slack confirmed the run outcome",
+        output_file_id: str = "",
+        output_url: str = "",
+    ) -> RunResult:
+        """Persist and attempt one exact non-question outcome message."""
+        delivered = run_questions.prepare_outcome_and_deliver(
+            self.connection,
+            run_id,
+            message,
+            status,
+            self.say,
+            post_once=self.post_once,
+            reconcile=self.reconcile,
+            pending_status=pending_status,
+            thread_ts=self.origin_thread_ts,
+            confirmed_reason=detail if status in {"failed", "needs_review", "skipped"} else "",
+            confirmation_detail=confirmation_detail,
+            transition_detail=detail,
+            output_file_id=output_file_id,
+            output_url=output_url,
+        )
+        result.status = delivered.status
+        result.output_url = output_url
+        result.said.extend(delivered.said)
         return result
 
     def _ask(
@@ -760,35 +768,22 @@ class Runner:
         result: RunResult,
         status: str = "needs_info",
         headline: str = "",
-        pending_warning_code: str = "",
     ) -> RunResult:
-        """Stop the run and put a question in Slack, under a headline if given.
-
-        A headline is announced as its own channel message and the question
-        posted underneath it as a reply. That is not decoration: one combined
-        message sits flat in the channel and starts no thread, and the photo
-        handoff only accepts an upload that arrives inside the listing's thread,
-        so a flat message leaves Carmen nowhere to put the photo.
-        """
+        """Persist one question, post it in its owned thread, and confirm the pause."""
         asked = safe(question or "I need one more thing before I can build this.")
-        if headline and not self.origin_thread_ts:
-            root_ts = self.say(safe(headline), None)
-            posted_ts = self.say(asked, root_ts or None)
-            thread_root = root_ts or posted_ts
-            result.said.append(safe(headline))
-        else:
-            posted_ts = self.say(asked, self.origin_thread_ts or None)
-            thread_root = self.origin_thread_ts or posted_ts
-        store.set_status(
+        delivery = run_questions.prepare_and_deliver(
             self.connection,
             run_id,
+            asked,
             status,
-            asked[:200],
-            slack_thread_ts=thread_root,
-            failure_reason=asked[:400],
-            pending_warning_code=pending_warning_code,
+            self.say,
+            post_once=self.post_once,
+            reconcile=self.reconcile,
+            headline=safe(headline) if headline else "",
+            thread_ts=self.origin_thread_ts,
         )
-        result.status = status
-        result.said.append(asked)
-        result.questions = [asked, *[q.ask for q in questions[1:]]]
+        result.status = delivery.status
+        result.said.extend(delivery.said)
+        if delivery.questions:
+            result.questions = [asked, *[q.ask for q in questions[1:]]]
         return result

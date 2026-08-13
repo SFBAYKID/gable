@@ -9,6 +9,7 @@ the scan-once and same-thread recheck contract reviewable as one small unit.
 from __future__ import annotations
 
 import sqlite3
+import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
@@ -29,6 +30,11 @@ class TemplateAudit:
     summary: str = ""
     slack_thread_ts: str = ""
     notification_pending: bool = False
+    checked_at: str = ""
+    delivery_claim_token: str = ""
+    delivery_claimed_at: str = ""
+    notification_attempted_at: str = ""
+    notification_attempt_count: int = 0
 
 
 def template_catalog_adopted(connection: sqlite3.Connection) -> bool:
@@ -65,7 +71,9 @@ def template_audit(
     row = connection.execute(
         """
         SELECT file_id, name, modified_time, status, summary, slack_thread_ts,
-               notification_pending
+               notification_pending, checked_at, delivery_claim_token,
+               delivery_claimed_at, notification_attempted_at,
+               notification_attempt_count
           FROM template_audits
          WHERE file_id = ?
         """,
@@ -82,7 +90,9 @@ def template_for_thread(
     row = connection.execute(
         """
         SELECT file_id, name, modified_time, status, summary, slack_thread_ts,
-               notification_pending
+               notification_pending, checked_at, delivery_claim_token,
+               delivery_claimed_at, notification_attempted_at,
+               notification_attempt_count
           FROM template_audits
          WHERE slack_thread_ts = ?
          ORDER BY checked_at DESC
@@ -91,6 +101,109 @@ def template_for_thread(
         (thread_ts,),
     ).fetchone()
     return _to_template_audit(row) if row else None
+
+
+def pending_template_notifications(connection: sqlite3.Connection) -> tuple[TemplateAudit, ...]:
+    """Return exact stored template verdicts whose Slack delivery is unresolved."""
+    rows = connection.execute(
+        """
+        SELECT file_id, name, modified_time, status, summary, slack_thread_ts,
+               notification_pending, checked_at, delivery_claim_token,
+               delivery_claimed_at, notification_attempted_at,
+               notification_attempt_count
+          FROM template_audits
+         WHERE notification_pending = 1
+           AND status != 'baseline'
+           AND summary != ''
+         ORDER BY checked_at, file_id
+        """
+    ).fetchall()
+    return tuple(_to_template_audit(row) for row in rows)
+
+
+def claim_template_notification_delivery(
+    connection: sqlite3.Connection,
+    audit: TemplateAudit,
+    expected_attempt_count: int,
+    stale_before: str,
+) -> str:
+    """Atomically mark and reserve the template verdict's sole Slack write."""
+    token = str(uuid.uuid4())
+    now = _now()
+    cursor = connection.execute(
+        """
+        UPDATE template_audits
+           SET delivery_claim_token = ?, delivery_claimed_at = ?,
+               notification_attempted_at = ?,
+               notification_attempt_count = notification_attempt_count + 1
+         WHERE file_id = ? AND modified_time = ? AND summary = ? AND checked_at = ?
+           AND notification_pending = 1
+           AND notification_attempt_count = ?
+           AND (delivery_claim_token = '' OR delivery_claimed_at <= ?)
+        """,
+        (
+            token,
+            now,
+            now,
+            audit.file_id,
+            audit.modified_time,
+            audit.summary,
+            audit.checked_at,
+            expected_attempt_count,
+            stale_before,
+        ),
+    )
+    return token if cursor.rowcount == 1 else ""
+
+
+def release_template_notification_delivery(
+    connection: sqlite3.Connection,
+    audit: TemplateAudit,
+    claim_token: str,
+) -> None:
+    """Release this process's active claim without permitting another write."""
+    connection.execute(
+        "UPDATE template_audits SET delivery_claim_token = '', delivery_claimed_at = '' "
+        "WHERE file_id = ? AND modified_time = ? AND checked_at = ? "
+        "AND delivery_claim_token = ?",
+        (audit.file_id, audit.modified_time, audit.checked_at, claim_token),
+    )
+
+
+def confirm_template_notification(
+    connection: sqlite3.Connection,
+    audit: TemplateAudit,
+    posted_ts: str,
+) -> bool:
+    """Confirm only the exact still-pending revision that Slack acknowledged."""
+    clean_ts = posted_ts.strip()
+    if not clean_ts:
+        return False
+    cursor = connection.execute(
+        """
+        UPDATE template_audits
+           SET slack_thread_ts = CASE
+                   WHEN slack_thread_ts = '' THEN ?
+                   ELSE slack_thread_ts
+               END,
+               notification_pending = 0,
+               delivery_claim_token = '',
+               delivery_claimed_at = ''
+         WHERE file_id = ?
+           AND modified_time = ?
+           AND summary = ?
+           AND checked_at = ?
+           AND notification_pending = 1
+        """,
+        (
+            clean_ts,
+            audit.file_id,
+            audit.modified_time,
+            audit.summary,
+            audit.checked_at,
+        ),
+    )
+    return cursor.rowcount == 1
 
 
 def record_template_audit(
@@ -103,9 +216,9 @@ def record_template_audit(
     slack_thread_ts: str = "",
     *,
     notification_pending: bool = False,
-) -> None:
+) -> bool:
     """Upsert one measured source-template outcome and its owned thread."""
-    connection.execute(
+    cursor = connection.execute(
         """
         INSERT INTO template_audits (
             file_id, name, modified_time, status, summary,
@@ -121,7 +234,13 @@ def record_template_audit(
                 ELSE excluded.slack_thread_ts
             END,
             notification_pending = excluded.notification_pending,
+            delivery_claim_token = '',
+            delivery_claimed_at = '',
+            notification_attempted_at = '',
+            notification_attempt_count = 0,
             checked_at = excluded.checked_at
+        WHERE template_audits.notification_pending = 0
+          AND template_audits.delivery_claim_token = ''
         """,
         (
             file_id,
@@ -134,6 +253,7 @@ def record_template_audit(
             int(notification_pending),
         ),
     )
+    return cursor.rowcount == 1
 
 
 def _to_template_audit(row: sqlite3.Row) -> TemplateAudit:
@@ -146,4 +266,9 @@ def _to_template_audit(row: sqlite3.Row) -> TemplateAudit:
         summary=str(row["summary"] or ""),
         slack_thread_ts=str(row["slack_thread_ts"] or ""),
         notification_pending=bool(row["notification_pending"]),
+        checked_at=str(row["checked_at"] or ""),
+        delivery_claim_token=str(row["delivery_claim_token"] or ""),
+        delivery_claimed_at=str(row["delivery_claimed_at"] or ""),
+        notification_attempted_at=str(row["notification_attempted_at"] or ""),
+        notification_attempt_count=int(row["notification_attempt_count"]),
     )

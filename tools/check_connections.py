@@ -25,6 +25,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from gable.google_client import build_google_service
+
 ENV_PATH: Path = Path(__file__).resolve().parent.parent / ".env"
 TIMEOUT_SECONDS: float = 30.0
 
@@ -203,7 +205,6 @@ def check_google(env: dict[str, str]) -> list[Result]:
 
     try:
         from google.oauth2 import service_account
-        from googleapiclient.discovery import build
     except ImportError as exc:  # pragma: no cover - dependency is declared
         return [Result("Google", FAIL, f"client libraries missing: {exc}")]
 
@@ -225,7 +226,7 @@ def check_google(env: dict[str, str]) -> list[Result]:
     sheet_id = env.get("GABLE_SHEET_ID")
     if sheet_id:
         try:
-            sheets = build("sheets", "v4", credentials=creds, cache_discovery=False)
+            sheets = build_google_service("sheets", "v4", creds)
             meta = sheets.spreadsheets().get(spreadsheetId=sheet_id).execute()
             tabs = [s["properties"]["title"] for s in meta.get("sheets", [])]
             results.append(
@@ -239,7 +240,7 @@ def check_google(env: dict[str, str]) -> list[Result]:
     drive_id = env.get("GABLE_DRIVE_ID")
     if drive_id:
         try:
-            drive = build("drive", "v3", credentials=creds, cache_discovery=False)
+            drive = build_google_service("drive", "v3", creds)
             info_ = drive.drives().get(driveId=drive_id).execute()
             listing = (
                 drive.files()
@@ -266,7 +267,7 @@ def check_google(env: dict[str, str]) -> list[Result]:
         )
     else:
         try:
-            drive_for_slides = build("drive", "v3", credentials=creds, cache_discovery=False)
+            drive_for_slides = build_google_service("drive", "v3", creds)
             candidates = (
                 drive_for_slides.files()
                 .list(
@@ -286,7 +287,7 @@ def check_google(env: dict[str, str]) -> list[Result]:
                     Result("Google Slides", SKIP, "the shared drive has no presentation to read")
                 )
             else:
-                slides = build("slides", "v1", credentials=creds, cache_discovery=False)
+                slides = build_google_service("slides", "v1", creds)
                 slides.presentations().get(
                     presentationId=candidates[0]["id"],
                     fields="presentationId",

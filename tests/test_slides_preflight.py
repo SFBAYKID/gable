@@ -62,6 +62,33 @@ def _headshot() -> dict[str, Any]:
     }
 
 
+def _image_headshot(object_id: str = "sample-portrait") -> dict[str, Any]:
+    """A sample agent already embedded as a Slides image object."""
+    return {
+        "objectId": object_id,
+        "size": {
+            "width": {"magnitude": 1_500_000},
+            "height": {"magnitude": 1_800_000},
+        },
+        "transform": {
+            "scaleX": 1,
+            "scaleY": 1,
+            "translateX": 8_000_000,
+            "translateY": 10_000_000,
+        },
+        "image": {"contentUrl": "https://slides.example/sample-agent.jpg"},
+    }
+
+
+def _agent_card() -> tuple[dict[str, Any], dict[str, Any]]:
+    """Recognised name and phone fields beside the portrait candidate."""
+    name = _text("agent-name", "AGENT NAME", 175)
+    name["transform"].update({"translateX": 5_300_000, "translateY": 10_100_000})
+    phone = _text("agent-phone", "Phone", 140)
+    phone["transform"].update({"translateX": 5_300_000, "translateY": 10_800_000})
+    return name, phone
+
+
 def _presentation(*elements: dict[str, Any]) -> dict[str, Any]:
     return {
         "pageSize": {
@@ -240,6 +267,21 @@ def test_a_material_photo_crop_is_a_postbuild_advisory_not_a_question() -> None:
     assert "run anyway" not in issue.say.casefold()
 
 
+def test_small_source_containment_does_not_claim_a_crop() -> None:
+    """A tiny tall upload stays whole rather than losing its hypothetical cover crop."""
+    presentation = _presentation(_text("address", "[PROPERTY ADDRESS]", 500))
+    report = preflight.analyze(
+        presentation,
+        "New Listing",
+        "New Listing",
+        fields.resolve(["[PROPERTY ADDRESS]"]),
+        {"address": "123 Main St, Baltimore, MD 21201"},
+        photo_size=(100, 200),
+    )
+
+    assert not any(issue.code == "large_photo_crop" for issue in report.warnings)
+
+
 def test_an_unknown_placeholder_and_missing_frame_are_structural_blockers() -> None:
     presentation = _presentation(
         _text("address", "[PROPERTY ADDRESS]", 500),
@@ -378,3 +420,87 @@ def test_two_headshot_candidates_are_refused_instead_of_choosing_a_face() -> Non
     report = preflight.certify(presentation, "New Listing", "Just Listed")
 
     assert any(issue.code == "ambiguous_headshot_frame" for issue in report.blockers)
+
+
+def test_an_existing_slides_image_is_a_required_headshot_slot() -> None:
+    presentation = _presentation(
+        _text("address", "[PROPERTY ADDRESS]", 900),
+        *_agent_card(),
+        _image_headshot(),
+    )
+
+    report = _analyze(
+        presentation,
+        {"address": "703 Perception Way, Aberdeen, MD 21001", "headshot": ""},
+    )
+
+    issue = next(item for item in report.blockers if item.code == "missing_headshot")
+    assert "Head Shots" in issue.say
+
+
+def test_an_image_and_shape_portrait_pair_is_ambiguous() -> None:
+    image = _image_headshot()
+    image["transform"]["translateX"] = 5_500_000
+    presentation = _presentation(
+        _text("address", "[PROPERTY ADDRESS]", 900),
+        *_agent_card(),
+        _headshot(),
+        image,
+    )
+
+    report = preflight.certify(presentation, "New Listing", "Just Listed")
+
+    assert any(issue.code == "ambiguous_headshot_frame" for issue in report.blockers)
+
+
+def test_square_logo_away_from_agent_card_is_not_a_headshot() -> None:
+    logo = _image_headshot("brokerage-logo")
+    logo["transform"].update({"translateX": 300_000, "translateY": 500_000})
+    presentation = _presentation(
+        _text("address", "[PROPERTY ADDRESS]", 900),
+        *_agent_card(),
+        logo,
+    )
+
+    report = _analyze(
+        presentation,
+        {"address": "703 Perception Way, Aberdeen, MD 21001", "headshot": ""},
+    )
+
+    assert not any(issue.code == "missing_headshot" for issue in report.blockers)
+
+
+def test_qr_code_without_resolved_agent_fields_is_not_a_headshot() -> None:
+    qr_code = _image_headshot("listing-qr-code")
+    presentation = _presentation(
+        _text("address", "[PROPERTY ADDRESS]", 900),
+        qr_code,
+    )
+
+    report = _analyze(
+        presentation,
+        {"address": "703 Perception Way, Aberdeen, MD 21001", "headshot": ""},
+    )
+
+    assert not any(issue.code == "missing_headshot" for issue in report.blockers)
+
+
+def test_secondary_property_image_away_from_contact_card_is_not_a_headshot() -> None:
+    secondary = _image_headshot("secondary-property-photo")
+    secondary["size"] = {
+        "width": {"magnitude": 3_000_000},
+        "height": {"magnitude": 2_000_000},
+    }
+    secondary["transform"].update({"translateX": 500_000, "translateY": 6_500_000})
+    presentation = _presentation(
+        _text("address", "[PROPERTY ADDRESS]", 900),
+        *_agent_card(),
+        secondary,
+    )
+
+    report = _analyze(
+        presentation,
+        {"address": "703 Perception Way, Aberdeen, MD 21001", "headshot": ""},
+    )
+
+    assert not any(issue.code == "missing_headshot" for issue in report.blockers)

@@ -34,17 +34,6 @@ def test_run_again_reloads_the_updated_drive_source_without_a_model_key(
     assert decision.arguments == {"mode": "check_updated"}
 
 
-@pytest.mark.parametrize(
-    "message",
-    ["run anyway", "use the current template as-is", "use current template as is"],
-)
-def test_only_an_explicit_override_uses_the_current_warned_design(message: str) -> None:
-    decision = think(message, api_key="")
-
-    assert decision.tool == "rebuild_flyer"
-    assert decision.arguments == {"mode": "run_anyway"}
-
-
 NEEDS_PHOTO_CONTEXT = """\
 Run status: needs_photo.
 Request type: Sold.
@@ -65,6 +54,42 @@ No flyer has been built in this thread yet.
 This run has no hero photo yet.
 The run is waiting because: The agent name needs about 5 percent more room.
 """
+
+
+REPLACEMENT_PHOTO_CONTEXT = """\
+Run status: needs_photo.
+Request type: Sold.
+Property address: 703 Perception Way, Aberdeen, MD 21001.
+Submitting agent: Mike Kulnich.
+Selected template: Sold.
+A flyer exists in this thread.
+A human-supplied hero photo is attached to this run.
+The run is waiting because: the supplied photo conflicts with the listing.
+"""
+
+
+@pytest.mark.parametrize(
+    "message",
+    ["run anyway", "use the current template as-is", "use current template as is"],
+)
+def test_run_anyway_cannot_bypass_a_template_safety_stop(message: str) -> None:
+    decision = think(message, context=NEEDS_TEMPLATE_CONTEXT, api_key="")
+
+    assert decision.tool == ""
+    assert "do not bypass" in decision.reply
+
+
+@pytest.mark.parametrize(
+    "message",
+    ["run anyway", "run again", "Hey, can you rerun this project?"],
+)
+def test_any_rerun_wording_while_waiting_for_the_first_photo_restates_the_request(
+    message: str,
+) -> None:
+    decision = think(message, context=NEEDS_PHOTO_CONTEXT, api_key="")
+
+    assert decision.tool == ""
+    assert decision.reply == "Send me the property image in this thread."
 
 
 def test_a_named_source_correction_rechecks_instead_of_becoming_a_flyer_edit() -> None:
@@ -127,6 +152,17 @@ def test_a_terse_acknowledgement_in_a_photo_wait_repeats_the_only_missing_step(
 
     assert decision.tool == ""
     assert decision.reply == "Send me the property image in this thread."
+
+
+@pytest.mark.parametrize(
+    "message",
+    ["run again", "Hey, can you rerun this project?", "Can you rerun this flyer?"],
+)
+def test_a_rerun_request_cannot_rebuild_from_a_rejected_photo(message: str) -> None:
+    decision = think(message, context=REPLACEMENT_PHOTO_CONTEXT, api_key="")
+
+    assert decision.tool == ""
+    assert decision.reply == "Send me the correct property image in this thread."
 
 
 @pytest.mark.parametrize("message", ["Edit the existing one", "Edit the exiting one"])

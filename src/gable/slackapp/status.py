@@ -42,6 +42,11 @@ STAGE_REFRESH_SECONDS: Final[float] = 2.0
 # eventual empty-status call if it does not stop inside this small join window.
 STOP_JOIN_SECONDS: Final[float] = 1.0
 
+# Give the worker one scheduler turn to complete a healthy local dispatch, so
+# the status normally reaches Slack before work begins. A slow network may not
+# hold the real response path longer than this small, process-local wait.
+INITIAL_DISPATCH_WAIT_SECONDS: Final[float] = 0.05
+
 
 class Working:
     """Keep Slack's native waiting treatment active for one response.
@@ -83,6 +88,7 @@ class Working:
         self._stage = stage
         self._stage_lock = threading.Lock()
         self._done = threading.Event()
+        self._initial_attempted = threading.Event()
         self._worker: threading.Thread | None = None
 
     def _set_status(self, text: str) -> None:
@@ -108,7 +114,17 @@ class Working:
 
     def _run(self) -> None:
         """Advance timed copy, then refresh the caller's current real stage."""
+        if self._done.is_set():
+            # A very fast answer may finish before the new thread is scheduled.
+            # Do not paint a stale waiting state after the outcome is visible.
+            self._initial_attempted.set()
+            return
         try:
+            # The cosmetic Web API request runs here rather than on the Slack
+            # event-handler thread. Even the explicitly bounded transport may
+            # take seconds during an outage; the answer must keep moving.
+            self._set_status(INITIAL_STATUS)
+            self._initial_attempted.set()
             if self._done.wait(timeout=LEAD_IN_STEPS[0][0]):
                 return
             self._set_status(LEAD_IN_STEPS[0][1])
@@ -129,15 +145,16 @@ class Working:
     def start(self) -> None:
         """Show the native state immediately and start timed updates.
 
-        The first call is synchronous so Slack receives the purple waiting state
-        before the potentially slow model or Google request begins. Later calls
-        run on the worker and cannot delay the work they describe.
+        Every network call runs on the worker so a cosmetic Slack outage cannot
+        delay the answer. The caller waits at most one small scheduler window;
+        a healthy initial update therefore normally lands before work begins,
+        while a stalled update remains asynchronous.
         """
         if not self._channel or not self._thread or self._worker is not None:
             return
-        self._set_status(INITIAL_STATUS)
         self._worker = threading.Thread(target=self._run, daemon=True, name="gable-status")
         self._worker.start()
+        self._initial_attempted.wait(timeout=INITIAL_DISPATCH_WAIT_SECONDS)
 
     def stage(self, text: str) -> None:
         """Record the truthful stage to show after the lead-in.

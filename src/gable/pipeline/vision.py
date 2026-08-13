@@ -81,8 +81,17 @@ Choose exactly one remedy:
 - "review" for every other problem, any mixed set of problems, and any case
   where you are unsure which remedy applies.
 
+For each problem, provide one matching kind in the same order:
+- "source_photo_conflict" only for a contradiction independently legible in
+  the first human-supplied image.
+- "photo_output" for crop, placement, stretching, softness, or a change visible
+  only in the rendered flyer.
+- "text", "layout", "placeholder", or "other" for every non-photo problem.
+
 Reply as JSON only:
 {"looks_right": true|false, "confident": true|false, "problems": ["..."],
+ "problem_kinds": ["source_photo_conflict"|"photo_output"|"text"|"layout"|
+ "placeholder"|"other"],
  "remedy": "none"|"review"|"replace_photo", "source_conflict_visible": true|false}
 
 Each problem must be one short sentence naming what and where, in plain words a
@@ -110,8 +119,11 @@ Do not critique colours, fonts, branding, or subjective design taste.
 
 Reply as JSON only. Use "none" when the template looks right and "review" for
 every problem; a reusable template never uses "replace_photo" and always uses
-false for "source_conflict_visible":
+false for "source_conflict_visible". Use "text", "layout", "placeholder", or
+"other" as each matching problem kind; a template never has a
+"source_photo_conflict" or "photo_output" problem:
 {"looks_right": true|false, "confident": true|false, "problems": ["..."],
+ "problem_kinds": ["text"|"layout"|"placeholder"|"other"],
  "remedy": "none"|"review", "source_conflict_visible": false}
 
 Each problem must be one short sentence naming what and where, in plain words a
@@ -124,6 +136,20 @@ _SCHEMA: Final[dict[str, Any]] = {
         "looks_right": {"type": "boolean"},
         "confident": {"type": "boolean"},
         "problems": {"type": "array", "items": {"type": "string"}},
+        "problem_kinds": {
+            "type": "array",
+            "items": {
+                "type": "string",
+                "enum": [
+                    "source_photo_conflict",
+                    "photo_output",
+                    "text",
+                    "layout",
+                    "placeholder",
+                    "other",
+                ],
+            },
+        },
         "remedy": {
             "type": "string",
             "enum": ["none", "review", "replace_photo"],
@@ -134,10 +160,27 @@ _SCHEMA: Final[dict[str, Any]] = {
         "looks_right",
         "confident",
         "problems",
+        "problem_kinds",
         "remedy",
         "source_conflict_visible",
     ],
     "additionalProperties": False,
+}
+
+_TEMPLATE_SCHEMA: Final[dict[str, Any]] = {
+    **_SCHEMA,
+    "properties": {
+        **_SCHEMA["properties"],
+        "problem_kinds": {
+            "type": "array",
+            "items": {
+                "type": "string",
+                "enum": ["text", "layout", "placeholder", "other"],
+            },
+        },
+        "remedy": {"type": "string", "enum": ["none", "review"]},
+        "source_conflict_visible": {"type": "boolean", "enum": [False]},
+    },
 }
 
 
@@ -147,6 +190,17 @@ class InspectionRemedy(StrEnum):
     NONE = "none"
     REVIEW = "review"
     REPLACE_PHOTO = "replace_photo"
+
+
+class InspectionProblemKind(StrEnum):
+    """A typed visual problem used to enforce safe recovery in code."""
+
+    SOURCE_PHOTO_CONFLICT = "source_photo_conflict"
+    PHOTO_OUTPUT = "photo_output"
+    TEXT = "text"
+    LAYOUT = "layout"
+    PLACEHOLDER = "placeholder"
+    OTHER = "other"
 
 
 @dataclass(frozen=True, slots=True)
@@ -163,6 +217,9 @@ class Inspection:
     #: explicit, strict-schema REPLACE_PHOTO result may turn a failed render
     #: directly back into the photo-upload state.
     remedy: InspectionRemedy = InspectionRemedy.REVIEW
+    #: One typed category per problem. A missing or mixed category list can
+    #: never authorize replacing a human-supplied source.
+    problem_kinds: tuple[InspectionProblemKind, ...] = ()
     #: True only when the contradiction is independently visible in the first,
     #: human-supplied image. A detail found only in the rendered derivative is
     #: never evidence against the source upload.
@@ -177,6 +234,11 @@ class Inspection:
             and not self.looks_right
             and self.remedy is InspectionRemedy.REPLACE_PHOTO
             and self.source_conflict_visible
+            and bool(self.problems)
+            and len(self.problem_kinds) == len(self.problems)
+            and all(
+                kind is InspectionProblemKind.SOURCE_PHOTO_CONFLICT for kind in self.problem_kinds
+            )
         )
 
     @property
@@ -233,6 +295,7 @@ def parse(reply: str, *, has_reference_photo: bool = False) -> Inspection:
     looks_right = data.get("looks_right")
     confident = data.get("confident")
     raw_problems = data.get("problems")
+    raw_problem_kinds = data.get("problem_kinds")
     raw_remedy = data.get("remedy")
     source_conflict_visible = data.get("source_conflict_visible")
     if (
@@ -240,38 +303,54 @@ def parse(reply: str, *, has_reference_photo: bool = False) -> Inspection:
         or not isinstance(confident, bool)
         or not isinstance(raw_problems, list)
         or any(not isinstance(problem, str) for problem in raw_problems)
+        or not isinstance(raw_problem_kinds, list)
+        or any(not isinstance(kind, str) for kind in raw_problem_kinds)
+        or len(raw_problem_kinds) != len(raw_problems)
         or not isinstance(raw_remedy, str)
         or not isinstance(source_conflict_visible, bool)
     ):
         return Inspection(looks_right=False, confident=False, checked=False)
     try:
         remedy = InspectionRemedy(raw_remedy)
+        problem_kinds = tuple(InspectionProblemKind(kind) for kind in raw_problem_kinds)
     except ValueError:
         return Inspection(looks_right=False, confident=False, checked=False)
-    problems = [problem.strip() for problem in raw_problems if problem.strip()]
+    problems = [problem.strip() for problem in raw_problems]
+    if any(not problem for problem in problems):
+        return Inspection(looks_right=False, confident=False, checked=False)
     if looks_right and problems:
+        # Preserve a named defect, but an internally contradictory "pass" can
+        # never carry enough certainty to blame and replace the human source.
         looks_right = False
-        if remedy is InspectionRemedy.NONE:
-            remedy = InspectionRemedy.REVIEW
+        remedy = InspectionRemedy.REVIEW
+        source_conflict_visible = False
     if looks_right:
         if remedy is not InspectionRemedy.NONE or source_conflict_visible:
             return Inspection(looks_right=False, confident=False, checked=False)
-    elif remedy is InspectionRemedy.NONE:
+    elif remedy is InspectionRemedy.NONE or not problems:
         return Inspection(looks_right=False, confident=False, checked=False)
     if remedy is InspectionRemedy.REPLACE_PHOTO and (not confident or not problems):
         return Inspection(looks_right=False, confident=False, checked=False)
     if remedy is InspectionRemedy.REPLACE_PHOTO and (
-        not source_conflict_visible or not has_reference_photo
+        not source_conflict_visible
+        or not has_reference_photo
+        or any(kind is not InspectionProblemKind.SOURCE_PHOTO_CONFLICT for kind in problem_kinds)
     ):
         # Preserve the visible problem but refuse to blame the human source
         # unless the first image was present and independently proved it.
         remedy = InspectionRemedy.REVIEW
+        source_conflict_visible = False
+    elif remedy is not InspectionRemedy.REPLACE_PHOTO and source_conflict_visible:
+        # A source-evidence flag without the matching typed remedy is internally
+        # inconsistent. Preserve the visible problem as review, never as blame
+        # for the human upload.
         source_conflict_visible = False
     return Inspection(
         looks_right=looks_right,
         confident=confident,
         problems=problems,
         remedy=remedy,
+        problem_kinds=problem_kinds,
         source_conflict_visible=source_conflict_visible,
     )
 
@@ -300,6 +379,7 @@ def _inspect(
     api_key: str | None = None,
     model: str | None = None,
     reference_image_bytes: bytes = b"",
+    schema: dict[str, Any] | None = None,
 ) -> Inspection:
     """Run one strict, fail-closed visual inspection request."""
     key = api_key or ""
@@ -332,7 +412,7 @@ def _inspect(
             "format": {
                 "type": "json_schema",
                 "name": "flyer_inspection",
-                "schema": _SCHEMA,
+                "schema": schema or _SCHEMA,
                 "strict": True,
             }
         },
@@ -388,4 +468,10 @@ def inspect_template(
     model: str | None = None,
 ) -> Inspection:
     """Inspect a reusable source design without flagging its placeholders."""
-    return _inspect(image_bytes, TEMPLATE_PROMPT, api_key=api_key, model=model)
+    return _inspect(
+        image_bytes,
+        TEMPLATE_PROMPT,
+        api_key=api_key,
+        model=model,
+        schema=_TEMPLATE_SCHEMA,
+    )

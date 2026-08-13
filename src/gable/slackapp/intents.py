@@ -121,13 +121,13 @@ def _rebuild_shortcut(
     history: list[tuple[str, str]],
     context: str,
 ) -> Decision | None:
-    """Resolve source rechecks and explicit warning overrides deterministically."""
+    """Resolve source rechecks without exposing a layout-warning override."""
     folded = _fold_words(message)
     for greeting in ("hey gable ", "hi gable ", "hey ", "hi ", "gable "):
         if folded.startswith(greeting):
             folded = folded.removeprefix(greeting)
             break
-    if folded in {
+    generic_rebuilds = {
         "yes run again",
         "run again",
         "rerun this project",
@@ -135,20 +135,26 @@ def _rebuild_shortcut(
         "rerun this flyer",
         "can you rerun this flyer",
         "rebuild this flyer",
+    }
+    retired_overrides = {
+        "run anyway",
+        "use the current template as is",
+        "use current template as is",
+    }
+    if folded in generic_rebuilds | retired_overrides and _paused_status(context) == "needs_photo":
+        return _photo_wait_decision(context)
+    if folded in generic_rebuilds | {
         "i updated the template",
         "check the template again",
         "check the updated template",
     }:
         return _check_updated_decision()
-    if folded in {
-        "run anyway",
-        "use the current template as is",
-        "use current template as is",
-    }:
+    if folded in retired_overrides:
         return Decision(
-            reply="I will use the current design as it is.",
-            tool="rebuild_flyer",
-            arguments={"mode": "run_anyway"},
+            reply=(
+                "I do not bypass template safety checks. If you updated the source design, "
+                "tell me to check it again."
+            )
         )
 
     correction_words = {"adjusted", "changed", "fixed", "resized", "updated", "widened"}
@@ -213,11 +219,9 @@ def _paused_run_shortcut(message: str, context: str) -> Decision | None:
     """Keep photo-wait acknowledgements inside the persisted listing state."""
     if _paused_status(context) != "needs_photo":
         return None
-    if "This run has no hero photo yet." not in context:
-        return None
     folded = _fold_words(message)
     if folded in {"ye", "yes", "yeah", "yep", "ok", "okay", "done"}:
-        return Decision(reply="Send me the property image in this thread.")
+        return _photo_wait_decision(context)
     if (
         folded
         in {
@@ -237,3 +241,14 @@ def _paused_run_shortcut(message: str, context: str) -> Decision | None:
             )
         )
     return None
+
+
+def _photo_wait_decision(context: str) -> Decision:
+    """Restate the one image needed without rebuilding from a rejected source."""
+    has_rejected_photo = (
+        "A flyer exists in this thread." in context
+        and "A human-supplied hero photo is attached to this run." in context
+    )
+    if has_rejected_photo:
+        return Decision(reply="Send me the correct property image in this thread.")
+    return Decision(reply="Send me the property image in this thread.")

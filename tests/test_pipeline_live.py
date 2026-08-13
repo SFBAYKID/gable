@@ -22,6 +22,8 @@ class FakeSlides:
         include_target: bool = True,
         include_overlay: bool = False,
         include_headshot: bool = False,
+        include_image_headshot: bool = False,
+        include_element_above_headshot: bool = False,
         include_sold_headshot: bool = False,
     ) -> None:
         """Configure whether the batch succeeds and reports every request."""
@@ -30,6 +32,8 @@ class FakeSlides:
         self.include_target = include_target
         self.include_overlay = include_overlay
         self.include_headshot = include_headshot
+        self.include_image_headshot = include_image_headshot
+        self.include_element_above_headshot = include_element_above_headshot
         self.include_sold_headshot = include_sold_headshot
         self.operation = ""
         self.body: dict[str, Any] = {}
@@ -111,6 +115,49 @@ class FakeSlides:
                         },
                     }
                 )
+            if self.include_image_headshot:
+                elements.extend(
+                    [
+                        {
+                            "objectId": "current-agent-name",
+                            "size": {
+                                "width": {"magnitude": 2_200_000},
+                                "height": {"magnitude": 400_000},
+                            },
+                            "transform": {
+                                "scaleX": 1,
+                                "scaleY": 1,
+                                "translateX": 5_300_000,
+                                "translateY": 10_100_000,
+                            },
+                            "shape": {
+                                "shapeType": "TEXT_BOX",
+                                "text": {
+                                    "textElements": [{"textRun": {"content": "Mike Kulnich"}}]
+                                },
+                            },
+                        },
+                        {
+                            "objectId": "current-agent-phone",
+                            "size": {
+                                "width": {"magnitude": 1_800_000},
+                                "height": {"magnitude": 300_000},
+                            },
+                            "transform": {
+                                "scaleX": 1,
+                                "scaleY": 1,
+                                "translateX": 5_300_000,
+                                "translateY": 10_800_000,
+                            },
+                            "shape": {
+                                "shapeType": "TEXT_BOX",
+                                "text": {
+                                    "textElements": [{"textRun": {"content": "410.456.3564"}}]
+                                },
+                            },
+                        },
+                    ]
+                )
             if self.include_headshot:
                 elements.append(
                     {
@@ -122,10 +169,47 @@ class FakeSlides:
                         "transform": {
                             "scaleX": 1,
                             "scaleY": 1,
-                            "translateX": 8_000_000,
+                            "translateX": 5_500_000,
                             "translateY": 10_000_000,
                         },
                         "shape": {"shapeProperties": {"shapeBackgroundFill": {}}},
+                    }
+                )
+            if self.include_image_headshot:
+                elements.append(
+                    {
+                        "objectId": "sample-portrait-image",
+                        "size": {
+                            "width": {"magnitude": 1_500_000},
+                            "height": {"magnitude": 1_800_000},
+                        },
+                        "transform": {
+                            "scaleX": 1,
+                            "scaleY": 1,
+                            "translateX": 8_000_000,
+                            "translateY": 10_000_000,
+                        },
+                        "image": {"contentUrl": "https://slides.example/sample-agent.jpg"},
+                    }
+                )
+            if self.include_element_above_headshot:
+                elements.append(
+                    {
+                        "objectId": "footer-above-headshot",
+                        "size": {
+                            "width": {"magnitude": 2_000_000},
+                            "height": {"magnitude": 500_000},
+                        },
+                        "transform": {
+                            "scaleX": 1,
+                            "scaleY": 1,
+                            "translateX": 1_000_000,
+                            "translateY": 11_500_000,
+                        },
+                        "shape": {
+                            "shapeType": "TEXT_BOX",
+                            "text": {"textElements": [{"textRun": {"content": "footer"}}]},
+                        },
                     }
                 )
             if self.include_sold_headshot:
@@ -341,6 +425,44 @@ def test_headshot_is_fitted_once_to_its_measured_frame_before_placement() -> Non
     requests = slides.body["requests"]
     assert requests[0]["deleteObject"]["objectId"] == "headshot-frame"
     assert requests[1]["createImage"]["url"] == ("https://images.example/fitted-headshot.jpg")
+
+
+def test_an_existing_slides_portrait_image_is_replaced_in_place() -> None:
+    slides = FakeSlides(
+        include_image_headshot=True,
+        include_element_above_headshot=True,
+    )
+
+    assert place_headshot(
+        slides,
+        "deck-1",
+        "https://images.example/mike-headshot.jpg",
+        {"agent_name": "Mike Kulnich", "agent_phone": "410.456.3564"},
+        refit=lambda _url, _width, _height: "https://images.example/fitted-mike.jpg",
+    )
+
+    requests = slides.body["requests"]
+    assert requests[0]["deleteObject"]["objectId"] == "sample-portrait-image"
+    assert requests[1]["createImage"]["url"] == "https://images.example/fitted-mike.jpg"
+    assert requests[2]["updatePageElementsZOrder"] == {
+        "pageElementObjectIds": ["footer-above-headshot"],
+        "operation": "BRING_TO_FRONT",
+    }
+
+
+def test_headshot_placement_fails_closed_on_image_shape_ambiguity() -> None:
+    slides = FakeSlides(include_headshot=True, include_image_headshot=True)
+
+    assert (
+        place_headshot(
+            slides,
+            "deck-1",
+            "https://images.example/mike-headshot.jpg",
+            {"agent_name": "Mike Kulnich", "agent_phone": "410.456.3564"},
+        )
+        is False
+    )
+    assert slides.body == {}
 
 
 def test_sold_headshot_replacement_restores_every_layer_above_the_portrait() -> None:

@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
 from gable.db import store
 from gable.db.schema import apply_migrations, connect
-from gable.pipeline.template_triage import TemplateTriage
+from gable.pipeline.questions import ReconcileState, Reconciliation
+from gable.pipeline.template_triage import TemplateTriage, drain_template_notifications
 from gable.pipeline.vision import Inspection
 from gable.slides import fitting
 from gable.slides.library import TemplateFile
@@ -97,6 +99,49 @@ def test_first_scan_adopts_existing_files_without_flooding_slack(tmp_path: Path)
     connection.close()
 
 
+def test_transient_empty_first_read_waits_for_a_real_catalogue_before_adoption(
+    tmp_path: Path,
+) -> None:
+    """A missing-folder-shaped empty read cannot turn the catalogue into new files."""
+    connection = connect(tmp_path / "gable.db")
+    apply_migrations(connection)
+    files: list[TemplateFile] = []
+    inspections = 0
+    posts: list[str] = []
+
+    def inspect(_file_id: str) -> Inspection:
+        nonlocal inspections
+        inspections += 1
+        return Inspection(True, True)
+
+    def post(text: str, _thread: str | None) -> str:
+        posts.append(text)
+        return "unexpected"
+
+    triage = TemplateTriage(
+        connection,
+        lambda: list(files),
+        lambda _file_id: _presentation(),
+        post,
+        look_at=inspect,
+    )
+
+    assert triage.scan_new() == 0
+    assert not store.template_catalog_adopted(connection)
+    files.extend(
+        [
+            TemplateFile("established-one", "New Listing", "one"),
+            TemplateFile("established-two", "Sold", "one"),
+        ]
+    )
+    assert triage.scan_new() == 0
+    assert store.template_catalog_adopted(connection)
+    assert inspections == 0
+    assert posts == []
+    assert triage.scan_new() == 0
+    connection.close()
+
+
 def test_new_file_is_measured_and_owns_a_recheck_thread(tmp_path: Path) -> None:
     connection = connect(tmp_path / "gable.db")
     apply_migrations(connection)
@@ -110,7 +155,7 @@ def test_new_file_is_measured_and_owns_a_recheck_thread(tmp_path: Path) -> None:
         _say_into(said),
         look_at=lambda _file_id: Inspection(True, True),
     )
-    assert triage.scan_new() == 0
+    store.adopt_template_catalog(connection, [("baseline", "Baseline", "zero")])
 
     files.append(TemplateFile("new-1", "New Listing", "one"))
     presentations["new-1"] = _presentation(email_width=100)
@@ -142,7 +187,7 @@ def test_a_missing_source_revokes_its_prior_ready_audit(tmp_path: Path) -> None:
         lambda _text, thread: thread or "thread-one",
         look_at=lambda _file_id: Inspection(True, True),
     )
-    triage.scan_new()
+    store.adopt_template_catalog(connection, [("baseline", "Baseline", "zero")])
     files.append(TemplateFile("new-1", "New Listing", "one"))
     assert triage.scan_new() == 1
     ready = store.template_audit(connection, "new-1")
@@ -180,7 +225,7 @@ def test_a_certified_template_is_rechecked_when_its_drive_revision_changes(
         _say_into(said),
         look_at=look,
     )
-    triage.scan_new()
+    store.adopt_template_catalog(connection, [("baseline", "Baseline", "zero")])
     files.append(TemplateFile("new-1", "New Listing", "revision-one"))
     presentations["new-1"] = _presentation(email_width=700)
     assert triage.scan_new() == 1
@@ -213,7 +258,7 @@ def test_duplicate_new_template_names_are_rejected_without_guessing(tmp_path: Pa
         _say_into(said),
         look_at=lambda _file_id: Inspection(True, True),
     )
-    triage.scan_new()
+    store.adopt_template_catalog(connection, [("baseline", "Baseline", "zero")])
     files.extend(
         [
             TemplateFile("one", "New Listing", "one"),
@@ -248,7 +293,7 @@ def test_a_new_powerpoint_is_named_as_unsupported_instead_of_ignored(tmp_path: P
         lambda _file_id: _presentation(),
         _say_into(said),
     )
-    triage.scan_new()
+    store.adopt_template_catalog(connection, [("baseline", "Baseline", "zero")])
     files.append(
         TemplateFile(
             "pptx-1",
@@ -276,7 +321,7 @@ def test_visual_uncertainty_blocks_template_certification(tmp_path: Path) -> Non
         _say_into(said),
         look_at=lambda _file_id: Inspection(False, False, checked=False),
     )
-    triage.scan_new()
+    store.adopt_template_catalog(connection, [("baseline", "Baseline", "zero")])
     files.append(TemplateFile("new-1", "New Listing", "one"))
 
     assert triage.scan_new() == 1
@@ -297,7 +342,7 @@ def test_missing_visual_provider_fails_closed_instead_of_certifying(tmp_path: Pa
         lambda _file_id: _presentation(),
         _say_into(said),
     )
-    triage.scan_new()
+    store.adopt_template_catalog(connection, [("baseline", "Baseline", "zero")])
     files.append(TemplateFile("new-1", "New Listing", "one"))
 
     assert triage.scan_new() == 1
@@ -323,7 +368,7 @@ def test_recheck_names_the_visual_stage_and_reports_a_visible_defect(tmp_path: P
             ["The contact details overlap the divider line."],
         ),
     )
-    triage.scan_new()
+    store.adopt_template_catalog(connection, [("baseline", "Baseline", "zero")])
     files.append(TemplateFile("new-1", "New Listing", "one"))
     triage.scan_new()
     stages: list[str] = []
@@ -362,17 +407,21 @@ def test_a_failed_slack_post_retries_the_stored_verdict_without_reinspection(
         say,
         look_at=look,
     )
-    triage.scan_new()
+    store.adopt_template_catalog(connection, [("baseline", "Baseline", "zero")])
     files.append(TemplateFile("new-1", "New Listing", "one"))
 
     assert triage.scan_new() == 1
     first = store.template_audit(connection, "new-1")
     assert first is not None and first.slack_thread_ts == ""
+    triage.reconcile = lambda *_args: Reconciliation(
+        ReconcileState.FOUND,
+        "thread-retry",
+    )
     assert triage.scan_new() == 0
     retried = store.template_audit(connection, "new-1")
     assert retried is not None and retried.slack_thread_ts == "thread-retry"
     assert visual_calls == 1
-    assert posts == 2
+    assert posts == 1
     connection.close()
 
 
@@ -404,7 +453,7 @@ def test_a_changed_template_retries_a_failed_thread_notice_without_reinspection(
         say,
         look_at=look,
     )
-    triage.scan_new()
+    store.adopt_template_catalog(connection, [("baseline", "Baseline", "zero")])
     files.append(TemplateFile("new-1", "New Listing", "one"))
     assert triage.scan_new() == 1
 
@@ -413,10 +462,80 @@ def test_a_changed_template_retries_a_failed_thread_notice_without_reinspection(
     waiting = store.template_audit(connection, "new-1")
     assert waiting is not None and waiting.notification_pending
 
+    triage.reconcile = lambda *_args: Reconciliation(
+        ReconcileState.FOUND,
+        "thread-update",
+    )
     assert triage.scan_new() == 0
     delivered = store.template_audit(connection, "new-1")
     assert delivered is not None and not delivered.notification_pending
     assert delivered.slack_thread_ts == "thread-one"
     assert visual_calls == 2
-    assert posts == 3
+    assert posts == 2
+    connection.close()
+
+
+def test_template_notice_retries_once_after_history_proves_the_failed_write_absent(
+    tmp_path: Path,
+) -> None:
+    """A definite outage recovers after grace without repeating paid inspection."""
+    connection = connect(tmp_path / "gable.db")
+    apply_migrations(connection)
+    store.adopt_template_catalog(connection, [("baseline", "Baseline", "zero")])
+    files = [TemplateFile("new-1", "New Listing", "one")]
+    inspections = 0
+    posts: list[str] = []
+    history_calls = 0
+
+    def inspect(_file_id: str) -> Inspection:
+        nonlocal inspections
+        inspections += 1
+        return Inspection(True, True)
+
+    def post_once(_text: str, _thread: str | None, client_id: str) -> str:
+        posts.append(client_id)
+        if len(posts) == 1:
+            raise ConnectionError("definite test outage")
+        return "template-confirmed"
+
+    def initial_history(*_args: object) -> Reconciliation:
+        nonlocal history_calls
+        history_calls += 1
+        return Reconciliation(
+            ReconcileState.ABSENT if history_calls == 1 else ReconcileState.UNKNOWN
+        )
+
+    triage = TemplateTriage(
+        connection,
+        lambda: list(files),
+        lambda _file_id: _presentation(),
+        lambda _text, _thread: "unused",
+        post_once=post_once,
+        reconcile=initial_history,
+        look_at=inspect,
+    )
+    assert triage.scan_new() == 1
+    pending = store.template_audit(connection, "new-1")
+    assert pending is not None and pending.notification_attempt_count == 1
+    old = (datetime.now(UTC) - timedelta(minutes=2)).isoformat()
+    connection.execute(
+        "UPDATE template_audits SET notification_attempted_at = ? WHERE file_id = ?",
+        (old, "new-1"),
+    )
+
+    assert (
+        drain_template_notifications(
+            connection,
+            lambda _text, _thread: "unused",
+            post_once,
+            lambda *_args: Reconciliation(ReconcileState.ABSENT),
+        )
+        == 1
+    )
+    delivered = store.template_audit(connection, "new-1")
+    assert delivered is not None and not delivered.notification_pending
+    assert delivered.notification_attempt_count == 2
+    assert delivered.slack_thread_ts == "template-confirmed"
+    assert len(posts) == 2 and posts[0] == posts[1]
+    assert inspections == 1
     connection.close()

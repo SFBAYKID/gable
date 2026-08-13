@@ -12,9 +12,11 @@ worse than a blank:
 
 1. **Nothing is accepted without a source.** Every fact carries the URL it came
    from, and a fact with no source is discarded rather than used.
-2. **Facts are cached by address.** The same property comes back as a listing,
-   an open house and then a sale; paying to research it three times is waste,
-   and the cache is what makes the common case free.
+2. **The result must prove the property identity locally.** The exact street,
+   city and ZIP must surround the values being extracted. A plausible number
+   elsewhere on a search page is not evidence about this listing. Historical
+   cached rows remain audit evidence but are not trusted by the current build
+   path because they predate that identity proof.
 
 Uses Firecrawl's search, which returns page content rather than just links, so
 one call usually settles it.
@@ -25,8 +27,9 @@ from __future__ import annotations
 import json
 import re
 import urllib.error
+import urllib.parse
 import urllib.request
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from sqlite3 import Connection
 from typing import Any, Final
@@ -51,7 +54,12 @@ _BATHS: Final[re.Pattern[str]] = re.compile(
 _SQFT: Final[re.Pattern[str]] = re.compile(
     r"([\d,]{3,7})\s*(?:sq\.?\s*ft|square\s*feet|sqft)", re.IGNORECASE
 )
-_PRICE: Final[re.Pattern[str]] = re.compile(r"\$\s?([\d,]{5,12})")
+_PRICE: Final[re.Pattern[str]] = re.compile(
+    r"(?:\b(?:list(?:ing)?|asking|sale)\s+price\b|\bprice\b|"
+    r"\blisted\s+(?:for|at)\b)\s*(?:is|of|:|-)?\s*\$\s?([\d,]{5,12})"
+    r"|\$\s?([\d,]{5,12})\s*(?:\b(?:list(?:ing)?|asking|sale)\s+price\b)",
+    re.IGNORECASE,
+)
 _SEARCH_TERMS: Final[dict[str, str]] = {
     "beds": "bedrooms",
     "baths": "bathrooms",
@@ -70,6 +78,10 @@ class Facts:
     list_price: str = ""
     source_url: str = ""
     confidence: float = 0.0
+    #: True only when the current lookup found the requested street, city and
+    #: ZIP in the same result that supplied these values.  Historical cache rows
+    #: predate this proof and are deliberately not promoted to trusted evidence.
+    identity_verified: bool = False
     #: Anything that looked wrong, for Gable to mention rather than hide.
     caveats: list[str] = field(default_factory=list)
 
@@ -146,7 +158,7 @@ def extract(text: str, source_url: str = "") -> Facts:
     beds = beds_match.group(1) if beds_match else ""
     baths = baths_match.group(1) if baths_match else ""
     sqft = sqft_match.group(1) if sqft_match else ""
-    price = f"${price_match.group(1)}" if price_match else ""
+    price = f"${next(group for group in price_match.groups() if group)}" if price_match else ""
 
     caveats = _plausible(beds, baths, sqft)
     found = sum(1 for value in (beds, baths, sqft, price) if value)
@@ -165,7 +177,88 @@ def extract(text: str, source_url: str = "") -> Facts:
     )
 
 
-def _search(query: str, api_key: str, limit: int = 4) -> list[dict[str, Any]]:
+def _source_url_is_usable(source_url: str) -> bool:
+    """Return whether a fact source is one explicit web page."""
+    parsed = urllib.parse.urlparse(source_url.strip())
+    return parsed.scheme in {"http", "https"} and bool(parsed.hostname)
+
+
+def has_authoritative_source(facts: Facts) -> bool:
+    """Return whether a current lookup proved both provenance and property identity."""
+    return bool(
+        not facts.is_empty and facts.identity_verified and _source_url_is_usable(facts.source_url)
+    )
+
+
+def _identity_text(value: str) -> str:
+    """Fold punctuation while preserving address word order for exact matching."""
+    decoded = urllib.parse.unquote(value).casefold()
+    return " ".join(
+        "".join(character if character.isalnum() else " " for character in decoded).split()
+    )
+
+
+def _phrase_pattern(value: str) -> re.Pattern[str] | None:
+    """Compile a punctuation-tolerant phrase with exact token boundaries."""
+    tokens = _identity_text(value).split()
+    if not tokens:
+        return None
+    body = r"[\W_]+".join(re.escape(token) for token in tokens)
+    return re.compile(rf"(?<!\w){body}(?!\w)", re.IGNORECASE)
+
+
+_OTHER_STREET_ADDRESS: Final[re.Pattern[str]] = re.compile(
+    r"(?<!\w)\d{1,7}\s+[\w.'-]+(?:\s+[\w.'-]+){0,8}\s+"
+    r"(?:st(?:reet)?|ave(?:nue)?|rd|road|dr(?:ive)?|ln|lane|way|"
+    r"blvd|boulevard|ct|court|pl|place|ter(?:race)?|cir(?:cle)?|"
+    r"pkwy|parkway|hwy|highway|trl|trail)\b",
+    re.IGNORECASE,
+)
+_PROPERTY_WINDOW: Final[int] = 1_500
+
+
+def _property_sections(address: str, result: Mapping[str, Any]) -> tuple[str, ...]:
+    """Return bounded page sections that prove the exact requested property.
+
+    Plausible bed, bath and price strings are not identity evidence.  The result
+    section supplying them must repeat the requested street, city and ZIP.
+    Starting at the exact street occurrence prevents a different listing above
+    it from donating the first plausible number, while the next address and a
+    hard window prevent an unrelated recommendation below it from doing so.
+    """
+    parts = [part.strip() for part in address.split(",") if part.strip()]
+    if len(parts) < 3:
+        return ()
+    street = _phrase_pattern(parts[0])
+    city = _phrase_pattern(parts[-2])
+    zip_match = re.search(r"\b\d{5}(?:-\d{4})?\b", address)
+    if street is None or city is None or zip_match is None:
+        return ()
+    unit: re.Pattern[str] | None = None
+    for part in parts[1:-2]:
+        folded = _identity_text(part)
+        if re.match(r"^(?:unit|apt|apartment|suite|ste)\b", folded):
+            unit = _phrase_pattern(part)
+            break
+    zip_pattern = re.compile(rf"(?<!\d){re.escape(zip_match.group(0))}(?!\d)")
+    sections: list[str] = []
+    for name in ("title", "description", "markdown"):
+        raw = str(result.get(name) or "")
+        for match in street.finditer(raw):
+            end = min(len(raw), match.start() + _PROPERTY_WINDOW)
+            next_address = _OTHER_STREET_ADDRESS.search(raw, match.end())
+            if next_address is not None:
+                end = min(end, next_address.start())
+            section = raw[match.start() : end]
+            if not city.search(section) or not zip_pattern.search(section):
+                continue
+            if unit is not None and not unit.search(section):
+                continue
+            sections.append(section)
+    return tuple(sections)
+
+
+def _search(query: str, api_key: str, limit: int = 4) -> list[Any]:
     """One Firecrawl search.
 
     Args:
@@ -212,6 +305,7 @@ def only_required(facts: Facts, required: frozenset[str]) -> Facts:
         list_price=list_price,
         source_url=facts.source_url,
         confidence=round(confidence, 2),
+        identity_verified=facts.identity_verified,
         caveats=caveats,
     )
 
@@ -251,14 +345,30 @@ def look_up(
 
     best = Facts()
     for result in results:
+        if not isinstance(result, Mapping):
+            continue
         url = str(result.get("url", ""))
-        if any(blocked in url.lower() for blocked in BLOCKED_SOURCES):
+        if not _source_url_is_usable(url) or any(
+            blocked in (urllib.parse.urlparse(url).hostname or "").lower()
+            for blocked in BLOCKED_SOURCES
+        ):
             # Their terms forbid it, and a flyer built on a violation is not
             # worth the numbers.
             continue
-        found = only_required(extract(str(result.get("markdown", "")), url), required)
-        if found.confidence > best.confidence:
-            best = found
+        for section in _property_sections(address, result):
+            found = only_required(extract(section, url), required)
+            found = Facts(
+                beds=found.beds,
+                baths=found.baths,
+                square_feet=found.square_feet,
+                list_price=found.list_price,
+                source_url=found.source_url,
+                confidence=found.confidence,
+                identity_verified=True,
+                caveats=found.caveats,
+            )
+            if found.confidence > best.confidence:
+                best = found
     return best
 
 

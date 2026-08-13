@@ -10,7 +10,7 @@ import pytest
 from gable.agents.website import OfficialProfile, ProfileLookup
 from gable.db import store
 from gable.db.schema import apply_migrations, connect
-from gable.pipeline.vision import Inspection, InspectionRemedy
+from gable.pipeline.vision import Inspection, InspectionProblemKind, InspectionRemedy
 from gable.voice import is_clean
 from tests.runner_support import Recorder
 from tests.runner_support import record as _record
@@ -71,20 +71,24 @@ def test_an_unconfirmed_delivery_message_never_leaves_a_delivered_run(
     result = runner.run(submission)
 
     current = store.run_by_id(db, result.run_id)
-    assert result.status == "failed"
+    assert result.status == "building"
     assert current is not None
-    assert current.status == "failed"
+    assert current.status == "building"
     assert current.output_url.endswith("/edit")
+    pending = store.pending_run_questions(db)
+    assert len(pending) == 1
+    assert pending[0].notification_kind == "outcome"
+    assert pending[0].target_status == "delivered"
     assert not db.execute(
         "SELECT 1 FROM run_events WHERE run_id = ? AND status = 'delivered'",
         (result.run_id,),
     ).fetchone()
 
 
-def test_a_slack_delivery_outage_is_recorded_without_escaping_the_runner(
+def test_a_slack_delivery_outage_keeps_the_verified_link_retryable(
     db: sqlite3.Connection,
 ) -> None:
-    """Slack can fail both the link and failure notice without falsifying state."""
+    """Slack cannot turn a verified flyer into terminal failed work."""
     submission = _submission(rid="rid-delivery-slack-down")
     _record(db, submission)
     runner = _runner(db, Recorder())
@@ -96,8 +100,10 @@ def test_a_slack_delivery_outage_is_recorded_without_escaping_the_runner(
     result = runner.run(submission)
 
     current = store.run_by_id(db, result.run_id)
-    assert result.status == "failed"
-    assert current is not None and current.status == "failed"
+    assert result.status == "building"
+    assert current is not None and current.status == "building"
+    assert current.output_url.endswith("/edit")
+    assert len(store.pending_run_questions(db)) == 1
     assert not db.execute(
         "SELECT 1 FROM run_events WHERE run_id = ? AND status = 'delivered'",
         (result.run_id,),
@@ -327,6 +333,7 @@ def test_mike_wrong_property_photo_requests_one_replacement_on_the_same_run(
         confident=True,
         problems=["The flyer says 703, but the house number in the photo says 721."],
         remedy=InspectionRemedy.REPLACE_PHOTO,
+        problem_kinds=(InspectionProblemKind.SOURCE_PHOTO_CONFLICT,),
         source_conflict_visible=True,
     )
 
@@ -338,10 +345,7 @@ def test_mike_wrong_property_photo_requests_one_replacement_on_the_same_run(
     assert current.status == "needs_photo"
     assert current.output_file_id == "out-1", "retain the rejected copy for audit"
     assert current.output_url.endswith("/edit")
-    assert current.failure_reason == (
-        "waiting for the correct property image because the supplied photo conflicts "
-        "with the listing"
-    )
+    assert current.failure_reason == store.PHOTO_REPLACEMENT_WAITING
     assert store.run_attempt_count(db, submission.response_row_id) == 1
     assert len(result.said) == len(rec.said) == 1
     assert result.questions == ["Can you send the correct property image?"]
@@ -351,6 +355,13 @@ def test_mike_wrong_property_photo_requests_one_replacement_on_the_same_run(
     assert is_clean(rec.said[0])
     assert "Open the flyer" not in rec.said[0]
     assert current.output_url not in rec.said[0]
+    confirmation_events = db.execute(
+        "SELECT detail FROM run_events WHERE run_id = ? AND status = 'needs_photo' ORDER BY id",
+        (result.run_id,),
+    ).fetchall()
+    assert [str(event["detail"]) for event in confirmation_events] == [
+        "replacement property photo request confirmed in Slack at 1786.0"
+    ]
 
 
 def test_a_conflict_visible_only_in_the_render_stays_needs_review(
@@ -366,6 +377,7 @@ def test_a_conflict_visible_only_in_the_render_stays_needs_review(
         confident=True,
         problems=["The render shows 721, but the number is unreadable in the source image."],
         remedy=InspectionRemedy.REPLACE_PHOTO,
+        problem_kinds=(InspectionProblemKind.PHOTO_OUTPUT,),
         source_conflict_visible=False,
     )
 
@@ -376,4 +388,106 @@ def test_a_conflict_visible_only_in_the_render_stays_needs_review(
     assert result.status == current.status == "needs_review"
     assert result.questions == []
     assert "correct property image" not in rec.said[0]
-    assert current.failure_reason == ""
+    assert current.failure_reason == (
+        "The render shows 721, but the number is unreadable in the source image."
+    )
+
+
+def test_an_unconfirmed_replacement_request_remains_durable_review(
+    db: sqlite3.Connection,
+) -> None:
+    """A blank Slack timestamp cannot claim that a person was asked for a photo."""
+    submission = _submission(rid="rid-unconfirmed-photo-request")
+    _record(db, submission)
+    rec = Recorder()
+    runner = _runner(db, rec)
+    runner.look_at = lambda _run_id, _image: Inspection(
+        looks_right=False,
+        confident=True,
+        problems=["The source house number says 721."],
+        remedy=InspectionRemedy.REPLACE_PHOTO,
+        problem_kinds=(InspectionProblemKind.SOURCE_PHOTO_CONFLICT,),
+        source_conflict_visible=True,
+    )
+    attempted: list[str] = []
+
+    def unconfirmed(message: str, _thread: str | None) -> str:
+        attempted.append(message)
+        return ""
+
+    runner.say = unconfirmed
+
+    result = runner.run(submission)
+
+    current = store.run_by_id(db, result.run_id)
+    assert current is not None
+    assert result.status == current.status == "needs_review"
+    assert current.failure_reason == store.QUESTION_NOTIFICATION_PENDING
+    assert current.output_file_id == "out-1"
+    assert current.output_url.endswith("/edit")
+    assert result.said == []
+    assert result.questions == []
+    assert len(attempted) == 1
+    assert "correct property image" in attempted[0]
+    assert not db.execute(
+        "SELECT 1 FROM run_events WHERE run_id = ? AND status = 'needs_photo'",
+        (result.run_id,),
+    ).fetchone()
+
+
+def test_mixed_visual_problems_stay_review_even_with_a_replace_remedy(
+    db: sqlite3.Connection,
+) -> None:
+    """Typed non-photo evidence prevents a source replacement conversation."""
+    submission = _submission(rid="rid-mixed-visual-problems")
+    _record(db, submission)
+    rec = Recorder()
+    runner = _runner(db, rec)
+    runner.look_at = lambda _run_id, _image: Inspection(
+        looks_right=False,
+        confident=True,
+        problems=["The source number says 721.", "The address overlaps the divider."],
+        remedy=InspectionRemedy.REPLACE_PHOTO,
+        problem_kinds=(
+            InspectionProblemKind.SOURCE_PHOTO_CONFLICT,
+            InspectionProblemKind.LAYOUT,
+        ),
+        source_conflict_visible=True,
+    )
+
+    result = runner.run(submission)
+
+    current = store.run_by_id(db, result.run_id)
+    assert current is not None
+    assert result.status == current.status == "needs_review"
+    assert result.questions == []
+    assert "correct property image" not in rec.said[0]
+    assert current.failure_reason == (
+        "The source number says 721.; The address overlaps the divider."
+    )
+
+
+def test_replacement_question_survives_an_overlong_visual_finding(
+    db: sqlite3.Connection,
+) -> None:
+    """The complete action stays below Slack's ceiling after a runaway sentence."""
+    submission = _submission(rid="rid-long-photo-finding")
+    _record(db, submission)
+    rec = Recorder()
+    runner = _runner(db, rec)
+    runner.look_at = lambda _run_id, _image: Inspection(
+        looks_right=False,
+        confident=True,
+        problems=["The source proves a mismatch because " + ("detail " * 150)],
+        remedy=InspectionRemedy.REPLACE_PHOTO,
+        problem_kinds=(InspectionProblemKind.SOURCE_PHOTO_CONFLICT,),
+        source_conflict_visible=True,
+    )
+
+    result = runner.run(submission)
+
+    assert result.status == "needs_photo"
+    assert len(rec.said) == 1
+    assert "Can you send the correct property image?" in rec.said[0]
+    assert len(rec.said[0]) <= 600
+    assert is_clean(rec.said[0])

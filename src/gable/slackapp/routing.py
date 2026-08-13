@@ -96,11 +96,19 @@ class EventReplayGuard:
 class ThreadOwnership:
     """Resolve and cache which Slack thread roots belong to Gable."""
 
-    def __init__(self, max_entries: int = DEFAULT_CACHE_SIZE) -> None:
+    def __init__(
+        self,
+        max_entries: int = DEFAULT_CACHE_SIZE,
+        *,
+        allowed_user_ids: frozenset[str] = frozenset(),
+    ) -> None:
         """Create a bounded, process-local ownership cache.
 
         Args:
             max_entries: Maximum resolved channel/thread pairs retained.
+            allowed_user_ids: Stable IDs allowed to create a human-authored
+                Gable conversation. Empty is reserved for isolated tests; the
+                production runtime always supplies Carmen and Chase.
 
         Raises:
             ValueError: If ``max_entries`` is not positive.
@@ -109,6 +117,7 @@ class ThreadOwnership:
             msg = "thread ownership cache size must be positive"
             raise ValueError(msg)
         self._max_entries = max_entries
+        self._allowed_user_ids = allowed_user_ids
         self._cache: OrderedDict[tuple[str, str], bool] = OrderedDict()
         self._lock = threading.Lock()
 
@@ -194,7 +203,12 @@ class ThreadOwnership:
             root = messages[0]
             if not isinstance(root, dict):
                 return False
-            owned = self._root_belongs_to_gable(root, bot_user_id=bot_user_id, bot_id=bot_id)
+            owned = self._root_belongs_to_gable(
+                root,
+                bot_user_id=bot_user_id,
+                bot_id=bot_id,
+                allowed_user_ids=self._allowed_user_ids,
+            )
             self._remember(key, owned)
             return owned
         except Exception:
@@ -207,13 +221,27 @@ class ThreadOwnership:
         *,
         bot_user_id: str,
         bot_id: str,
+        allowed_user_ids: frozenset[str],
     ) -> bool:
-        """Recognize a Gable-authored root or a human root that called Gable."""
-        if bot_user_id and str(root.get("user") or "") == bot_user_id:
+        """Recognize a Gable root or an allowed human root that called Gable."""
+        root_user_id = str(root.get("user") or "")
+        root_bot_id = str(root.get("bot_id") or "")
+        if bot_id and root_bot_id == bot_id:
             return True
-        if bot_id and str(root.get("bot_id") or "") == bot_id:
+        if (
+            bot_user_id
+            and root_user_id == bot_user_id
+            and (not root_bot_id or root_bot_id == bot_id)
+        ):
             return True
         if not bot_user_id:
+            return False
+        # Another app may explicitly mention Gable in its own root. That mention
+        # authorizes only the one direct response handled by ``app_mention``; it
+        # must never transfer the thread to Gable for later unmentioned replies.
+        if root_bot_id or root.get("app_id") or root.get("subtype") == "bot_message":
+            return False
+        if not root_user_id or (allowed_user_ids and root_user_id not in allowed_user_ids):
             return False
         mention = re.compile(rf"<@{re.escape(bot_user_id)}(?:\|[^>]*)?>")
         return mention.search(str(root.get("text") or "")) is not None

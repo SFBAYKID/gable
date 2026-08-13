@@ -15,6 +15,7 @@ network. This module does not upload or decide *which* photo to use.
 from __future__ import annotations
 
 import io
+import threading
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import Final
@@ -40,11 +41,77 @@ OUTPUT_QUALITY: Final[int] = 88
 # decoded RGB frame comfortably inside the 1 GB production process.
 MAX_SOURCE_PIXELS: Final[int] = 50_000_000
 
+# Slides accepts inserted images only through 25 megapixels. The edge cap also
+# prevents an absurdly long image allocating an unsafe intermediate frame.
+MAX_OUTPUT_PIXELS: Final[int] = 25_000_000
+MAX_TARGET_EDGE_PX: Final[int] = 8_000
+EXIF_ORIENTATION_TAG: Final[int] = 274
+EXIF_SWAPS_AXES: Final[frozenset[int]] = frozenset({5, 6, 7, 8})
+
 # Background detail is deliberately suppressed: it exists only to fill the
 # frame behind the untouched-composition foreground, never to look like a
 # second sharp copy of the property.
 SMALL_SOURCE_BLUR_RADIUS: Final[float] = 18.0
 SMALL_SOURCE_BACKGROUND_BRIGHTNESS: Final[float] = 0.55
+
+# JPEG has no transparency. A white matte is neutral for flyer artwork and,
+# unlike ``convert("RGB")``, does not expose RGB values hidden behind an alpha
+# value of zero. Those hidden values are not pixels the person could see in the
+# supplied upload and therefore must not appear in the flyer.
+ALPHA_MATTE_RGB: Final[tuple[int, int, int]] = (255, 255, 255)
+
+# Bolt can run uploads from different listing threads concurrently. One legal
+# 50 MP decode has a material memory peak on the 1 GB production process, and a
+# large target needs several full-frame Pillow intermediates. Serialize those
+# in-memory operations; network, publishing, and Slides work remain concurrent.
+_IMAGE_PROCESSING_LOCK: Final[threading.Lock] = threading.Lock()
+
+
+def _validate_target_dimensions(width: int, height: int) -> None:
+    """Refuse a frame that exceeds the process or Google Slides image limits."""
+    if width <= 0 or height <= 0:
+        msg = f"target must be positive, got {width}x{height}"
+        raise ValueError(msg)
+    if width > MAX_TARGET_EDGE_PX or height > MAX_TARGET_EDGE_PX:
+        msg = f"target edge exceeds the safe {MAX_TARGET_EDGE_PX}-pixel limit"
+        raise ValueError(msg)
+    if width * height > MAX_OUTPUT_PIXELS:
+        msg = f"target exceeds the safe {MAX_OUTPUT_PIXELS}-pixel output limit"
+        raise ValueError(msg)
+
+
+def _validate_max_edge(max_edge_px: int) -> None:
+    """Refuse an upload-normalization edge that can exceed safe memory."""
+    if max_edge_px <= 0:
+        msg = f"max edge must be positive, got {max_edge_px}"
+        raise ValueError(msg)
+    if max_edge_px > MAX_TARGET_EDGE_PX:
+        msg = f"max edge exceeds the safe {MAX_TARGET_EDGE_PX}-pixel limit"
+        raise ValueError(msg)
+
+
+def _flatten_visible_pixels(image: Image.Image) -> Image.Image:
+    """Return RGB pixels composited over white when the source has transparency.
+
+    Pillow's direct RGBA-to-RGB conversion discards alpha. A fully transparent
+    red pixel consequently becomes opaque red, inventing visible content from
+    data that was hidden in the upload. Explicit alpha compositing preserves
+    only the source's visible contribution and supplies a deterministic matte
+    for the JPEG output format.
+    """
+    # ``PA`` and Pillow's premultiplied ``RGBa``/``La`` modes also carry an
+    # alpha band, so checking only the familiar RGBA and LA spellings is not
+    # enough. Palette PNGs may instead describe alpha through ``info``.
+    has_alpha = any(band.lower() == "a" for band in image.getbands()) or (
+        "transparency" in image.info
+    )
+    if not has_alpha:
+        return image if image.mode == "RGB" else image.convert("RGB")
+
+    rgba = image if image.mode == "RGBA" else image.convert("RGBA")
+    flattened = Image.new("RGB", rgba.size, ALPHA_MATTE_RGB)
+    flattened.paste(rgba, mask=rgba.getchannel("A"))
+    return flattened
 
 
 class FitAction(StrEnum):
@@ -113,15 +180,11 @@ def assess(
             corrupt image or a bad frame, and guessing past it would put a
             stretched photo on a flyer.
     """
-    for name, value in (
-        ("source_width", source_width),
-        ("source_height", source_height),
-        ("target_width", target_width),
-        ("target_height", target_height),
-    ):
+    for name, value in (("source_width", source_width), ("source_height", source_height)):
         if value <= 0:
             msg = f"{name} must be positive, got {value}"
             raise ValueError(msg)
+    _validate_target_dimensions(target_width, target_height)
 
     source_aspect = source_width / source_height
     target_aspect = target_width / target_height
@@ -211,10 +274,18 @@ def fit_locally(
             an unreadable upload is worth a specific message to Carmen, not a
             silent fallback to a stretched image.
     """
-    if target_width <= 0 or target_height <= 0:
-        msg = f"target must be positive, got {target_width}x{target_height}"
-        raise ValueError(msg)
+    _validate_target_dimensions(target_width, target_height)
+    with _IMAGE_PROCESSING_LOCK:
+        return _fit_locally_unlocked(image_bytes, target_width, target_height, quality)
 
+
+def _fit_locally_unlocked(
+    image_bytes: bytes,
+    target_width: int,
+    target_height: int,
+    quality: int,
+) -> bytes:
+    """Perform a validated cover fit while the caller holds the memory guard."""
     with Image.open(io.BytesIO(image_bytes)) as opened:
         if opened.width * opened.height > MAX_SOURCE_PIXELS:
             msg = "the source image dimensions exceed the safe processing limit"
@@ -224,9 +295,9 @@ def fit_locally(
         # the wrong axis: a 4000x3000-stored portrait shot would be trimmed 40%
         # off its sides instead of 6% off top and bottom, and ship sideways.
         upright = ImageOps.exif_transpose(opened)
-        # Flyers are JPEG; a palette or alpha image must be flattened first or
-        # Pillow refuses to save, and transparency would show as black anyway.
-        im: Image.Image = upright.convert("RGB")
+        # Flyers are JPEG; alpha must be composited rather than discarded or
+        # invisible RGB values become visible property detail.
+        im = _flatten_visible_pixels(upright)
 
         source_aspect = im.width / im.height
         target_aspect = target_width / target_height
@@ -277,15 +348,23 @@ def fit_small_source(
             exceeds the safe pixel limit.
         OSError: if Pillow cannot read ``image_bytes``.
     """
-    if target_width <= 0 or target_height <= 0:
-        msg = f"target must be positive, got {target_width}x{target_height}"
-        raise ValueError(msg)
+    _validate_target_dimensions(target_width, target_height)
+    with _IMAGE_PROCESSING_LOCK:
+        return _fit_small_source_unlocked(image_bytes, target_width, target_height, quality)
 
+
+def _fit_small_source_unlocked(
+    image_bytes: bytes,
+    target_width: int,
+    target_height: int,
+    quality: int,
+) -> bytes:
+    """Perform a validated contained fit while the caller holds the memory guard."""
     with Image.open(io.BytesIO(image_bytes)) as opened:
         if opened.width * opened.height > MAX_SOURCE_PIXELS:
             msg = "the source image dimensions exceed the safe processing limit"
             raise ValueError(msg)
-        source = ImageOps.exif_transpose(opened).convert("RGB")
+        source = _flatten_visible_pixels(ImageOps.exif_transpose(opened))
 
         background = ImageOps.fit(
             source,
@@ -315,6 +394,30 @@ def fit_small_source(
         return out.getvalue()
 
 
+def _normalise_for_fitting_unlocked(
+    image_bytes: bytes,
+    max_edge_px: int,
+    quality: int,
+) -> bytes:
+    """Perform the memory-heavy Pillow normalization under the caller's guard."""
+    with Image.open(io.BytesIO(image_bytes)) as opened:
+        if opened.width * opened.height > MAX_SOURCE_PIXELS:
+            msg = "the source image dimensions exceed the safe processing limit"
+            raise ValueError(msg)
+        # Downsample before creating the oriented and RGB copies. For large
+        # JPEGs Pillow can use decoder draft mode here; transposing/converting
+        # first held several full decoded frames at once and a legal 50 MP
+        # upload peaked near the 1 GB production memory limit. Rotation and
+        # proportional resizing commute, and the longest edge is unchanged by
+        # EXIF orientation.
+        if max(opened.size) > max_edge_px:
+            opened.thumbnail((max_edge_px, max_edge_px), Image.Resampling.LANCZOS)
+        upright = _flatten_visible_pixels(ImageOps.exif_transpose(opened))
+        out = io.BytesIO()
+        upright.save(out, format="JPEG", quality=quality, optimize=True)
+        return out.getvalue()
+
+
 def normalise_for_fitting(
     image_bytes: bytes,
     max_edge_px: int = 2400,
@@ -341,19 +444,34 @@ def normalise_for_fitting(
         ValueError: for an invalid edge limit.
         OSError: when the source is not a readable image.
     """
-    if max_edge_px <= 0:
-        msg = f"max edge must be positive, got {max_edge_px}"
-        raise ValueError(msg)
-    with Image.open(io.BytesIO(image_bytes)) as opened:
-        if opened.width * opened.height > MAX_SOURCE_PIXELS:
-            msg = "the source image dimensions exceed the safe processing limit"
-            raise ValueError(msg)
-        upright = ImageOps.exif_transpose(opened).convert("RGB")
-        if max(upright.size) > max_edge_px:
-            upright.thumbnail((max_edge_px, max_edge_px), Image.Resampling.LANCZOS)
-        out = io.BytesIO()
-        upright.save(out, format="JPEG", quality=quality, optimize=True)
-        return out.getvalue()
+    _validate_max_edge(max_edge_px)
+    with _IMAGE_PROCESSING_LOCK:
+        return _normalise_for_fitting_unlocked(image_bytes, max_edge_px, quality)
+
+
+def fit_bounded_source_locally(
+    image_bytes: bytes,
+    target_width: int,
+    target_height: int,
+    *,
+    max_source_edge_px: int = 2400,
+    quality: int = OUTPUT_QUALITY,
+) -> bytes:
+    """Downsample a potentially huge source safely, then cover-fit it once.
+
+    This is the headshot boundary. Drive limits the compressed file size, not
+    decoded pixels, so a small JPEG can still expand to 50 megapixels. Holding
+    the shared guard across its early downsample and final fit prevents two
+    listing threads from approaching the 1 GB process ceiling together.
+
+    Returns JPEG bytes at the exact target dimensions. Invalid source, target,
+    or edge limits raise ``ValueError``; unreadable input raises ``OSError``.
+    """
+    _validate_target_dimensions(target_width, target_height)
+    _validate_max_edge(max_source_edge_px)
+    with _IMAGE_PROCESSING_LOCK:
+        prepared = _normalise_for_fitting_unlocked(image_bytes, max_source_edge_px, quality)
+        return _fit_locally_unlocked(prepared, target_width, target_height, quality)
 
 
 def image_dimensions(image_bytes: bytes) -> tuple[int, int]:
@@ -369,8 +487,7 @@ def image_dimensions(image_bytes: bytes) -> tuple[int, int]:
         OSError: if Pillow cannot identify the format.
     """
     with Image.open(io.BytesIO(image_bytes)) as im:
-        # As displayed, not as stored — see `fit_locally`. `assess` compares
-        # these against the frame, so reporting stored dimensions for a rotated
-        # photo makes it choose the wrong crop axis.
-        upright = ImageOps.exif_transpose(im)
-        return upright.width, upright.height
+        # Reading the orientation tag avoids decoding a potentially huge frame
+        # merely to learn whether its displayed axes are swapped.
+        orientation = int(im.getexif().get(EXIF_ORIENTATION_TAG, 1))
+        return (im.height, im.width) if orientation in EXIF_SWAPS_AXES else im.size

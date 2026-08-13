@@ -151,7 +151,7 @@ def after_research(
     )
     still_missing = [
         name
-        for name in ("beds", "baths", "square_feet")
+        for name in ("beds", "baths", "square_feet", "list_price")
         if name in required and not merged.get(name)
     ]
 
@@ -166,12 +166,15 @@ def after_research(
             detail="research returned an implausible value",
         )
 
-    if still_missing and not intake.price:
+    if still_missing:
         readable = ", ".join(name.replace("_", " ") for name in still_missing)
+        pronoun = "it" if len(still_missing) == 1 else "them"
         return Step(
             outcome=Outcome.ASK,
-            questions=[Question("facts", f"I could not find the {readable}. Do you have them?")],
-            say=f"I could not find the {readable} for this one. Do you have them?",
+            questions=[
+                Question("facts", f"I could not find the {readable}. Do you have {pronoun}?")
+            ],
+            say=f"I could not find the {readable} for this one. Do you have {pronoun}?",
             category=intake.category,
             detail=f"research did not settle {readable}",
         )

@@ -14,12 +14,42 @@ import sqlite3
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
+from gable.db.event_store import (
+    AbandonedSlackEvent,
+    abandoned_slack_events,
+    claim_slack_event,
+    complete_slack_event,
+    slack_event_claimed,
+)
+from gable.db.photo_store import (
+    claim_run_for_photo,
+    has_pending_photo_question,
+    satisfy_pending_photo_question,
+)
+from gable.db.question_store import (
+    QUESTION_NOTIFICATION_PENDING,
+    PendingRunQuestion,
+    bind_run_question_thread,
+    claim_run_notification_delivery,
+    confirm_run_question,
+    has_pending_run_notification,
+    has_run_action_notification,
+    pending_run_question,
+    pending_run_questions,
+    prepare_headshot_replacement_action,
+    prepare_photo_replacement_action,
+    prepare_run_action_notification,
+    prepare_run_outcome,
+    prepare_run_question,
+    release_run_notification_delivery,
+)
 from gable.db.run_store import (
     ACTIVE,
     INTERRUPTED_NOTIFICATION_PENDING,
     INTERRUPTED_REASON,
     MAX_RUN_ATTEMPTS,
     PAUSED,
+    PHOTO_REPLACEMENT_WAITING,
     TERMINAL,
     VALID_STATUSES,
     RunAlreadyActiveError,
@@ -27,9 +57,8 @@ from gable.db.run_store import (
     RunRow,
     acknowledge_interrupted_run,
     claim_paused_run,
-    decode_warning_codes,
-    encode_warning_codes,
     latest_run,
+    pending_interrupted_runs,
     recover_interrupted_runs,
     run_attempt_count,
     run_by_id,
@@ -40,7 +69,11 @@ from gable.db.run_store import (
 from gable.db.template_store import (
     TemplateAudit,
     adopt_template_catalog,
+    claim_template_notification_delivery,
+    confirm_template_notification,
+    pending_template_notifications,
     record_template_audit,
+    release_template_notification_delivery,
     template_audit,
     template_catalog_adopted,
     template_for_thread,
@@ -53,24 +86,51 @@ __all__ = [
     "INTERRUPTED_REASON",
     "MAX_RUN_ATTEMPTS",
     "PAUSED",
+    "PHOTO_REPLACEMENT_WAITING",
+    "QUESTION_NOTIFICATION_PENDING",
     "TERMINAL",
     "VALID_STATUSES",
+    "AbandonedSlackEvent",
+    "PendingRunQuestion",
     "RunAlreadyActiveError",
     "RunLimitReachedError",
     "RunRow",
     "TemplateAudit",
+    "abandoned_slack_events",
     "acknowledge_interrupted_run",
     "adopt_template_catalog",
+    "bind_run_question_thread",
     "claim_paused_run",
-    "decode_warning_codes",
-    "encode_warning_codes",
+    "claim_run_for_photo",
+    "claim_run_notification_delivery",
+    "claim_slack_event",
+    "claim_template_notification_delivery",
+    "complete_slack_event",
+    "confirm_run_question",
+    "confirm_template_notification",
+    "has_pending_photo_question",
+    "has_pending_run_notification",
+    "has_run_action_notification",
     "latest_run",
+    "pending_interrupted_runs",
+    "pending_run_question",
+    "pending_run_questions",
+    "pending_template_notifications",
+    "prepare_headshot_replacement_action",
+    "prepare_photo_replacement_action",
+    "prepare_run_action_notification",
+    "prepare_run_outcome",
+    "prepare_run_question",
     "record_template_audit",
     "recover_interrupted_runs",
+    "release_run_notification_delivery",
+    "release_template_notification_delivery",
     "run_attempt_count",
     "run_by_id",
     "run_for_thread",
+    "satisfy_pending_photo_question",
     "set_status",
+    "slack_event_claimed",
     "start_run",
     "template_audit",
     "template_catalog_adopted",
@@ -123,7 +183,8 @@ def record_submission(
         sqlite3.Error: on a write failure.
     """
     existing = connection.execute(
-        "SELECT content_hash, source_tab FROM submissions WHERE response_row_id = ?",
+        "SELECT sheet_row, submitted_at, content_hash, source_tab "
+        "FROM submissions WHERE response_row_id = ?",
         (response_row_id,),
     ).fetchone()
     if existing:
@@ -135,7 +196,9 @@ def record_submission(
         content_changed = content_hash and str(existing["content_hash"] or "") != content_hash
         clean_tab = source_tab.strip()
         tab_changed = bool(clean_tab) and str(existing["source_tab"] or "") != clean_tab
-        if content_changed or tab_changed:
+        location_changed = int(existing["sheet_row"]) != sheet_row
+        timestamp_changed = str(existing["submitted_at"] or "") != submitted_at
+        if content_changed or tab_changed or location_changed or timestamp_changed:
             connection.execute(
                 """
                 UPDATE submissions
@@ -244,30 +307,6 @@ def load_submission(
         content_hash=row["content_hash"],
         source_tab=str(row["source_tab"] or ""),
     )
-
-
-def response_id_for_timestamp(connection: sqlite3.Connection, submitted_at: str) -> str | None:
-    """Resolve one immutable form timestamp to its deployed submission id.
-
-    Args:
-        connection: An open connection.
-        submitted_at: Google Forms timestamp exactly as stored for the row.
-
-    Returns:
-        The existing response id, or ``None`` when this timestamp is new.
-
-    Raises:
-        ValueError: If historical data contains more than one submission with
-            the same timestamp. Choosing either would merge two listings.
-        sqlite3.Error: On a read failure.
-    """
-    rows = connection.execute(
-        "SELECT response_row_id FROM submissions WHERE submitted_at = ?",
-        (submitted_at,),
-    ).fetchall()
-    if len(rows) > 1:
-        raise ValueError("more than one stored submission has the same form timestamp")
-    return str(rows[0]["response_row_id"]) if rows else None
 
 
 def has_been_handled(connection: sqlite3.Connection, response_row_id: str) -> bool:

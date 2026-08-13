@@ -6,18 +6,20 @@ from collections.abc import Callable
 from sqlite3 import Connection
 
 from gable.db import store
-from gable.listings.enrich import Facts
+from gable.listings.enrich import Facts, has_authoritative_source
 from gable.listings.intake import Intake
 from gable.pipeline.orchestrator import Outcome, Step, after_research, plan
 from gable.slides.fields import Resolution
 
 
-def required_public_facts(resolution: Resolution) -> frozenset[str]:
-    """Return cached fact names represented by the source's resolved fields."""
+def required_public_facts(resolution: Resolution, intake: Intake) -> frozenset[str]:
+    """Return web-researchable facts represented by this request and source."""
     required = frozenset({"beds", "baths", "square_feet"} & resolution.fields.keys())
     # Intake and Facts use different truthful names for the same source field:
     # the selected design says price, while cached research calls it list_price.
-    if "price" in resolution.fields:
+    # A Sold closing price and a Price Reduction's new price are not public list
+    # prices, so neither may be filled from this web path.
+    if "price" in resolution.fields and intake.accepts_public_list_price:
         required |= frozenset({"list_price"})
     return required
 
@@ -30,14 +32,20 @@ def resolve(
     progress: Callable[[], None] = lambda: None,
 ) -> tuple[Step, dict[str, str]]:
     """Research only missing public fields displayed by this exact source."""
-    required = required_public_facts(resolution)
-    known = store.recall_facts(connection, intake.address)
+    required = required_public_facts(resolution, intake)
+    # Existing rows predate address-identity proof and carry no durable marker
+    # that distinguishes a matching property page from a plausible wrong search
+    # result.  Keep them for audit, but do not trust them to fill a flyer.  A
+    # selected gap is resolved by one current strict lookup or remains missing.
+    known: dict[str, str] = {}
     step = plan(intake, known, required)
     if step.outcome is not Outcome.RESEARCH:
         return step, known
 
     progress()
     found = research(intake.address, required)
+    if not has_authoritative_source(found):
+        found = Facts()
     if not found.is_empty:
         store.remember_facts(
             connection,
@@ -46,5 +54,5 @@ def resolve(
             found.source_url,
             found.confidence,
         )
-        known = store.recall_facts(connection, intake.address)
+        known = found.as_dict()
     return after_research(intake, found, known, required), known

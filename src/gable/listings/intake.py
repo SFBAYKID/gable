@@ -213,24 +213,43 @@ class Intake:
 
     @property
     def price(self) -> str:
-        """Whichever price column this request type actually populates.
+        """The one form price column authoritative for this request type.
 
         The form has no list price. A sold post carries a closing price and a
         price reduction carries a new price, so the request type decides which
         column is the price for this flyer.
 
         Returns:
-            The price as the agent typed it, or an empty string.
+            Sold's closing price, Price Reduction's new price, or empty for
+            request types whose form contract supplies neither. An irrelevant
+            populated column is ignored rather than turned into a plausible but
+            false price.
 
         Raises:
             Nothing.
         """
-        return (self.closing_price or self.new_price).strip()
+        request_type = self.request_type.strip().casefold()
+        if request_type == "sold":
+            return self.closing_price.strip()
+        if request_type == "price reduction":
+            return self.new_price.strip()
+        return ""
 
     @property
     def is_sold(self) -> bool:
         """Whether this request is about a completed sale."""
-        return self.request_type.strip().lower() in {"sold", "under contract"}
+        return self.request_type.strip().casefold() == "sold"
+
+    @property
+    def accepts_public_list_price(self) -> bool:
+        """Whether a researched list price means the price this request needs.
+
+        A Sold flyer asks for the closing price, and a Price Reduction asks for
+        the new price.  A public listing price is neither of those values even
+        when it looks plausible, so those two request types may use only the
+        form's own price column.
+        """
+        return self.request_type.strip().lower() not in {"sold", "price reduction"}
 
     @property
     def mentions_open_house(self) -> bool:
@@ -470,15 +489,6 @@ def incoherences(intake: Intake) -> list[Question]:
     # Whether a design exists is not a contradiction in the row, and it is no
     # longer decided here: the picker looks for a file named after this request
     # type and says exactly which name is missing when there is none.
-
-    if intake.closing_price and intake.new_price:
-        asks.append(
-            Question(
-                "price",
-                "This request has both a new price and a closing price on it. "
-                "Which one belongs on the flyer?",
-            )
-        )
 
     return asks
 

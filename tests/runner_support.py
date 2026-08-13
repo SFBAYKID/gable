@@ -133,6 +133,7 @@ def runner(db: sqlite3.Connection, rec: Recorder, facts: Facts | None = None) ->
                 list_price="$515,000",
                 source_url="https://redfin.test",
                 confidence=0.95,
+                identity_verified=True,
             )
         ),
         official_contact_lookup=lambda name, email: ProfileLookup(

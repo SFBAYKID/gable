@@ -30,7 +30,8 @@ def test_inspection_uses_original_detail_and_strict_structured_output(
         seen.update(payload)
         assert api_key == "test-key"
         return _completed(
-            '{"looks_right":true,"confident":true,"problems":[],"remedy":"none",'
+            '{"looks_right":true,"confident":true,"problems":[],"problem_kinds":[],'
+            '"remedy":"none",'
             '"source_conflict_visible":false}'
         )
 
@@ -49,6 +50,8 @@ def test_inspection_uses_original_detail_and_strict_structured_output(
     schema = seen["text"]["format"]["schema"]
     assert schema["properties"]["remedy"]["enum"] == ["none", "review", "replace_photo"]
     assert schema["properties"]["source_conflict_visible"] == {"type": "boolean"}
+    assert "source_photo_conflict" in schema["properties"]["problem_kinds"]["items"]["enum"]
+    assert "problem_kinds" in schema["required"]
     assert "source_conflict_visible" in schema["required"]
     assert "too small to read" in seen["input"][0]["content"][0]["text"]
 
@@ -78,7 +81,8 @@ def test_split_response_text_is_joined_before_parsing(monkeypatch: pytest.Monkey
                         {
                             "type": "output_text",
                             "text": (
-                                '"confident":true,"problems":[],"remedy":"none",'
+                                '"confident":true,"problems":[],"problem_kinds":[],'
+                                '"remedy":"none",'
                                 '"source_conflict_visible":false}'
                             ),
                         },
@@ -101,7 +105,8 @@ def test_source_photo_and_render_are_compared_in_one_inspection(
     def post(payload: dict[str, Any], _api_key: str) -> dict[str, Any]:
         seen.update(payload)
         return _completed(
-            '{"looks_right":true,"confident":true,"problems":[],"remedy":"none",'
+            '{"looks_right":true,"confident":true,"problems":[],"problem_kinds":[],'
+            '"remedy":"none",'
             '"source_conflict_visible":false}'
         )
 
@@ -138,7 +143,8 @@ def test_template_inspection_uses_the_placeholder_aware_prompt(
     def post(payload: dict[str, Any], _api_key: str) -> dict[str, Any]:
         seen.update(payload)
         return _completed(
-            '{"looks_right":true,"confident":true,"problems":[],"remedy":"none",'
+            '{"looks_right":true,"confident":true,"problems":[],"problem_kinds":[],'
+            '"remedy":"none",'
             '"source_conflict_visible":false}'
         )
 
@@ -150,6 +156,15 @@ def test_template_inspection_uses_the_placeholder_aware_prompt(
     prompt = seen["input"][0]["content"][0]["text"]
     assert "Intentional placeholder wording" in prompt
     assert "inconsistent spacing" in prompt
+    schema = seen["text"]["format"]["schema"]
+    assert schema["properties"]["remedy"]["enum"] == ["none", "review"]
+    assert schema["properties"]["source_conflict_visible"]["enum"] == [False]
+    assert schema["properties"]["problem_kinds"]["items"]["enum"] == [
+        "text",
+        "layout",
+        "placeholder",
+        "other",
+    ]
 
 
 def test_a_visible_problem_is_preserved_for_the_runner(
@@ -160,7 +175,8 @@ def test_a_visible_problem_is_preserved_for_the_runner(
         "_post",
         lambda _payload, _key: _completed(
             '{"looks_right":false,"confident":true,'
-            '"problems":["The address overlaps the divider line."],"remedy":"review",'
+            '"problems":["The address overlaps the divider line."],'
+            '"problem_kinds":["layout"],"remedy":"review",'
             '"source_conflict_visible":false}'
         ),
     )
@@ -174,7 +190,8 @@ def test_a_visible_problem_is_preserved_for_the_runner(
 
 def test_string_false_cannot_be_coerced_into_a_silent_pass() -> None:
     result = vision.parse(
-        '{"looks_right":"false","confident":true,"problems":[],"remedy":"review",'
+        '{"looks_right":"false","confident":true,"problems":[],"problem_kinds":[],'
+        '"remedy":"review",'
         '"source_conflict_visible":false}'
     )
 
@@ -185,6 +202,7 @@ def test_string_false_cannot_be_coerced_into_a_silent_pass() -> None:
 def test_a_pass_that_also_names_a_problem_is_treated_as_a_failure() -> None:
     result = vision.parse(
         '{"looks_right":true,"confident":true,"problems":["The price is clipped."],'
+        '"problem_kinds":["text"],'
         '"remedy":"none","source_conflict_visible":false}'
     )
 
@@ -193,17 +211,35 @@ def test_a_pass_that_also_names_a_problem_is_treated_as_a_failure() -> None:
     assert result.problems == ["The price is clipped."]
 
 
+def test_a_contradictory_pass_cannot_authorize_replacing_the_source() -> None:
+    result = vision.parse(
+        '{"looks_right":true,"confident":true,'
+        '"problems":["The source house number says 721."],'
+        '"problem_kinds":["source_photo_conflict"],'
+        '"remedy":"replace_photo","source_conflict_visible":true}',
+        has_reference_photo=True,
+    )
+
+    assert result.checked is True
+    assert result.looks_right is False
+    assert result.remedy is vision.InspectionRemedy.REVIEW
+    assert result.source_conflict_visible is False
+    assert result.needs_source_replacement is False
+
+
 def test_a_wrong_property_photo_has_a_typed_replacement_remedy() -> None:
     """A confident source-photo contradiction can route straight to upload."""
     result = vision.parse(
         '{"looks_right":false,"confident":true,'
         '"problems":["The flyer says 703, but the house number in the photo says 721."],'
+        '"problem_kinds":["source_photo_conflict"],'
         '"remedy":"replace_photo","source_conflict_visible":true}',
         has_reference_photo=True,
     )
 
     assert result.checked is True
     assert result.remedy is vision.InspectionRemedy.REPLACE_PHOTO
+    assert result.problem_kinds == (vision.InspectionProblemKind.SOURCE_PHOTO_CONFLICT,)
     assert result.source_conflict_visible is True
 
 
@@ -212,6 +248,7 @@ def test_a_number_visible_only_in_the_render_never_blames_the_source() -> None:
     result = vision.parse(
         '{"looks_right":false,"confident":true,'
         '"problems":["The rendered house number says 721 but it is unreadable in the source."],'
+        '"problem_kinds":["photo_output"],'
         '"remedy":"replace_photo","source_conflict_visible":false}',
         has_reference_photo=True,
     )
@@ -225,6 +262,7 @@ def test_a_source_conflict_claim_without_a_first_image_stays_review() -> None:
     result = vision.parse(
         '{"looks_right":false,"confident":true,'
         '"problems":["The property number conflicts with the flyer."],'
+        '"problem_kinds":["source_photo_conflict"],'
         '"remedy":"replace_photo","source_conflict_visible":true}'
     )
 
@@ -233,20 +271,63 @@ def test_a_source_conflict_claim_without_a_first_image_stays_review() -> None:
     assert result.source_conflict_visible is False
 
 
+def test_a_mixed_visual_failure_cannot_request_a_replacement_photo() -> None:
+    """One unrelated layout defect makes the typed remedy human review."""
+    result = vision.parse(
+        '{"looks_right":false,"confident":true,'
+        '"problems":["The source house number says 721.",'
+        '"The address overlaps the divider."],'
+        '"problem_kinds":["source_photo_conflict","layout"],'
+        '"remedy":"replace_photo","source_conflict_visible":true}',
+        has_reference_photo=True,
+    )
+
+    assert result.checked is True
+    assert result.remedy is vision.InspectionRemedy.REVIEW
+    assert result.source_conflict_visible is False
+    assert result.needs_source_replacement is False
+
+
+def test_problem_messages_and_kinds_must_have_the_same_length() -> None:
+    result = vision.parse(
+        '{"looks_right":false,"confident":true,'
+        '"problems":["The photo is cropped."],"problem_kinds":[],'
+        '"remedy":"review","source_conflict_visible":false}',
+        has_reference_photo=True,
+    )
+
+    assert result.checked is False
+
+
+def test_an_empty_typed_problem_cannot_preserve_a_false_array_match() -> None:
+    result = vision.parse(
+        '{"looks_right":false,"confident":true,"problems":["   "],'
+        '"problem_kinds":["source_photo_conflict"],"remedy":"replace_photo",'
+        '"source_conflict_visible":true}',
+        has_reference_photo=True,
+    )
+
+    assert result.checked is False
+    assert result.needs_source_replacement is False
+
+
 @pytest.mark.parametrize(
     "reply",
     [
         (
             '{"looks_right":true,"confident":true,"problems":[],"remedy":"review",'
+            '"problem_kinds":[],'
             '"source_conflict_visible":false}'
         ),
         (
-            '{"looks_right":false,"confident":true,"problems":[],"remedy":"none",'
+            '{"looks_right":false,"confident":true,"problems":[],"problem_kinds":[],'
+            '"remedy":"none",'
             '"source_conflict_visible":false}'
         ),
         (
             '{"looks_right":false,"confident":false,'
             '"problems":["The property image may be wrong."],"remedy":"replace_photo",'
+            '"problem_kinds":["source_photo_conflict"],'
             '"source_conflict_visible":true}'
         ),
     ],

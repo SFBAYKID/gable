@@ -341,6 +341,7 @@ def test_an_action_reply_comes_from_the_executor_after_it_runs() -> None:
         _decision: Decision,
         thread_ts: str,
         _progress: Callable[[str], None],
+        _action_id: str,
     ) -> str:
         calls.append(thread_ts)
         return "Done. I changed the price text to 32 points."
@@ -349,6 +350,27 @@ def test_an_action_reply_comes_from_the_executor_after_it_runs() -> None:
         "Done. I changed the price text to 32 points."
     )
     assert calls == ["thread-1"]
+
+
+def test_a_durable_action_may_post_its_own_outcome_without_an_outer_duplicate() -> None:
+    """An empty executor result means the outbox already handled Slack."""
+    from gable.slackapp.app import reply_for_decision
+    from gable.slackapp.brain import Decision
+
+    decision = Decision(
+        reply="Rebuilding the flyer.",
+        tool="rebuild_flyer",
+        arguments={"mode": "check_updated"},
+    )
+
+    assert (
+        reply_for_decision(
+            decision,
+            lambda _decision, _thread, _progress, _action_id: "",
+            "thread-1",
+        )
+        == ""
+    )
 
 
 class _ShareClient:

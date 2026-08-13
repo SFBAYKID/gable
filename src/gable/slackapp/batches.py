@@ -32,20 +32,24 @@ def summarize(outcomes: tuple[BatchOutcome, ...]) -> str:
     count = len(ready)
     headline = f"{count} post{'s' if count != 1 else ''} ready"
     facts = ["Each ready item is a Google Slides file linked in its own listing thread."]
-    if ready:
-        facts.append(f"Included  {_addresses(ready)}")
+    # Operational exceptions are never allowed to fall behind a long address
+    # list and disappear at the Slack length ceiling.  Included addresses are
+    # useful but already have their own threads, so that is the only fact placed
+    # last where ``safe`` may omit it as a whole.
     if held:
         noun = "listing" if len(held) == 1 else "listings"
-        facts.append(f"Held back  {len(held)} {noun} waiting for a person")
+        facts.append(f"Held back  {len(held)} {noun} waiting for a person.")
     if skipped:
         noun = "request" if len(skipped) == 1 else "requests"
-        facts.append(f"Skipped  {len(skipped)} non-flyer {noun}")
+        facts.append(f"Skipped  {len(skipped)} non-flyer {noun}.")
     if failed:
         noun = "listing" if len(failed) == 1 else "listings"
         facts.append(
             f"Failed  {len(failed)} {noun} during processing; Chase can check "
-            "Gable's log before retrying"
+            "Gable's log before retrying."
         )
+    if ready:
+        facts.append(f"Included  {_addresses(ready)}")
     return safe(f"{headline}\n\n{quote_rail(facts)}")
 
 

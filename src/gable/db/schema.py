@@ -27,7 +27,7 @@ from typing import Final
 
 #: Bumped whenever a migration is added. `apply_migrations` uses it to decide
 #: what still needs running.
-SCHEMA_VERSION: Final[int] = 7
+SCHEMA_VERSION: Final[int] = 10
 
 #: Each migration is (version, sql). They run in order and only once. Never edit
 #: one that has shipped — add another, the same rule as the decision log.
@@ -241,6 +241,127 @@ MIGRATIONS: Final[tuple[tuple[int, str], ...]] = (
 
         CREATE INDEX IF NOT EXISTS idx_operation_releases_run
             ON operation_releases (run_id, operation_detail);
+        """,
+    ),
+    (
+        8,
+        """
+        -- A run outcome and its Slack delivery are separate durable writes.
+        -- Keep the exact message here before posting so a restart can retry it
+        -- without rebuilding the flyer or pretending the person saw it. The
+        -- same table carries questions and truthful terminal/review outcomes;
+        -- stable client ids make every retry the same Slack message.
+        CREATE TABLE IF NOT EXISTS run_questions (
+            question_id        TEXT PRIMARY KEY,
+            run_id             TEXT NOT NULL REFERENCES runs(run_id),
+            notification_kind  TEXT NOT NULL DEFAULT 'question'
+                CHECK (notification_kind IN ('question', 'outcome', 'action')),
+            pending_status     TEXT NOT NULL DEFAULT 'needs_review',
+            target_status      TEXT NOT NULL,
+            message            TEXT NOT NULL,
+            question_label     TEXT NOT NULL,
+            headline           TEXT NOT NULL DEFAULT '',
+            thread_ts          TEXT NOT NULL DEFAULT '',
+            headline_ts        TEXT NOT NULL DEFAULT '',
+            question_ts        TEXT NOT NULL DEFAULT '',
+            headline_client_id TEXT NOT NULL UNIQUE,
+            question_client_id TEXT NOT NULL UNIQUE,
+            confirmed_reason   TEXT NOT NULL DEFAULT '',
+            confirmation_detail TEXT NOT NULL DEFAULT '',
+            created_at         TEXT NOT NULL,
+            confirmed_at       TEXT NOT NULL DEFAULT '',
+            -- A person can satisfy the exact pending request before the
+            -- posting worker records Slack's acknowledgement.  Keep that
+            -- distinct from confirmation: no audit row may claim Slack
+            -- confirmed a question merely because its requested photo arrived.
+            satisfied_at       TEXT NOT NULL DEFAULT '',
+            satisfaction_detail TEXT NOT NULL DEFAULT ''
+        );
+
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_run_questions_pending
+            ON run_questions (run_id)
+            WHERE confirmed_at = '' AND satisfied_at = '';
+        CREATE INDEX IF NOT EXISTS idx_run_questions_run
+            ON run_questions (run_id, created_at);
+        """,
+    ),
+    (
+        9,
+        """
+        -- Legacy tuple ids could collapse byte-identical Google Form rows.
+        -- Preserve multiplicity from each complete tab snapshot so a later
+        -- identical response is new work while historical copies do not replay.
+        CREATE TABLE IF NOT EXISTS submission_source_rows (
+            id                INTEGER PRIMARY KEY AUTOINCREMENT,
+            response_row_id   TEXT NOT NULL REFERENCES submissions(response_row_id),
+            source_tab        TEXT NOT NULL,
+            sheet_row         INTEGER NOT NULL,
+            submitted_at      TEXT NOT NULL,
+            content_hash      TEXT NOT NULL,
+            active            INTEGER NOT NULL DEFAULT 1 CHECK (active IN (0, 1)),
+            first_seen_at     TEXT NOT NULL,
+            last_seen_at      TEXT NOT NULL
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_submission_source_rows_active
+            ON submission_source_rows (
+                source_tab, response_row_id, content_hash, active, sheet_row
+            );
+        """,
+    ),
+    (
+        10,
+        """
+        -- External Slack writes must have one durable owner, including when
+        -- two processes overlap during a restart. Attempt markers deliberately
+        -- prefer an honest pending row over a second write after an ambiguous
+        -- acknowledgement; later workers reconcile the stable client id.
+        ALTER TABLE run_questions
+            ADD COLUMN delivery_claim_token TEXT NOT NULL DEFAULT '';
+        ALTER TABLE run_questions
+            ADD COLUMN delivery_claimed_at TEXT NOT NULL DEFAULT '';
+        ALTER TABLE run_questions
+            ADD COLUMN headline_attempted_at TEXT NOT NULL DEFAULT '';
+        ALTER TABLE run_questions
+            ADD COLUMN headline_attempt_count INTEGER NOT NULL DEFAULT 0;
+        ALTER TABLE run_questions
+            ADD COLUMN question_attempted_at TEXT NOT NULL DEFAULT '';
+        ALTER TABLE run_questions
+            ADD COLUMN question_attempt_count INTEGER NOT NULL DEFAULT 0;
+
+        -- The final photo claim records the Slack event identity with the run.
+        -- Preparation before that point is content-addressed and safe to redo;
+        -- after it, restart recovery owns the visible active run.
+        ALTER TABLE runs
+            ADD COLUMN photo_event_id TEXT NOT NULL DEFAULT '';
+
+        ALTER TABLE template_audits
+            ADD COLUMN delivery_claim_token TEXT NOT NULL DEFAULT '';
+        ALTER TABLE template_audits
+            ADD COLUMN delivery_claimed_at TEXT NOT NULL DEFAULT '';
+        ALTER TABLE template_audits
+            ADD COLUMN notification_attempted_at TEXT NOT NULL DEFAULT '';
+        ALTER TABLE template_audits
+            ADD COLUMN notification_attempt_count INTEGER NOT NULL DEFAULT 0;
+
+        -- Process memory cannot suppress the same Slack event after restart.
+        -- Claim a user action before external work; an abandoned claim remains
+        -- visible for operator repair instead of repeating an unknown mutation
+        -- or paid inspection behind the user's back.
+        CREATE TABLE IF NOT EXISTS slack_event_claims (
+            route          TEXT NOT NULL,
+            event_id       TEXT NOT NULL,
+            subject_id     TEXT NOT NULL,
+            thread_ts      TEXT NOT NULL,
+            fingerprint    TEXT NOT NULL,
+            claimed_at     TEXT NOT NULL,
+            completed_at   TEXT NOT NULL DEFAULT '',
+            detail         TEXT NOT NULL DEFAULT '',
+            PRIMARY KEY (route, event_id)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_slack_event_claims_subject
+            ON slack_event_claims (subject_id, claimed_at);
         """,
     ),
 )

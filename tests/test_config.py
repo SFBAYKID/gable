@@ -251,6 +251,17 @@ def test_batch_ceiling_is_enforced() -> None:
         _load(GABLE_MAX_BATCH="5000")
 
 
+@pytest.mark.parametrize("name", ["GABLE_SLIDE_WIDTH_PX", "GABLE_SLIDE_HEIGHT_PX"])
+def test_slide_edge_above_safe_image_limit_is_rejected(name: str) -> None:
+    with pytest.raises(ConfigError, match=name):
+        _load(**{name: "8001"})
+
+
+def test_slide_area_above_safe_image_limit_is_rejected() -> None:
+    with pytest.raises(ConfigError, match="safe 25000000-pixel output limit"):
+        _load(GABLE_SLIDE_WIDTH_PX="6000", GABLE_SLIDE_HEIGHT_PX="5000")
+
+
 def test_unknown_enum_lists_the_valid_options() -> None:
     with pytest.raises(ConfigError) as excinfo:
         _load(GABLE_PHOTO_POLICY="generate_sometimes")

@@ -48,7 +48,6 @@ def _context_values(connection: Connection, run: store.RunRow, target: str) -> l
     if stored is None:
         return []
     intake = stored.intake
-    known = store.recall_facts(connection, intake.address)
     person = sheet_repo.find_salesperson(connection, intake.agent_email)
     person_name = " ".join(
         part for part in (person.get("first_name", ""), person.get("last_name", "")) if part
@@ -57,15 +56,12 @@ def _context_values(connection: Connection, run: store.RunRow, target: str) -> l
     mapping: tuple[tuple[tuple[str, ...], str], ...] = (
         (
             ("price", "list price", "sale price", "closing price"),
-            intake.price or known.get("list_price", ""),
+            intake.price,
         ),
         (("address", "property address"), intake.address),
         (("agent", "agent name", "name"), person_name or intake.agent_name),
         (("phone", "phone number"), person.get("phone", "")),
         (("email", "email address"), intake.agent_email),
-        (("beds", "bedrooms"), known.get("beds", "")),
-        (("baths", "bathrooms"), known.get("baths", "")),
-        (("square feet", "sqft", "square footage"), known.get("square_feet", "")),
         (("open house", "open house time", "open house date"), intake.open_house),
     )
     values: list[str] = []
@@ -143,8 +139,18 @@ class SlideEditor:
             return "I could not match this thread to a listing, so I have not changed anything."
         if decision.tool == "report_status":
             return self._status(run)
+        if store.has_pending_run_notification(self.connection, run.run_id):
+            return (
+                "I am still confirming the last outcome in this thread, so I did not "
+                "change the flyer again."
+            )
         if not run.output_file_id:
             return "This listing does not have a built flyer yet, so there is nothing to edit."
+        if decision.tool != "replace_photo":
+            return (
+                "Post-delivery flyer edits are paused until I can verify a separate draft, so I "
+                "left the flyer unchanged."
+            )
         if decision.tool == "replace_photo":
             return self._begin_photo_replacement(run, decision.arguments)
 
@@ -210,17 +216,12 @@ class SlideEditor:
                 # upload is rebuilt through the normal geometry/readback/vision
                 # gates; PhotoHandoff atomically replaces photo provenance only
                 # when it claims this pause.
-                approved = store.decode_warning_codes(run.approved_warning_codes) - {
-                    "large_photo_crop"
-                }
                 store.set_status(
                     self.connection,
                     run.run_id,
                     "needs_photo",
                     "waiting for a replacement property photo",
                     failure_reason="Send me the new property photo.",
-                    approved_warning_codes=store.encode_warning_codes(approved),
-                    pending_warning_code="",
                 )
                 return "Send me the new property photo."
 

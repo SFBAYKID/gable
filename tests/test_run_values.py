@@ -39,3 +39,51 @@ def test_an_agent_title_is_not_invented_when_no_source_collects_one(tmp_path: Pa
     assert values["agent_title"] == ""
     assert values["agent_phone"] == "410.555.0100"
     connection.close()
+
+
+def test_a_sold_request_never_uses_a_public_list_price_as_its_closing_price(
+    tmp_path: Path,
+) -> None:
+    connection = connect(tmp_path / "gable.db")
+    apply_migrations(connection)
+    intake = Intake(
+        agent_email="agent@example.com",
+        agent_name="Avery Agent",
+        request_type="Sold",
+        address="1 Main St, Baltimore, MD 21201",
+        post_details="",
+        open_house="",
+        new_price="",
+        closing_price="",
+        extra_notes="",
+        side="",
+        notes="",
+    )
+
+    values = for_intake(connection, intake, {"list_price": "$515,000"})
+
+    assert values["price"] == ""
+    connection.close()
+
+
+def test_a_listing_request_may_use_a_verified_public_list_price(tmp_path: Path) -> None:
+    connection = connect(tmp_path / "gable.db")
+    apply_migrations(connection)
+    intake = Intake(
+        agent_email="agent@example.com",
+        agent_name="Avery Agent",
+        request_type="New Listing",
+        address="1 Main St, Baltimore, MD 21201",
+        post_details="",
+        open_house="",
+        new_price="",
+        closing_price="",
+        extra_notes="",
+        side="",
+        notes="",
+    )
+
+    values = for_intake(connection, intake, {"list_price": "$515,000"})
+
+    assert values["price"] == "$515,000"
+    connection.close()

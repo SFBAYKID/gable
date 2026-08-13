@@ -46,19 +46,39 @@ def _db(tmp_path: Path) -> sqlite3.Connection:
     return connection
 
 
-def test_schema_six_migrates_to_the_append_only_operation_release_ledger(
+def _remove_v10_template_columns(connection: sqlite3.Connection) -> None:
+    """Restore template_audits to its shipped pre-v10 shape for migration tests."""
+    for column in (
+        "delivery_claim_token",
+        "delivery_claimed_at",
+        "notification_attempted_at",
+        "notification_attempt_count",
+    ):
+        connection.execute(f"ALTER TABLE template_audits DROP COLUMN {column}")
+
+
+def _remove_v10_run_columns(connection: sqlite3.Connection) -> None:
+    connection.execute("ALTER TABLE runs DROP COLUMN photo_event_id")
+
+
+def test_schema_six_migrates_through_current_durable_state(
     tmp_path: Path,
 ) -> None:
     """A deployed v6 database gains reconciliation without changing old rows."""
     connection = _db(tmp_path)
+    connection.execute("DROP TABLE submission_source_rows")
+    connection.execute("DROP TABLE run_questions")
     connection.execute("DROP TABLE operation_releases")
+    connection.execute("DROP TABLE slack_event_claims")
     connection.execute("DROP INDEX idx_spend_id_run")
-    connection.execute("DELETE FROM schema_version WHERE version = 7")
+    _remove_v10_template_columns(connection)
+    _remove_v10_run_columns(connection)
+    connection.execute("DELETE FROM schema_version WHERE version >= 7")
     assert current_version(connection) == 6
 
-    assert apply_migrations(connection) == 1
+    assert apply_migrations(connection) == 4
 
-    assert current_version(connection) == SCHEMA_VERSION == 7
+    assert current_version(connection) == SCHEMA_VERSION == 10
     columns = connection.execute("PRAGMA table_info(operation_releases)").fetchall()
     assert [str(row["name"]) for row in columns] == [
         "id",
@@ -69,6 +89,90 @@ def test_schema_six_migrates_to_the_append_only_operation_release_ledger(
         "evidence",
         "at",
     ]
+    outbox_columns = connection.execute("PRAGMA table_info(run_questions)").fetchall()
+    assert {
+        "notification_kind",
+        "pending_status",
+        "created_at",
+        "confirmed_at",
+        "satisfied_at",
+        "delivery_claim_token",
+        "question_attempt_count",
+    }.issubset({str(row["name"]) for row in outbox_columns})
+
+
+def test_deployed_schema_seven_gains_the_generalized_outbox(tmp_path: Path) -> None:
+    """The current live database can apply the unshipped v8 and v9 atomically."""
+    connection = _db(tmp_path)
+    connection.execute("DROP TABLE submission_source_rows")
+    connection.execute("DROP TABLE run_questions")
+    connection.execute("DROP TABLE slack_event_claims")
+    _remove_v10_template_columns(connection)
+    _remove_v10_run_columns(connection)
+    connection.execute("DELETE FROM schema_version WHERE version >= 8")
+    assert current_version(connection) == 7
+
+    assert apply_migrations(connection) == 3
+
+    assert current_version(connection) == SCHEMA_VERSION == 10
+    columns = {
+        str(row["name"])
+        for row in connection.execute("PRAGMA table_info(run_questions)").fetchall()
+    }
+    assert {
+        "notification_kind",
+        "pending_status",
+        "created_at",
+        "satisfied_at",
+        "delivery_claim_token",
+        "question_attempt_count",
+    } <= columns
+    assert connection.execute(
+        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'slack_event_claims'"
+    ).fetchone()
+
+
+def test_slack_event_claim_survives_restart_and_has_one_cross_process_winner(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "gable.db"
+    first = _db(tmp_path)
+    second = connect(path)
+
+    assert store.claim_slack_event(
+        first,
+        "file_share",
+        "event-1",
+        "run-1",
+        "thread-1",
+        "file-1",
+    )
+    assert not store.claim_slack_event(
+        second,
+        "file_share",
+        "event-1",
+        "run-1",
+        "thread-1",
+        "file-1",
+    )
+    first.close()
+
+    restarted = connect(path)
+    assert store.slack_event_claimed(restarted, "file_share", "event-1")
+    assert store.complete_slack_event(
+        restarted,
+        "file_share",
+        "event-1",
+        "run-1",
+        "photo handoff stored its durable result",
+    )
+    assert not store.complete_slack_event(
+        restarted,
+        "file_share",
+        "event-1",
+        "run-1",
+        "duplicate completion",
+    )
 
 
 def test_opening_a_run_rolls_back_if_its_first_event_cannot_be_written(
@@ -139,6 +243,36 @@ def test_only_one_worker_can_claim_a_paused_run(tmp_path: Path) -> None:
     assert current.photo_url.endswith("first.jpg")
 
 
+def test_a_stale_photo_event_cannot_claim_a_different_paused_state(tmp_path: Path) -> None:
+    """The status observed before download is part of the atomic resume claim."""
+    connection = _db(tmp_path)
+    run = store.start_run(connection, _submission(connection))
+    store.set_status(connection, run.run_id, "needs_photo", "waiting for the image")
+
+    # Another human action resolves the photo wait but discovers missing data
+    # while the file worker still holds its earlier needs_photo observation.
+    store.set_status(connection, run.run_id, "needs_info", "waiting for a direct phone")
+
+    assert not store.claim_paused_run(
+        connection,
+        run.run_id,
+        {"photo_url": "https://example.test/stale.jpg"},
+        expected_status="needs_photo",
+    )
+    current = store.run_by_id(connection, run.run_id)
+    assert current is not None
+    assert current.status == "needs_info"
+    assert current.photo_url == ""
+
+
+def test_an_expected_claim_status_must_itself_be_paused(tmp_path: Path) -> None:
+    connection = _db(tmp_path)
+    run = store.start_run(connection, _submission(connection))
+
+    with pytest.raises(ValueError, match="expected status is not paused"):
+        store.claim_paused_run(connection, run.run_id, expected_status="building")
+
+
 @pytest.mark.parametrize("paused_status", sorted(store.PAUSED))
 def test_a_paused_run_blocks_a_new_attempt(tmp_path: Path, paused_status: str) -> None:
     """Human-owned pauses resume in place and never consume another attempt."""
@@ -172,32 +306,27 @@ def test_unknown_status_is_rejected_without_mutating_the_run_or_event_log(
     assert [event["status"] for event in events] == ["pending"]
 
 
-def test_warning_approval_fields_survive_a_run_reload(tmp_path: Path) -> None:
-    """A later photo handoff can recover the exact warning a person approved."""
+def test_legacy_warning_fields_remain_readable_but_runtime_cannot_mutate_them(
+    tmp_path: Path,
+) -> None:
+    """Migration-era warning columns are inert append-only compatibility data."""
     connection = _db(tmp_path)
     run = store.start_run(connection, _submission(connection))
+    connection.execute(
+        "UPDATE runs SET approved_warning_codes = ?, pending_warning_code = ? WHERE run_id = ?",
+        ("address_tight", "hero_crop", run.run_id),
+    )
     store.set_status(
         connection,
         run.run_id,
         "needs_template",
         "waiting for a measured warning decision",
-        approved_warning_codes="address_tight",
-        pending_warning_code="hero_crop",
     )
 
     current = store.run_by_id(connection, run.run_id)
     assert current is not None
     assert current.approved_warning_codes == "address_tight"
     assert current.pending_warning_code == "hero_crop"
-
-
-def test_warning_code_serialization_is_deterministic_and_fails_closed() -> None:
-    encoded = store.encode_warning_codes({"large_photo_crop", "tight_address"})
-
-    assert encoded == '["large_photo_crop","tight_address"]'
-    assert store.decode_warning_codes(encoded) == frozenset({"large_photo_crop", "tight_address"})
-    assert store.decode_warning_codes("not json") == frozenset()
-    assert store.decode_warning_codes('["tight-address"]') == frozenset()
 
 
 def test_submission_source_tab_is_added_without_erasing_the_saved_payload(

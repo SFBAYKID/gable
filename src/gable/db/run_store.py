@@ -9,7 +9,6 @@ entry in the same autocommit connection.
 
 from __future__ import annotations
 
-import json
 import sqlite3
 import uuid
 from collections.abc import Iterator, Mapping
@@ -48,6 +47,12 @@ INTERRUPTED_NOTIFICATION_PENDING: Final[str] = (
     "processing was interrupted before completion; Slack notification pending"
 )
 
+#: The corresponding human-owned wait after Slack returns the question's exact
+#: timestamp. This stable sentence is safe to expose in bounded thread context.
+PHOTO_REPLACEMENT_WAITING: Final[str] = (
+    "waiting for the correct property image because the supplied photo conflicts with the listing"
+)
+
 _RUN_UPDATE_FIELDS: Final[frozenset[str]] = frozenset(
     {
         "template_file_id",
@@ -56,12 +61,11 @@ _RUN_UPDATE_FIELDS: Final[frozenset[str]] = frozenset(
         "output_url",
         "photo_url",
         "photo_source",
+        "photo_event_id",
         "ai_generated",
         "ai_enhanced",
         "slack_thread_ts",
         "failure_reason",
-        "approved_warning_codes",
-        "pending_warning_code",
     }
 )
 
@@ -72,25 +76,6 @@ class RunLimitReachedError(RuntimeError):
 
 class RunAlreadyActiveError(RuntimeError):
     """Raised when another worker owns or a person is resolving this submission."""
-
-
-def encode_warning_codes(codes: frozenset[str] | set[str]) -> str:
-    """Serialize exact approved preflight codes deterministically."""
-    cleaned = sorted(code for code in codes if code and code.replace("_", "").isalnum())
-    return json.dumps(cleaned, separators=(",", ":"))
-
-
-def decode_warning_codes(encoded: str) -> frozenset[str]:
-    """Read approved codes, failing closed on malformed persisted state."""
-    try:
-        values = json.loads(encoded or "[]")
-    except (TypeError, ValueError):
-        return frozenset()
-    if not isinstance(values, list) or not all(
-        isinstance(value, str) and value and value.replace("_", "").isalnum() for value in values
-    ):
-        return frozenset()
-    return frozenset(values)
 
 
 def _now() -> str:
@@ -132,6 +117,7 @@ class RunRow:
     #: The fitted, published hero photo, once one has been attached.
     photo_url: str = ""
     photo_source: str = ""
+    photo_event_id: str = ""
     ai_enhanced: bool = False
     approved_warning_codes: str = ""
     pending_warning_code: str = ""
@@ -254,7 +240,10 @@ def recover_interrupted_runs(connection: sqlite3.Connection) -> tuple[RunRow, ..
     placeholders = ",".join("?" * len(ACTIVE))
     rows = connection.execute(
         f"SELECT run_id, slack_thread_ts FROM runs "
-        f"WHERE status IN ({placeholders}) ORDER BY created_at",
+        f"WHERE status IN ({placeholders}) AND NOT EXISTS ("
+        "SELECT 1 FROM run_questions q WHERE q.run_id = runs.run_id "
+        "AND q.notification_kind = 'outcome' "
+        "AND q.confirmed_at = '' AND q.satisfied_at = '') ORDER BY created_at",
         tuple(sorted(ACTIVE)),
     ).fetchall()
     for row in rows:
@@ -267,6 +256,11 @@ def recover_interrupted_runs(connection: sqlite3.Connection) -> tuple[RunRow, ..
             failure_reason=INTERRUPTED_NOTIFICATION_PENDING,
         )
 
+    return pending_interrupted_runs(connection)
+
+
+def pending_interrupted_runs(connection: sqlite3.Connection) -> tuple[RunRow, ...]:
+    """Return legacy interruption markers not yet moved into the stable-id outbox."""
     pending = connection.execute(
         "SELECT run_id FROM runs WHERE failure_reason = ? ORDER BY created_at, rowid",
         (INTERRUPTED_NOTIFICATION_PENDING,),
@@ -382,6 +376,7 @@ def claim_paused_run(
     fields: Mapping[str, str | int] | None = None,
     *,
     detail: str = "resumed from its Slack thread",
+    expected_status: str | None = None,
 ) -> bool:
     """Atomically move one still-paused run back to pending.
 
@@ -391,30 +386,42 @@ def claim_paused_run(
         detail: Immutable transition note.
         fields: Optional photo or source data that must become current with
             the claim, never in a separate raceable write.
+        expected_status: When set, claim only this exact paused state. A Slack
+            photo handoff uses ``needs_photo`` so a stale upload cannot resume a
+            run that changed to another human-owned pause while the file was
+            being downloaded.
 
     Returns:
         True for the one caller that claimed the pause; False when another
         worker already resumed it or the run is no longer paused.
 
     Raises:
-        ValueError: If a caller supplies a non-run column.
+        ValueError: If a caller supplies a non-run column or a non-paused
+            expected status.
         sqlite3.Error: On a write failure.
     """
     updates = dict(fields or {})
     unknown = set(updates) - _RUN_UPDATE_FIELDS
     if unknown:
         raise ValueError(f"not run columns: {sorted(unknown)}")
+    if expected_status is not None and expected_status not in PAUSED:
+        raise ValueError(f"expected status is not paused: {expected_status!r}")
     now = _now()
     assignments = ", ".join(f"{name} = ?" for name in updates)
     sql = "UPDATE runs SET status = 'pending', updated_at = ?"
     if assignments:
         sql += f", {assignments}"
-    placeholders = ",".join("?" * len(PAUSED))
-    sql += f" WHERE run_id = ? AND status IN ({placeholders})"
+    allowed_statuses = (expected_status,) if expected_status is not None else tuple(sorted(PAUSED))
+    placeholders = ",".join("?" * len(allowed_statuses))
+    sql += (
+        f" WHERE run_id = ? AND status IN ({placeholders}) "
+        "AND NOT EXISTS (SELECT 1 FROM run_questions q WHERE q.run_id = runs.run_id "
+        "AND q.confirmed_at = '' AND q.satisfied_at = '')"
+    )
     with _transition(connection):
         cursor = connection.execute(
             sql,
-            (now, *updates.values(), run_id, *sorted(PAUSED)),
+            (now, *updates.values(), run_id, *allowed_statuses),
         )
         if cursor.rowcount != 1:
             return False
@@ -428,7 +435,7 @@ def claim_paused_run(
 _RUN_COLUMNS: Final[str] = (
     "run_id, response_row_id, status, template_file_id, template_label, "
     "output_file_id, output_url, slack_thread_ts, failure_reason, photo_url, "
-    "photo_source, ai_enhanced, approved_warning_codes, pending_warning_code"
+    "photo_source, photo_event_id, ai_enhanced, approved_warning_codes, pending_warning_code"
 )
 
 
@@ -486,6 +493,7 @@ def _to_run(row: sqlite3.Row) -> RunRow:
         template_label=str(row["template_label"] or ""),
         photo_url=str(row["photo_url"] or ""),
         photo_source=str(row["photo_source"] or ""),
+        photo_event_id=str(row["photo_event_id"] or ""),
         ai_enhanced=bool(row["ai_enhanced"]),
         approved_warning_codes=str(row["approved_warning_codes"] or ""),
         pending_warning_code=str(row["pending_warning_code"] or ""),

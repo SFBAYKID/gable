@@ -16,6 +16,7 @@ from typing import Any, Final
 from gable.agents.contacts import sync_contacts
 from gable.config import ConfigError, Settings
 from gable.db.schema import apply_migrations, connect
+from gable.google_client import build_google_service
 from gable.logging_setup import configure_logging
 from gable.pipeline.live import build_runner
 from gable.pipeline.poller import Poller
@@ -46,14 +47,13 @@ def _local_requirements(settings: Settings) -> list[str]:
 def _build_google_clients(settings: Settings) -> tuple[Any, Any, Any]:
     """Construct Sheets, Drive, and Slides clients without importing Slack."""
     from google.oauth2 import service_account
-    from googleapiclient.discovery import build
 
     credentials = service_account.Credentials.from_service_account_file(  # type: ignore[no-untyped-call]
         str(settings.google_service_account_file), scopes=list(GOOGLE_SCOPES)
     )
-    sheets = build("sheets", "v4", credentials=credentials, cache_discovery=False)
-    drive = build("drive", "v3", credentials=credentials, cache_discovery=False)
-    slides = build("slides", "v1", credentials=credentials, cache_discovery=False)
+    sheets = build_google_service("sheets", "v4", credentials)
+    drive = build_google_service("drive", "v3", credentials)
+    slides = build_google_service("slides", "v1", credentials)
     return sheets, drive, slides
 
 

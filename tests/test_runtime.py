@@ -4,8 +4,9 @@ from __future__ import annotations
 
 import sqlite3
 import threading
-import time
 from pathlib import Path
+
+import pytest
 
 from gable.db.schema import apply_migrations, connect
 from gable.runtime import RuntimeComponents, serve
@@ -48,6 +49,22 @@ class FakePoller:
             msg = "poller broke"
             raise RuntimeError(msg)
         return 0
+
+
+class FakeNotifications:
+    """Records the independent durable-question worker lifecycle."""
+
+    def __init__(self, events: list[str]) -> None:
+        """Share the ordered runtime event recorder."""
+        self.events = events
+
+    def start(self) -> None:
+        """Record background startup."""
+        self.events.append("notifications started")
+
+    def close(self) -> None:
+        """Record the joined shutdown."""
+        self.events.append("notifications closed")
 
 
 def _components(
@@ -118,7 +135,9 @@ def test_database_connection_survives_a_thread_handoff(tmp_path: Path) -> None:
     assert failures == []
 
 
-def test_slack_is_served_without_watching_the_sheet_when_polling_is_off() -> None:
+def test_slack_is_served_without_watching_the_sheet_when_polling_is_off(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Polling can be held back while the Slack conversation is still exercised.
 
     The backfill guard is skipped in this mode on purpose. It exists to stop a
@@ -134,17 +153,39 @@ def test_slack_is_served_without_watching_the_sheet_when_polling_is_off() -> Non
         connection=connection,
         poll_enabled=False,
     )
-    result: list[int] = []
-    worker = threading.Thread(target=lambda: result.append(serve(components)), daemon=True)
-    worker.start()
-    for _ in range(200):
-        if "socket connected" in events:
-            break
-        time.sleep(0.01)
+    monkeypatch.setattr("gable.runtime._wait_for_shutdown", lambda: events.append("waited"))
+
+    assert serve(components) == 0
 
     assert "socket connected" in events, "Slack must still be connected"
     assert "poller checked" not in events, "the backfill guard must not block this mode"
     assert not any(e.startswith("poller on") for e in events), "the sheet must not be watched"
+
+
+def test_question_retries_run_and_join_when_sheet_polling_is_off(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Controlled release mode must not strand a Slack question until restart."""
+    events: list[str] = []
+    connection = sqlite3.connect(":memory:")
+    components = RuntimeComponents(
+        poller=FakePoller(events, ready=False),
+        socket=FakeSocket(events),
+        connection=connection,
+        notifications=FakeNotifications(events),
+        poll_enabled=False,
+    )
+    monkeypatch.setattr("gable.runtime._wait_for_shutdown", lambda: events.append("waited"))
+
+    assert serve(components) == 0
+
+    assert events == [
+        "socket connected",
+        "notifications started",
+        "waited",
+        "notifications closed",
+        "socket closed",
+    ]
 
 
 def test_polling_is_on_by_default() -> None:

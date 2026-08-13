@@ -17,8 +17,9 @@ from pathlib import Path
 from typing import Any, Final, Protocol
 
 from google.oauth2 import service_account
-from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
+
+from gable.google_client import build_google_service
 
 #: Read-only. Widening this is a decision, not a convenience.
 SCOPES: Final[tuple[str, ...]] = ("https://www.googleapis.com/auth/spreadsheets.readonly",)
@@ -67,16 +68,17 @@ class SheetClient:
             A ready client.
 
         Raises:
-            SheetError: if the credentials cannot be loaded. Raised here rather
-                than at first use so a misconfigured deploy fails at startup.
+            SheetError: if credentials or the bounded Google transport cannot
+                be constructed. Raised here rather than at first use so a
+                misconfigured deploy fails at startup.
         """
         try:
             credentials = service_account.Credentials.from_service_account_file(  # type: ignore[no-untyped-call]
                 str(service_account_file), scopes=list(SCOPES)
             )
-            service = build("sheets", "v4", credentials=credentials, cache_discovery=False)
+            service = build_google_service("sheets", "v4", credentials)
         except Exception as exc:
-            msg = f"could not load the service account key: {type(exc).__name__}"
+            msg = f"could not construct the read-only Sheets client: {type(exc).__name__}"
             raise SheetError(msg) from exc
         return cls(spreadsheet_id=spreadsheet_id, service=service)
 

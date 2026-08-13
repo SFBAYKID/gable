@@ -29,6 +29,7 @@ from collections.abc import Callable
 from typing import Any, Final
 
 from gable.slackapp.brain import Decision, think
+from gable.slackapp.client import build_web_client
 from gable.slackapp.context import (
     ContextProvider,
     HistoryProvider,
@@ -58,7 +59,7 @@ FALLBACK: Final[str] = (
 
 ProgressReporter = Callable[[str], None]
 FileShareHandler = Callable[[dict[str, Any], Any, ProgressReporter], str]
-ActionHandler = Callable[[Decision, str, ProgressReporter], str]
+ActionHandler = Callable[[Decision, str, ProgressReporter, str], str]
 Thinker = Callable[..., Decision]
 
 ACTION_STAGES: Final[dict[str, str]] = {
@@ -167,6 +168,7 @@ def reply_for_decision(
     action_handler: ActionHandler | None = None,
     thread_ts: str = "",
     progress: ProgressReporter = lambda _stage: None,
+    action_id: str = "",
 ) -> str:
     """Choose an honest reply while action execution is being connected.
 
@@ -176,6 +178,7 @@ def reply_for_decision(
         thread_ts: Thread that identifies the database run.
         progress: Updates the same native waiting state while a long action
             moves through its real stages.
+        action_id: Stable Slack event identity used to suppress action replay.
 
     Returns:
         The model's reply for conversation and clarification. For an action no
@@ -188,7 +191,7 @@ def reply_for_decision(
     if not decision.wants_action or decision.tool == "ask_clarifying":
         return decision.reply
     if action_handler is not None:
-        return action_handler(decision, thread_ts, progress)
+        return action_handler(decision, thread_ts, progress, action_id)
     return "I understood the change, but I could not apply it. I have not changed the flyer."
 
 
@@ -299,11 +302,13 @@ def answer_mention(
                         action_handler,
                         str(thread or ""),
                         waiting.stage,
+                        str(event.get("client_msg_id") or event.get("ts") or ""),
                     )
                 )
                 # Said inside the block on purpose: the native state remains up
                 # until the answer is in the thread, then Slack clears it.
-                say(text=answer, thread_ts=thread)
+                if answer:
+                    say(text=answer, thread_ts=thread)
             except Exception:
                 logger.exception("mention response failed")
                 say(text=FALLBACK, thread_ts=thread)
@@ -370,8 +375,10 @@ def answer_thread_reply(
                         action_handler,
                         thread,
                         waiting.stage,
+                        str(event.get("client_msg_id") or event.get("ts") or ""),
                     )
-                say(text=safe_reply(answer), thread_ts=thread)
+                if answer:
+                    say(text=safe_reply(answer), thread_ts=thread)
             except Exception:
                 logger.exception("thread response failed")
                 say(text=FALLBACK, thread_ts=thread)
@@ -422,8 +429,8 @@ def build_app(
         msg = "SLACK_BOT_TOKEN is not set, so Gable would start and answer nobody"
         raise RuntimeError(msg)
 
-    app = App(token=bot_token, signing_secret="", logger=logger)
-    thread_ownership = ThreadOwnership()
+    app = App(client=build_web_client(bot_token), signing_secret="", logger=logger)
+    thread_ownership = ThreadOwnership(allowed_user_ids=allowed_user_ids)
     replay_guard = EventReplayGuard()
 
     @app.event("app_mention")

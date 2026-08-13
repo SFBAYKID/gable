@@ -133,6 +133,25 @@ def test_a_reduction_takes_the_new_price() -> None:
     assert _intake(request_type="Price Reduction", new_price="$345,000").price == "$345,000"
 
 
+def test_a_sold_post_never_uses_the_new_price_column() -> None:
+    assert _intake(request_type="Sold", new_price="$345,000").price == ""
+
+
+def test_a_reduction_never_uses_the_closing_price_column() -> None:
+    assert _intake(request_type="Price Reduction", closing_price="$450,000").price == ""
+
+
+def test_unrelated_request_types_ignore_both_special_purpose_price_columns() -> None:
+    assert (
+        _intake(
+            request_type="New Listing",
+            new_price="$345,000",
+            closing_price="$450,000",
+        ).price
+        == ""
+    )
+
+
 def test_no_price_column_means_no_price() -> None:
     assert _intake().price == ""
 
@@ -155,7 +174,15 @@ def test_a_known_fact_is_not_researched_twice() -> None:
 
 
 def test_a_supplied_price_is_not_researched() -> None:
-    assert "price" not in missing_public_facts(_intake(closing_price="$450,000"))
+    assert "list_price" not in missing_public_facts(
+        _intake(request_type="Sold", closing_price="$450,000")
+    )
+
+
+def test_an_irrelevant_price_column_does_not_suppress_list_price_research() -> None:
+    assert "list_price" in missing_public_facts(
+        _intake(request_type="New Listing", closing_price="$450,000")
+    )
 
 
 def test_nothing_is_researched_without_an_address() -> None:
@@ -215,9 +242,10 @@ def test_a_missing_address_is_asked_about_first() -> None:
     assert asks[0].field_name == "address"
 
 
-def test_two_prices_at_once_is_a_contradiction() -> None:
-    asks = incoherences(_intake(new_price="$1", closing_price="$2"))
-    assert any(q.field_name == "price" for q in asks)
+@pytest.mark.parametrize("request_type", ["Sold", "Price Reduction", "New Listing"])
+def test_irrelevant_special_price_columns_do_not_create_a_question(request_type: str) -> None:
+    asks = incoherences(_intake(request_type=request_type, new_price="$1", closing_price="$2"))
+    assert not any(q.field_name == "price" for q in asks)
 
 
 def test_a_request_type_with_no_category_is_not_a_contradiction() -> None:

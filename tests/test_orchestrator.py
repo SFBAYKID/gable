@@ -160,10 +160,43 @@ def test_missing_unselected_public_facts_do_not_become_questions() -> None:
     assert "square feet" not in step.say
 
 
+def test_a_submitted_price_does_not_hide_a_missing_required_bedroom_count() -> None:
+    step = after_research(
+        _intake(request_type="Sold", closing_price="$450,000"),
+        Facts(),
+        {},
+        frozenset({"beds"}),
+    )
+
+    assert step.outcome is Outcome.ASK
+    assert "beds" in step.say
+
+
+def test_a_missing_required_public_list_price_is_a_question() -> None:
+    step = after_research(
+        _intake(request_type="New Listing"),
+        Facts(),
+        {},
+        frozenset({"list_price"}),
+    )
+
+    assert step.outcome is Outcome.ASK
+    assert "list price" in step.say
+
+
 def test_what_the_agent_typed_is_never_overwritten() -> None:
     """Gable fills blanks; it does not correct a human's own listing."""
     found = Facts(beds="9", baths="9", square_feet="9,999", confidence=0.9)
-    step = after_research(_intake(), found, {"beds": "4", "baths": "3", "square_feet": "1,804"})
+    step = after_research(
+        _intake(),
+        found,
+        {
+            "beds": "4",
+            "baths": "3",
+            "square_feet": "1,804",
+            "list_price": "$515,000",
+        },
+    )
     assert step.outcome is Outcome.BUILD
     assert "beds" not in step.say
 

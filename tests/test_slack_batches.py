@@ -40,3 +40,20 @@ def test_zero_deliveries_never_claim_a_post_is_ready() -> None:
     assert message.startswith("0 posts ready")
     assert "Included" not in message
     assert not violations(message)
+
+
+def test_long_ready_addresses_cannot_hide_held_or_failed_counts() -> None:
+    outcomes = (
+        *(
+            BatchOutcome(f"{index} {'Long Property Boulevard ' * 4}", "delivered")
+            for index in range(12)
+        ),
+        BatchOutcome("13 Held Road", "needs_photo"),
+        BatchOutcome("14 Failed Lane", "failed"),
+    )
+
+    message = summarize(outcomes)
+
+    assert "Held back  1 listing" in message
+    assert "Failed  1 listing" in message
+    assert not violations(message)
