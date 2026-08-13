@@ -1,0 +1,483 @@
+"""Reject template and content problems before a flyer copy is created.
+
+Google Slides already exposes the exact geometry of every text box and photo
+well.  That data is more reliable for measurement than asking a vision model to
+guess coordinates from pixels.  This module uses those measurements to answer
+three questions before the build starts:
+
+* can Gable identify the fields and the hero-photo frame safely;
+* will this listing's actual values fit at the template's designed type size;
+* will fitting the supplied photo discard an unusually large part of it.
+
+The rendered-flyer vision pass remains the final gate.  Preflight prevents a
+known problem; vision catches effects that cannot be inferred from rectangles,
+such as a roofline hidden by a decorative mask.
+"""
+
+from __future__ import annotations
+
+import re
+from dataclasses import dataclass
+from typing import Any, Final
+
+from gable.photos.fit import assess
+from gable.slides import fields, fitting
+from gable.slides.elements import descendants, font_size_pt, font_weight, text_content
+from gable.slides.hero import find_hero_frame
+
+PHOTO_CROP_WARNING: Final[float] = 0.30
+_TOKEN_MARKS: Final[re.Pattern[str]] = re.compile(r"[\[\]{}<>]")
+
+# A new design is checked with realistic upper-bound content before any listing
+# depends on it. These are capacities, not values Gable will ever print. They
+# deliberately cover the long-but-normal end of the current roster and form.
+TEMPLATE_CAPACITY_CHARS: Final[dict[str, int]] = {
+    "address": 52,
+    "price": 14,
+    "beds": 8,
+    "baths": 8,
+    "square_feet": 10,
+    "agent_name": 28,
+    "agent_phone": 18,
+    "agent_email": 42,
+    "client_name": 28,
+    "review_quote": 280,
+    "agent_title": 24,
+    "social_handle": 28,
+    "neighborhood": 32,
+    "website": 36,
+    "open_house": 38,
+}
+
+# These values become confusing or visually broken when they wrap. A tall box
+# is not permission to put half an email, phone number, price, or person's name
+# on a second line. Addresses, review copy, and open-house wording may be
+# intentionally multiline.
+SINGLE_LINE_FIELDS: Final[frozenset[str]] = frozenset(
+    {
+        "price",
+        "beds",
+        "baths",
+        "square_feet",
+        "agent_name",
+        "agent_phone",
+        "agent_email",
+        "client_name",
+        "agent_title",
+        "social_handle",
+        "neighborhood",
+        "website",
+    }
+)
+
+
+@dataclass(frozen=True, slots=True)
+class Issue:
+    """One problem Gable can explain before it creates a flyer."""
+
+    code: str
+    say: str
+    blocking: bool = False
+    status: str = "needs_template"
+    advisory: str = ""
+
+
+@dataclass(frozen=True, slots=True)
+class Report:
+    """The measured result for one template and one listing."""
+
+    issues: tuple[Issue, ...] = ()
+    hero_width_px: int = 0
+    hero_height_px: int = 0
+
+    @property
+    def blockers(self) -> tuple[Issue, ...]:
+        """Problems that cannot be overridden safely."""
+        return tuple(issue for issue in self.issues if issue.blocking)
+
+    @property
+    def warnings(self) -> tuple[Issue, ...]:
+        """Measured tradeoffs Carmen may explicitly accept."""
+        return tuple(issue for issue in self.issues if not issue.blocking)
+
+
+def _implied_font_size_pt(height_emu: float) -> float:
+    """Estimate inherited type size from a one-line box's height."""
+    if height_emu <= 0:
+        return 0.0
+    return max(1.0, (height_emu / fitting.EMU_PER_POINT) / 1.2)
+
+
+def text_boxes(presentation: dict[str, Any]) -> list[fitting.TextBox]:
+    """Measure every text box in a Slides presentation.
+
+    Imported PowerPoint files often inherit their font size from the theme.
+    Slides omits that value, so the box height supplies a conservative estimate
+    instead of silently skipping the field most likely to overflow.
+    """
+    boxes: list[fitting.TextBox] = []
+    for page in presentation.get("slides", []):
+        for element in descendants(page.get("pageElements", [])):
+            text = text_content(element)
+            if not text:
+                continue
+            transform = element.get("transform", {})
+            size = element.get("size", {})
+            width = float(size.get("width", {}).get("magnitude", 0) * transform.get("scaleX", 1))
+            height = float(size.get("height", {}).get("magnitude", 0) * transform.get("scaleY", 1))
+            size_pt = font_size_pt(element) or _implied_font_size_pt(height)
+            lines = 1
+            if size_pt > 0 and height > 0:
+                lines = max(1, int((height / fitting.EMU_PER_POINT) // (size_pt * 1.2)))
+            boxes.append(
+                fitting.TextBox(
+                    object_id=str(element.get("objectId") or ""),
+                    text=text,
+                    font_size_pt=size_pt,
+                    width_emu=width,
+                    lines=lines,
+                    weight=font_weight(element),
+                )
+            )
+    return boxes
+
+
+def _readable(text: str) -> str:
+    """Make a template literal safe to show under Gable's no-brackets rule."""
+    return " ".join(_TOKEN_MARKS.sub("", text).split()) or "an unnamed field"
+
+
+def _field_for_literal(resolution: fields.Resolution, literal: str) -> str:
+    """Return the semantic field name carried by one template literal."""
+    for name, primary in resolution.fields.items():
+        if primary == literal or literal in resolution.also.get(name, ()):
+            return name
+    return "text"
+
+
+def _replacement_issue(
+    template_label: str,
+    field_name: str,
+    box: fitting.TextBox,
+    replacement: str,
+) -> Issue | None:
+    """Explain a measured overflow for one actual replacement value."""
+    fit = fitting.fit_for(
+        box.object_id,
+        replacement,
+        box.font_size_pt,
+        box.width_emu,
+        1 if field_name in SINGLE_LINE_FIELDS else box.lines,
+        box.weight,
+    )
+
+    if not fit.overflows:
+        return None
+
+    readable = field_name.replace("_", " ")
+    current_width = max(1.0, fit.box_width_pt)
+    needed_width = fitting.estimate_width_pt(replacement, fit.current_pt, fit.weight)
+    extra = max(1, round(((needed_width / current_width) - 1) * 100))
+    prefix = f"I checked the {template_label} design before building."
+    if fit.too_small_to_read:
+        return Issue(
+            code=f"unreadable_{field_name}",
+            say=(
+                f"{prefix} The {readable} would need about {extra} percent more room, "
+                f"and shrinking it enough would make it {fitting.MIN_READABLE_PT:g} points "
+                "or smaller. Widen that section, then tell me to check the updated "
+                "template again."
+            ),
+            blocking=True,
+        )
+    return Issue(
+        code=f"tight_{field_name}",
+        say=(
+            f"{prefix} The {readable} is {len(replacement)} characters and needs about "
+            f"{extra} percent more room at its current size. Would you like me to run this "
+            "design anyway, or update the template and have me check it again?"
+        ),
+        advisory=f"I sized the {readable} down because it was too long for its template box.",
+    )
+
+
+def _average_character_capacity(box: fitting.TextBox, lines: int | None = None) -> int:
+    """Estimate average-character capacity at the design's current type size."""
+    if box.font_size_pt <= 0 or box.width_emu <= 0:
+        return 0
+    available_lines = box.lines if lines is None else lines
+    available = (box.width_emu / fitting.EMU_PER_POINT) * max(1, available_lines) * fitting.SAFETY
+    weight = fitting.BOLD_MULTIPLIER if box.weight >= fitting.BOLD_WEIGHT else 1.0
+    return max(0, int(available / (box.font_size_pt * 0.52 * weight)))
+
+
+def certify(
+    presentation: dict[str, Any],
+    template_label: str,
+    category: str,
+    *,
+    slide_px: tuple[int, int] = (1080, 1350),
+) -> Report:
+    """Check a newly filed template before a real listing depends on it.
+
+    Structural checks use the same evidence as listing preflight. Capacity
+    checks then measure each recognised field against a documented long-but-
+    normal character allowance. The estimate is described as approximate in
+    Slack; the actual listing value is measured again before every build.
+    """
+    text = [
+        text_content(element)
+        for page in presentation.get("slides", [])
+        for element in descendants(page.get("pageElements", []))
+        if text_content(element)
+    ]
+    resolution = fields.resolve(text)
+    structural = analyze(
+        presentation,
+        template_label,
+        category,
+        resolution,
+        {},
+        slide_px=slide_px,
+    )
+    issues = list(structural.issues)
+    boxes = text_boxes(presentation)
+    warned: set[str] = set()
+    for field_name, expected in TEMPLATE_CAPACITY_CHARS.items():
+        literals = [
+            literal
+            for literal in (
+                resolution.fields.get(field_name, ""),
+                *resolution.also.get(field_name, ()),
+            )
+            if literal
+        ]
+        for literal in literals:
+            matching = [box for box in boxes if box.text.strip() == literal.strip()]
+            for box in matching:
+                capacity = _average_character_capacity(
+                    box,
+                    1 if field_name in SINGLE_LINE_FIELDS else None,
+                )
+                if capacity >= expected or field_name in warned:
+                    continue
+                readable = field_name.replace("_", " ")
+                issues.append(
+                    Issue(
+                        f"capacity_{field_name}",
+                        (
+                            f"I checked the new {template_label} design. Its {readable} "
+                            f"section holds roughly {capacity} average characters at the "
+                            f"current size, while the safe template test allows {expected}. "
+                            "Would you mind making that section wider? Once you do, tell me "
+                            "to check the updated template again."
+                        ),
+                    )
+                )
+                warned.add(field_name)
+                break
+
+    return Report(tuple(issues), structural.hero_width_px, structural.hero_height_px)
+
+
+def analyze(
+    presentation: dict[str, Any],
+    template_label: str,
+    category: str,
+    resolution: fields.Resolution,
+    values: dict[str, str],
+    *,
+    slide_px: tuple[int, int] = (1080, 1350),
+    photo_size: tuple[int, int] | None = None,
+) -> Report:
+    """Inspect a template and this listing's values before any copy is made."""
+    issues: list[Issue] = []
+    pages = presentation.get("slides", [])
+    if len(pages) != 1:
+        count = len(pages)
+        return Report(
+            issues=(
+                Issue(
+                    "slide_count",
+                    f"I checked the {template_label} design before building. It has {count} "
+                    "slides, but a flyer must contain exactly one. Remove the extra slides, "
+                    "then tell me to check it again.",
+                    blocking=True,
+                ),
+            )
+        )
+
+    page_size = presentation.get("pageSize", {})
+    slide_width = float(page_size.get("width", {}).get("magnitude", 0) or 0)
+    slide_height = float(page_size.get("height", {}).get("magnitude", 0) or 0)
+    if slide_width <= 0 or slide_height <= 0:
+        return Report(
+            issues=(
+                Issue(
+                    "slide_size",
+                    f"I could not measure the page size in the {template_label} design, so I "
+                    "cannot prove that its fields or photo will fit. Re-save the template as "
+                    "a Google Slides file, then tell me to check it again.",
+                    blocking=True,
+                ),
+            )
+        )
+
+    if not resolution.is_usable_for(category):
+        issues.append(
+            Issue(
+                "missing_fields",
+                f"I checked the {template_label} design before building, but I could not find "
+                "a property-address field I can fill safely. Add a clear address placeholder, "
+                "then tell me to check it again.",
+                blocking=True,
+            )
+        )
+
+    suspicious = next(
+        (literal for literal in resolution.unrecognised if _TOKEN_MARKS.search(literal)), ""
+    )
+    if suspicious:
+        issues.append(
+            Issue(
+                "unknown_placeholder",
+                f"I found a fillable-looking field called {_readable(suspicious)} in the "
+                f"{template_label} design, but I do not know what data belongs there. Rename "
+                "it to a field Gable knows, then tell me to check it again.",
+                blocking=True,
+            )
+        )
+
+    frame = find_hero_frame(pages[0], slide_width, slide_height)
+    if frame is None:
+        issues.append(
+            Issue(
+                "missing_photo_frame",
+                f"I checked the {template_label} design before building, but I could not "
+                "identify exactly one safe main-photo frame. Make that frame a separate, "
+                "unfilled shape near the top, then tell me to check it again.",
+                blocking=True,
+            )
+        )
+        return Report(tuple(issues))
+
+    hero_width_px = max(1, round(frame.width / slide_width * slide_px[0]))
+    hero_height_px = max(1, round(frame.height / slide_height * slide_px[1]))
+
+    top_level_ids = {
+        str(element.get("objectId") or "")
+        for page in pages
+        for element in page.get("pageElements", [])
+    }
+    literals_by_field = {
+        name: (primary, *resolution.also.get(name, ()))
+        for name, primary in resolution.fields.items()
+    }
+    grouped_field = next(
+        (
+            name
+            for page in pages
+            for element in descendants(page.get("pageElements", []))
+            for name, literals in literals_by_field.items()
+            if str(element.get("objectId") or "") not in top_level_ids
+            and text_content(element).strip() in {literal.strip() for literal in literals}
+        ),
+        "",
+    )
+    if grouped_field:
+        readable = grouped_field.replace("_", " ")
+        issues.append(
+            Issue(
+                f"grouped_{grouped_field}",
+                f"I checked the {template_label} design before building. Its {readable} "
+                "field is inside grouped artwork, so I cannot measure its final text "
+                "capacity reliably. Ungroup that field into its own text box, then tell "
+                "me to check it again.",
+                blocking=True,
+            )
+        )
+
+    # A recognised field with no truthful value is already a known failure. Do
+    # not create a copy and hope the final vision pass notices its placeholder.
+    # New-template certification deliberately supplies no listing values, so
+    # this check applies only to an actual run.
+    if values:
+        missing = next(
+            (name for name in resolution.fields if not values.get(name, "").strip()),
+            "",
+        )
+        if missing:
+            readable = missing.replace("_", " ")
+            issues.append(
+                Issue(
+                    f"missing_value_{missing}",
+                    f"I checked the {template_label} design before building. It has a "
+                    f"{readable} section, but I do not have a value for it. What should "
+                    "it say? You can also remove that section from the template and tell "
+                    "me to check it again.",
+                    blocking=True,
+                    status="needs_info",
+                )
+            )
+
+    pairs = fields.replacements(resolution, values)
+    all_text = [text_content(element) for element in descendants(pages[0].get("pageElements", []))]
+    for literal in pairs:
+        total = sum(text.count(literal) for text in all_text)
+        standalone = sum(text.strip() == literal.strip() for text in all_text)
+        if total == 0 or total != standalone:
+            issues.append(
+                Issue(
+                    "unsafe_replacement",
+                    f"I checked the {template_label} design before building. Its "
+                    f"{_field_for_literal(resolution, literal).replace('_', ' ')} field is "
+                    "embedded in other text, so filling it could change the wrong words. Put "
+                    "that field in its own text box, then tell me to check it again.",
+                    blocking=True,
+                )
+            )
+            break
+
+    boxes = text_boxes(presentation)
+    warned: set[str] = set()
+    for literal, replacement in pairs.items():
+        matching = [box for box in boxes if box.text.strip() == literal.strip()]
+        field_name = _field_for_literal(resolution, literal)
+        if not matching:
+            issues.append(
+                Issue(
+                    f"unmeasured_{field_name}",
+                    f"I found the {field_name.replace('_', ' ')} in the {template_label} "
+                    "design, but I could not measure its text box. Put it in a normal Slides "
+                    "text box, then tell me to check it again.",
+                    blocking=True,
+                )
+            )
+            continue
+        for box in matching:
+            issue = _replacement_issue(template_label, field_name, box, replacement)
+            if issue is not None and issue.code not in warned:
+                issues.append(issue)
+                warned.add(issue.code)
+
+    if photo_size is not None:
+        photo_width, photo_height = photo_size
+        photo = assess(photo_width, photo_height, hero_width_px, hero_height_px)
+        if photo.crop_loss > PHOTO_CROP_WARNING:
+            percent = round(photo.crop_loss * 100)
+            issues.append(
+                Issue(
+                    "large_photo_crop",
+                    f"I checked the photo against the {template_label} design before "
+                    f"building. Their shapes differ enough that about {percent} percent of "
+                    "the photo would sit outside the frame. Send a photo closer to the "
+                    "frame's shape, update the frame, or tell me to run this design anyway.",
+                    status="needs_photo",
+                    advisory=(
+                        f"I fitted the photo to the current frame at your request; about "
+                        f"{percent} percent was outside the frame."
+                    ),
+                )
+            )
+
+    return Report(tuple(issues), hero_width_px, hero_height_px)

@@ -51,9 +51,13 @@ class RunRow:
     output_url: str = ""
     slack_thread_ts: str = ""
     failure_reason: str = ""
+    template_file_id: str = ""
+    template_label: str = ""
     #: The fitted, published hero photo, once one has been attached. Carried
     #: here so a paused run can be continued without asking for it again.
     photo_url: str = ""
+    photo_source: str = ""
+    ai_enhanced: bool = False
 
     @property
     def is_terminal(self) -> bool:
@@ -75,6 +79,18 @@ class StoredSubmission:
     submitted_at: str
     intake: Intake
     content_hash: str
+
+
+@dataclass(frozen=True, slots=True)
+class TemplateAudit:
+    """One source template Gable has adopted or measured."""
+
+    file_id: str
+    name: str
+    modified_time: str
+    status: str
+    summary: str = ""
+    slack_thread_ts: str = ""
 
 
 def record_submission(
@@ -327,8 +343,9 @@ def latest_run(connection: sqlite3.Connection, response_row_id: str) -> RunRow |
         sqlite3.Error: on a query failure.
     """
     row = connection.execute(
-        "SELECT run_id, response_row_id, status, output_file_id, output_url,"
-        " slack_thread_ts, failure_reason, photo_url"
+        "SELECT run_id, response_row_id, status, template_file_id, template_label,"
+        " output_file_id, output_url, slack_thread_ts, failure_reason, photo_url,"
+        " photo_source, ai_enhanced"
         " FROM runs WHERE response_row_id = ? ORDER BY created_at DESC LIMIT 1",
         (response_row_id,),
     ).fetchone()
@@ -352,8 +369,9 @@ def run_for_thread(connection: sqlite3.Connection, thread_ts: str) -> RunRow | N
         sqlite3.Error: on a query failure.
     """
     row = connection.execute(
-        "SELECT run_id, response_row_id, status, output_file_id, output_url,"
-        " slack_thread_ts, failure_reason, photo_url"
+        "SELECT run_id, response_row_id, status, template_file_id, template_label,"
+        " output_file_id, output_url, slack_thread_ts, failure_reason, photo_url,"
+        " photo_source, ai_enhanced"
         " FROM runs WHERE slack_thread_ts = ? ORDER BY created_at DESC LIMIT 1",
         (thread_ts,),
     ).fetchone()
@@ -375,8 +393,9 @@ def paused_runs(connection: sqlite3.Connection) -> list[RunRow]:
     """
     placeholders = ",".join("?" * len(PAUSED))
     rows = connection.execute(
-        "SELECT run_id, response_row_id, status, output_file_id, output_url,"
-        " slack_thread_ts, failure_reason, photo_url"
+        "SELECT run_id, response_row_id, status, template_file_id, template_label,"
+        " output_file_id, output_url, slack_thread_ts, failure_reason, photo_url,"
+        " photo_source, ai_enhanced"
         f" FROM runs WHERE status IN ({placeholders}) ORDER BY created_at",
         tuple(sorted(PAUSED)),
     ).fetchall()
@@ -393,7 +412,114 @@ def _to_run(row: sqlite3.Row) -> RunRow:
         output_url=row["output_url"] or "",
         slack_thread_ts=row["slack_thread_ts"] or "",
         failure_reason=row["failure_reason"] or "",
+        template_file_id=row["template_file_id"] or "",
+        template_label=row["template_label"] or "",
         photo_url=row["photo_url"] or "",
+        photo_source=row["photo_source"] or "",
+        ai_enhanced=bool(row["ai_enhanced"]),
+    )
+
+
+def template_catalog_adopted(connection: sqlite3.Connection) -> bool:
+    """Whether the pre-existing template folder has been baselined once."""
+    row = connection.execute("SELECT 1 FROM template_scan_state WHERE singleton = 1").fetchone()
+    return row is not None
+
+
+def adopt_template_catalog(
+    connection: sqlite3.Connection,
+    templates: list[tuple[str, str, str]],
+) -> None:
+    """Record current files without announcing them as newly uploaded."""
+    now = _now()
+    connection.executemany(
+        """
+        INSERT OR IGNORE INTO template_audits (
+            file_id, name, modified_time, status, summary, checked_at
+        ) VALUES (?, ?, ?, 'baseline', 'adopted before template monitoring', ?)
+        """,
+        [(file_id, name, modified_time, now) for file_id, name, modified_time in templates],
+    )
+    connection.execute(
+        "INSERT OR IGNORE INTO template_scan_state (singleton, adopted_at) VALUES (1, ?)",
+        (now,),
+    )
+
+
+def template_audit(
+    connection: sqlite3.Connection,
+    file_id: str,
+) -> TemplateAudit | None:
+    """Return the stored review for one source file, if Gable has seen it."""
+    row = connection.execute(
+        """
+        SELECT file_id, name, modified_time, status, summary, slack_thread_ts
+          FROM template_audits
+         WHERE file_id = ?
+        """,
+        (file_id,),
+    ).fetchone()
+    return _to_template_audit(row) if row else None
+
+
+def template_for_thread(
+    connection: sqlite3.Connection,
+    thread_ts: str,
+) -> TemplateAudit | None:
+    """Resolve a Gable template-review thread back to its Drive file."""
+    row = connection.execute(
+        """
+        SELECT file_id, name, modified_time, status, summary, slack_thread_ts
+          FROM template_audits
+         WHERE slack_thread_ts = ?
+         ORDER BY checked_at DESC
+         LIMIT 1
+        """,
+        (thread_ts,),
+    ).fetchone()
+    return _to_template_audit(row) if row else None
+
+
+def record_template_audit(
+    connection: sqlite3.Connection,
+    file_id: str,
+    name: str,
+    modified_time: str,
+    status: str,
+    summary: str,
+    slack_thread_ts: str = "",
+) -> None:
+    """Upsert one measured source-template outcome and its owned thread."""
+    connection.execute(
+        """
+        INSERT INTO template_audits (
+            file_id, name, modified_time, status, summary,
+            slack_thread_ts, checked_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(file_id) DO UPDATE SET
+            name = excluded.name,
+            modified_time = excluded.modified_time,
+            status = excluded.status,
+            summary = excluded.summary,
+            slack_thread_ts = CASE
+                WHEN excluded.slack_thread_ts = '' THEN template_audits.slack_thread_ts
+                ELSE excluded.slack_thread_ts
+            END,
+            checked_at = excluded.checked_at
+        """,
+        (file_id, name, modified_time, status, summary, slack_thread_ts, _now()),
+    )
+
+
+def _to_template_audit(row: sqlite3.Row) -> TemplateAudit:
+    """Turn one template audit query into its immutable record."""
+    return TemplateAudit(
+        file_id=str(row["file_id"]),
+        name=str(row["name"]),
+        modified_time=str(row["modified_time"] or ""),
+        status=str(row["status"]),
+        summary=str(row["summary"] or ""),
+        slack_thread_ts=str(row["slack_thread_ts"] or ""),
     )
 
 

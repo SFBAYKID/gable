@@ -1,166 +1,117 @@
-# Gable — project brief
+# Gable
 
-Everything the building agent needs to start. Hand this whole folder to the
-agent in PyCharm.
+Gable turns one Google Form submission plus one human-supplied property photo
+into an editable Google Slides flyer. It works in Slack with Carmen and Chase,
+never publishes outside the configured Gable channel, and never calls a flyer
+ready unless its deterministic checks and rendered-image inspection both pass.
 
----
+The current implementation and its limits are documented in
+`AUDIT_2026-08-12.md`. Runtime language and safety rules live in `AGENTS.md`;
+engineering constraints and the decision history live in `CLAUDE.md` and
+`ARCHITECTURE.md`.
 
-## The name
+## What happens on a listing
 
-**Gable.** A gable is the triangular end of a pitched roof — the shape every
-house icon is already drawn from, which is why the logo writes itself. One
-syllable, fast to type as `@gable`, professional without being cute, and it
-won't sound dated in two years.
+1. The poller reads the form-response tab by header name and records the row in
+   SQLite without modifying the Sheet.
+2. Gable selects the native Google Slides file in `Generic Templates` whose
+   name matches the form's request type.
+3. Before copying anything, it reads the current source file, resolves the
+   fields, measures the text boxes and hero frame, and checks the listing's real
+   values and supplied photo against those measurements.
+4. A structural problem or unreadable result pauses the listing. A measured
+   but usable text or crop warning asks Carmen whether to run as-is or update
+   the source template.
+5. A Slack photo keeps its original composition until the exact frame is known.
+   Gable then crops and resizes once. Enlargement up to 2x is local; beyond 2x,
+   one policy- and spend-gated GPT Image 2 edit may restore resolution while a
+   fidelity check preserves the property and composition.
+6. Gable copies the template, fills standalone fields, reads every value back,
+   places the hero and headshot, fits only text it changed, renders a thumbnail,
+   and asks the configured vision model to compare the supplied property photo
+   with the visible result.
+7. Only a confident pass is linked as ready. The output is a live Slides file,
+   so Carmen can also correct it directly.
 
-Alternates considered, in case you want to change it (it's a find-and-replace
-across these files plus one line in the Slack manifest):
+Every user-triggered Slack turn, including template rechecks and photo uploads,
+uses the same native purple waiting state and switches to the real work stage
+after the short personality sequence.
 
-| Name | Angle |
-|---|---|
-| **Curb** | From "curb appeal." Real-estate native, very short. |
-| **Placard** | The sign in the front yard — literally the artifact being made. |
-| **Shingle** | "Hanging out your shingle," plus roof shingle. Warmer, more playful. |
-| **Foyer** | Entryway. Softer, more hospitality than real estate. |
+New source templates receive deterministic structure and text-capacity checks,
+then a placeholder-aware visual inspection for clipping, overlap, spacing,
+alignment, padding, and off-canvas artwork before they are certified.
 
-## The logo
+## Template contract
 
-`assets/gable-icon-512.png` — 512×512, Slack's required size.
+- Put templates in `Templates / Generic Templates` as native Google Slides.
+- Name each file exactly like the corresponding form request type. Matching is
+  case- and whitespace-tolerant; duplicate names are refused.
+- Use exactly one slide.
+- Keep every replaceable value in its own ordinary text box. Supported labels
+  and sample-value conventions are resolved by `slides/fields.py`.
+- Keep one separate, unfilled main-photo shape near the top of the slide. Gable
+  refuses to infer a frame when more than one candidate is plausible.
+- Give normal addresses up to 52 average characters, emails up to 42, and agent
+  names up to 28 enough room at the intended type size. These are certification
+  targets; each listing is measured again with its actual content.
 
-A warm amber gable roof sitting on a white flyer, on a deep slate ground. The
-mark reads as *house* and *document* simultaneously, which is exactly what the
-agent does. It stays legible at 24px in a Slack sidebar, which is where it will
-actually live. Background color `#16222E` is set in the manifest to match.
+The first template-folder scan adopts existing files silently. Every later new
+file is measured once and gets its own Gable-owned Slack thread. After changing
+the source, reply in that thread that it is updated; Gable reloads the same Drive
+file and checks it again. A listing-specific warning also accepts an explicit
+instruction to run the current design anyway, but structural and unreadable
+problems are never overridable.
 
----
+## Setup
 
-## What's in this folder
+Requirements are Python 3.11 or newer, a Slack app installed in Socket Mode, a
+Google service account with Sheets, Drive and Slides enabled, the intake Sheet,
+and a Google shared drive. Share only those two resources with the service
+account. Source templates and output must be in the shared drive because a
+service account has no usable My Drive storage quota.
 
-| File | Purpose |
-|---|---|
-| `CLAUDE.md` | Rules for the agent building this. Honesty, code standards, what's verified vs. guessed. **Read first.** |
-| `ARCHITECTURE.md` | System design, data model, decision log. |
-| `AGENTS.md` | How Gable behaves at runtime — Slack message formats, prohibitions. |
-| `slack/manifest.json` | Paste into api.slack.com to create or update the app. |
-| `.env.example` | Every config variable, documented. |
-| `assets/gable-icon-512.png` | Slack app icon. |
+```bash
+python3 -m venv .venv
+.venv/bin/pip install -e '.[dev]'
+cp .env.example .env
+.venv/bin/python tools/check_connections.py
+.venv/bin/python tools/adopt_backfill.py
+make check
+python -m gable.slackapp.runtime
+```
 
----
+Fill `.env` before running connection checks. Never commit it or place the
+service-account JSON inside the repository.
 
-## Setup order
+## Verification
 
-Things that must happen in sequence, because each depends on the last.
+`make check` is the definition-of-done gate: Ruff formatting and lint, strict
+Mypy, and the full Pytest suite.
 
-**1. You (Chase), not the agent — these involve credentials**
+To exercise the real new-template path without touching the response Sheet or
+posting to Slack, copy and inspect one existing source through a temporary
+SQLite database:
 
-- Create the Slack app from `slack/manifest.json`, upload the icon, generate the
-  app-level token, install to the workspace, `/invite @Gable` to `C0BP597644B`.
-- Create a Google Cloud service account, enable the Sheets and Drive APIs,
-  download the JSON key.
-- **Share the Sheet with the service account's `client_email` as Editor.** It
-  does not inherit your access — this step is missed constantly.
-- Create the droplet, add your SSH public key, disable password auth.
-- Create the Spaces bucket if you're using one.
-- Get a Firecrawl API key.
+```bash
+.venv/bin/python tools/template_smoke_test.py --source Sold
+```
 
-**2. Spike A — before any application code**
+The tool creates one recoverable Drive copy, runs the production triage logic,
+prints the result locally, and moves only that temporary copy to Drive trash in
+a `finally` block.
 
-Open your flyer template in Canva, go to Apps → Bulk create → Upload data, and
-upload a two-row CSV with a column containing an image URL. Find out whether
-Canva accepts a URL in an image column from an *uploaded file*.
+## Important limits
 
-I confirmed image columns exist in Bulk Create's **manual** data-entry table —
-there are literal "Add text" and "Add image" buttons, and adding an image column
-produces a distinct image-typed column. I did **not** confirm it for uploaded
-files, and Phase 1's entire output format rests on that.
-
-If uploaded files can't carry image URLs, stop and tell me. The fix is probably
-moving Phase 2 forward, not working around it.
-
-**3. Then the agent builds Phase 1.**
-
----
-
-## Things I want to be straight with you about
-
-**The Slack app is live.** Bot authentication and Socket Mode were verified.
-`files:read` from `slack/manifest.json` is installed: on 2026-08-11 a real
-thread upload was fetched and measured successfully. A watched upload after the
-automatic AI upscale deployment reached the image model successfully; its
-derivative failed the seam gate and correctly fell back to the original. That
-run then exposed a server-directory ownership fault, repaired at 10:54 Pacific.
-A finished live flyer from that repaired path is still pending.
-
-**The deployed droplet is the $6, 1 GB tier with 1 GB swap.** Slack uploads are
-capped at 25 MB before Pillow opens them. The full photo workflow still needs a
-live RSS measurement before adding a systemd memory limit.
-
-**Socket Mode means polling.** No inbound port means no Apps Script webhook, so
-the Sheet is checked every two minutes from 7 AM Central through 7 PM Pacific
-and every ten minutes otherwise, weekends included.
-
-**Hero photos come from Carmen in the listing's Slack thread.** The form's Drive
-links are inaccessible to Gable and often contain several photos with no hero
-choice. The upload is fitted locally, served by nginx, verified anonymously,
-and resumes the same paused run.
-
-**On AI-generated house photos.** You said you're not sure and lean toward
-generating freely. I built it as a config switch defaulting to
-`generate_with_approval`, so nothing is locked in either direction.
-
-My concern isn't Canva's disclosure rule. It's that an image model can't know
-what 123 Main St. looks like — given the address it will invent a house, and
-that lands a factually wrong photograph on marketing material for a specific
-property someone can drive to. You made the case yourself that these photos are
-public and easy to find; that's precisely what makes this a retrieval problem
-rather than a generation one. AI's good job here is cleaning up the photo you
-found.
-
-If you set `generate_freely`, the code honors it — but generated images stay
-tagged, badged in Slack, and logged in the `Runs` tab. I'd rather you flip that
-switch on purpose than inherit it by accident.
-
-**Credentials.** You offered logins for Canva, DigitalOcean, Slack, and Google.
-I won't enter a password anywhere, and `CLAUDE.md` §3 instructs the building
-agent not to either. The split is: you do the console and OAuth steps, the agent
-works from tokens in `.env`. Same for the droplet — SSH key, never a password.
-
----
-
-## What's still unknown
-
-Carried into `CLAUDE.md` §4.3 so the building agent can't miss it:
-
-1. Whether uploaded CSV/XLSX can carry image URLs into Bulk Create. **Blocking.**
-2. Bulk Create's max rows per batch.
-3. Whether Bulk Create preserves brand-template layout, and how it handles
-   overflowing text.
-4. Whether a private data-connector app can ship to a Teams team without Canva
-   marketplace review. **Gates Phase 2.**
-5. The Canva autofill trial quota — `canva_autofill_spike.py` prints it, but has
-   never been run against the live API.
-
----
-
-## What I actually verified, and how
-
-In your live Canva account on 2026-08-10, via your browser:
-
-- Plan is Canva Teams, $30/month, 2 members.
-- Bulk Create opens with **no upgrade wall** on that plan.
-- Its "Select data source" panel lists live connector apps: Google Sheets,
-  Google Analytics, Meta SKU Catalog, BigQuery, Snowflake, HubSpot Data, QrDy,
-  SheetSync. Canva's docs claim data connectors need Business or Enterprise —
-  your account contradicts the docs, so trust the account.
-- The manual data table has "Add text" and "Add image" buttons, and adding an
-  image column produces a distinctly image-typed column.
-
-From Canva's published documentation:
-
-- Autofill via the Connect API requires Enterprise; the response carries
-  `trial_information.uses_remaining`.
-- Data-connector image cells are `{type: 'image_upload', url, thumbnailUrl,
-  mimeType}` — external HTTPS URL, ≤4096 chars, ≤50MB, with an `ai_disclosure`
-  field.
-
-The scratch design I created while testing is still in your Canva — "White Beige
-Modern House for Sale Flyer." Delete it whenever.
+- Perfect output cannot be guaranteed by any current vision model. Gable's
+  contract is stronger and testable: prevent deterministic defects before a
+  copy, fail closed when visual review is unavailable or uncertain, and leave
+  an editable Slides file for the final human decision.
+- Hero-photo web search, Drive-photo selection, MLS access, and synthetic
+  property-photo generation are not connected. The runtime uses the one photo
+  supplied in the listing's Slack thread.
+- The source-template capacity check estimates average glyph width because the
+  Slides API does not expose final line-break layout. Actual values are measured
+  again, text is read back after mutation, and the rendered image is the final
+  gate.
+- A hard cumulative $50 ledger guards connected paid calls. A listing gets at
+  most one image-edit attempt and three fresh run attempts.

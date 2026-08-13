@@ -231,6 +231,44 @@ def fit_locally(
         return out.getvalue()
 
 
+def normalise_for_fitting(
+    image_bytes: bytes,
+    max_edge_px: int = 2400,
+    quality: int = OUTPUT_QUALITY,
+) -> bytes:
+    """Prepare an upload without choosing a crop before its frame is known.
+
+    Slack is transport, not layout.  The old handoff centre-cropped every
+    upload to the 4:5 slide and the placement step cropped that derivative a
+    second time to the template's actual photo frame.  A wide frame could
+    therefore never recover the sides removed by the first crop.  This keeps
+    the full composition, applies phone orientation, strips metadata, and only
+    downsizes an edge that is needlessly large for the flyer service.
+
+    Args:
+        image_bytes: Human-supplied image in any Pillow-readable format.
+        max_edge_px: Longest retained edge. Must be positive.
+        quality: JPEG output quality.
+
+    Returns:
+        Upright RGB JPEG bytes with the source aspect ratio unchanged.
+
+    Raises:
+        ValueError: for an invalid edge limit.
+        OSError: when the source is not a readable image.
+    """
+    if max_edge_px <= 0:
+        msg = f"max edge must be positive, got {max_edge_px}"
+        raise ValueError(msg)
+    with Image.open(io.BytesIO(image_bytes)) as opened:
+        upright = ImageOps.exif_transpose(opened).convert("RGB")
+        if max(upright.size) > max_edge_px:
+            upright.thumbnail((max_edge_px, max_edge_px), Image.Resampling.LANCZOS)
+        out = io.BytesIO()
+        upright.save(out, format="JPEG", quality=quality, optimize=True)
+        return out.getvalue()
+
+
 def image_dimensions(image_bytes: bytes) -> tuple[int, int]:
     """Read an image's pixel dimensions without decoding the whole frame.
 

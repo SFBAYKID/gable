@@ -5,8 +5,8 @@ loop needs that limit in code, not in a comment (AGENTS.md §7), so `guard()` is
 consulted before every paid call and raises rather than returning a value the
 caller might ignore.
 
-Prices are per million tokens, from each vendor's own page on 2026-08-11. They
-are estimates for a running total, not an invoice — the authority is the vendor's
+Each call reserves a fixed conservative amount before the vendor is reached.
+These are safety estimates, not an invoice — the authority is the vendor's
 dashboard, and this exists to stop a runaway, not to do accounting.
 """
 
@@ -17,17 +17,6 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Final, TypeVar
 
-#: USD per million tokens, input and output.
-TOKEN_PRICES: Final[dict[str, tuple[float, float]]] = {
-    "gpt-5-mini": (0.25, 2.00),
-    "gpt-5-nano": (0.05, 0.40),
-    "gpt-5": (1.25, 10.00),
-    "gpt-image-1-mini": (2.50, 8.00),
-    "gpt-image-2": (8.00, 30.00),
-    "claude-sonnet-5": (2.00, 10.00),
-    "claude-opus-5": (5.00, 25.00),
-}
-
 #: Firecrawl bills per search rather than per token.
 FIRECRAWL_PER_SEARCH: Final[float] = 0.01
 
@@ -35,7 +24,11 @@ FIRECRAWL_PER_SEARCH: Final[float] = 0.01
 #: until after the vendor replies. Both exceed the configured maximum-output
 #: cost plus the normal prompt, so the guard stops early rather than late.
 CONVERSATION_RESERVE_USD: Final[float] = 0.01
-VISION_RESERVE_USD: Final[float] = 0.01
+# The final gate now sends both a source photo and a render at original detail.
+# Ten cents remains intentionally above the documented token-price estimate,
+# including the configured output ceiling, instead of understating a two-image
+# request as though it still contained only one thumbnail.
+VISION_RESERVE_USD: Final[float] = 0.10
 #: One medium-quality GPT Image 2 edit plus its high-fidelity input.
 #: VERIFIED 2026-08-11: the official image-generation guide prices the standard
 #: portrait output below this reservation. The extra headroom deliberately
@@ -67,28 +60,6 @@ class Estimate:
 
 
 _T = TypeVar("_T")
-
-
-def token_cost(model: str, input_tokens: int, output_tokens: int) -> float:
-    """Estimate the cost of one model call.
-
-    Args:
-        model: The model name.
-        input_tokens: Prompt tokens.
-        output_tokens: Completion tokens.
-
-    Returns:
-        Cost in USD. An unknown model is priced at the most expensive known
-        rate, so an unrecognised name cannot hide spending.
-
-    Raises:
-        Nothing.
-    """
-    if model in TOKEN_PRICES:
-        per_in, per_out = TOKEN_PRICES[model]
-    else:
-        per_in, per_out = max(TOKEN_PRICES.values(), key=lambda pair: pair[1])
-    return (input_tokens * per_in + output_tokens * per_out) / 1_000_000
 
 
 def total_spent(connection: sqlite3.Connection) -> float:

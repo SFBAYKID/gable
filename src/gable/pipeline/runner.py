@@ -27,63 +27,21 @@ import logging
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from sqlite3 import Connection
-from typing import Any, Final
+from typing import Any
 
 from gable.db import store
 from gable.listings.enrich import Facts
 from gable.listings.intake import Intake, price_note
-from gable.listings.review import review_values
-from gable.pipeline import audit, people
+from gable.pipeline import audit, people, run_values
 from gable.pipeline.orchestrator import Outcome, after_research, agent_slots, judge, plan
 from gable.pipeline.vision import Inspection, inspect
 from gable.sheets import repository as repo
 from gable.slides import fields as template_fields
-from gable.slides import fitting
+from gable.slides import fitting, preflight
 from gable.slides import manifest as template_manifest
 from gable.voice import safe
 
-#: Every Corner House agent is on this domain, so a roster row missing its own
-#: URL still produces a real website rather than the word "Website".
-DEFAULT_BROKERAGE_URL: Final[str] = "cornerhouserealty.com"
-
-#: The brokerage's main line, used when the roster has no direct number for an
-#: agent. Chase's rule: a missing agent number falls back to the main number on
-#: the site rather than stopping the run. VERIFIED 2026-08-11 by reading
-#: cornerhouserealty.com, where it is the most frequently listed number and
-#: appears on the templates themselves as the office line.
-OFFICE_PHONE: Final[str] = "443.499.3839"
-
-#: Deliberately empty. The designs ship with "@reallygreatsite", which is filler
-#: from whoever built them and belongs to nobody here. Chase was asked and chose
-#: to leave it rather than have a handle invented, so the slot stays unfilled
-#: and surfaces as a question — which is the rule for anything Gable does not
-#: actually know.
-DEFAULT_SOCIAL_HANDLE: Final[str] = ""
-
 logger = logging.getLogger("gable.runner")
-
-
-def _city_of(address: str) -> str:
-    """The city an address sits in, for designs with a neighbourhood slot.
-
-    Args:
-        address: A property address, ideally "street, city, ST ZIP".
-
-    Returns:
-        The city, or an empty string when the address has no comma to read it
-        from. Empty leaves the design's placeholder in place, which becomes a
-        question rather than a wrong neighbourhood.
-
-    Raises:
-        Nothing.
-    """
-    parts = [part.strip() for part in address.split(",") if part.strip()]
-    return parts[1] if len(parts) >= 2 else ""
-
-
-#: Chase asked for two inspections: one to catch the obvious, a second to catch
-#: what fixing the first moved.
-QUALITY_PASSES: Final[int] = 2
 
 
 @dataclass
@@ -120,13 +78,18 @@ class Runner:
     fill: Callable[[str, dict[str, str]], int]
     #: Reads every text box with its size and geometry, for fitting.
     read_text_boxes: Callable[[str], list[fitting.TextBox]] = lambda _fid: []
+    #: Measures the current source template and this listing's real values
+    #: before any Drive copy is created.
+    preflight_template: Callable[
+        [str, str, str, template_fields.Resolution, dict[str, str]], preflight.Report
+    ] = lambda _fid, _label, _category, _resolution, _values: preflight.Report()
     #: Applies Slides requests to a presentation.
     apply: Callable[[str, list[dict[str, Any]]], None] = lambda _fid, _reqs: None
     #: Renders a slide to PNG bytes, for the vision check.
     thumbnail: Callable[[str], bytes] = lambda _fid: b""
     #: Looks at a rendered flyer. Injected like every other outside call, so a
     #: test can supply a verdict without spending a vision call.
-    look_at: Callable[[bytes], Inspection] = inspect
+    look_at: Callable[[str, bytes], Inspection] = lambda _run_id, image: inspect(image)
     #: The hero photo for this listing, already fitted and published, or "" if
     #: none has been supplied yet.
     hero_photo_url: str = ""
@@ -134,11 +97,11 @@ class Runner:
     #: but the run must keep this root so the next human response still maps.
     origin_thread_ts: str = ""
     #: Places the hero photo into a rendered flyer.
-    place_photo: Callable[[str, str, str], bool] = lambda _fid, _url, _template: False
+    place_photo: Callable[[str, str, str, str], bool] = lambda _run, _fid, _url, _template: False
     #: Puts the agent's own face where the sample face was. Returns False when
     #: the design has no recognisable headshot frame, which is a flyer worth a
     #: look rather than a failure.
-    place_headshot: Callable[[str, str], bool] = lambda _fid, _url: False
+    place_headshot: Callable[[str, str], bool | None] = lambda _fid, _url: None
     #: Proves that the photo URL is usable for the target slot. The live
     #: builder supplies the network checker; the runner itself performs no
     #: hidden I/O.
@@ -156,6 +119,9 @@ class Runner:
     #: Names the stage being worked on, for Slack's waiting indicator. Cosmetic
     #: by contract: it is called around real work and must never affect it.
     progress: Callable[[str], None] = lambda _stage: None
+    #: True only for an explicit "run this design anyway" reply. Structural or
+    #: unreadable-text problems remain blockers under every setting.
+    allow_template_warnings: bool = False
 
     def run(self, submission: repo.Submission) -> RunResult:
         """Take one submission as far as it can go.
@@ -201,7 +167,13 @@ class Runner:
         Raises:
             Nothing. The same failure boundary as a new run records problems.
         """
-        store.set_status(self.connection, run_id, "pending", "resumed from its Slack thread")
+        store.set_status(
+            self.connection,
+            run_id,
+            "pending",
+            "resumed from its Slack thread",
+            failure_reason="",
+        )
         result = RunResult(run_id=run_id, status="pending")
         return self._perform(run_id, submission.intake, result)
 
@@ -213,12 +185,13 @@ class Runner:
             logger.exception("run %s failed", run_id)
             store.set_status(self.connection, run_id, "failed", "unhandled error during the run")
             result.status = "failed"
-            result.said.append(
-                safe(
-                    "Something went wrong while I was building this one. "
-                    "I have stopped rather than posting something half-finished."
-                )
+            spoken = safe(
+                "I could not finish building this flyer because one of its processing "
+                "steps failed. I stopped without sending it as finished."
             )
+            result.said.append(spoken)
+            posted_ts = self.say(spoken, self.origin_thread_ts or None)
+            self._remember_thread(run_id, posted_ts)
             return result
 
     def _sequence(self, run_id: str, intake: Intake, result: RunResult) -> RunResult:
@@ -282,31 +255,9 @@ class Runner:
             self.progress("is looking up the agent...")
             added = self.record_unknown_agent(intake)
 
-        # 5b. Ask for the hero photo BEFORE building anything.
-        #
-        # This is Chase's step 4, and skipping it was a real failure: a flyer
-        # was delivered showing the template's own sky-and-grass placeholder
-        # where the house should be, and announced as ready. A listing flyer
-        # without a photograph of the listing is not a draft, it is wrong, so
-        # the run stops here rather than producing one.
-        if not self.hero_photo_url:
-            return self._ask(
-                run_id,
-                # Plain words only. "Hero" is our word for the photo well, not
-                # Carmen's, and asking her which image she wants "as the hero"
-                # asks her to learn our vocabulary to answer a simple question.
-                #
-                "Can you send me the image?",
-                [],
-                result,
-                status="needs_photo",
-                # The request type, the agent and the property lead the thread,
-                # because Carmen reads this in a channel carrying every listing
-                # at once and needs all three to place it.
-                headline=people.announce(self.connection, intake),
-            )
-
-        # 6. Build.
+        # 5b. Select and measure the current source before asking for the photo
+        # or creating a Drive copy. A template correction therefore costs no
+        # abandoned flyer, and resuming this same run reads the updated file.
         self.progress("is choosing the design...")
         template_id, template_label = self.pick_template(step.category, intake)
         if not template_id:
@@ -328,32 +279,68 @@ class Runner:
         store.set_status(
             self.connection,
             run_id,
-            "building",
-            f"using {template_label}",
+            "pending",
+            f"selected {template_label} for preflight",
             template_file_id=template_id,
             template_label=template_label,
         )
+        resolution = template_fields.resolve(self.read_slide_text(template_id))
+        values = run_values.for_intake(self.connection, intake, known)
+        values["address"] = template_manifest.normalise_address(values.get("address", ""))
+        values["hero_photo"] = self.hero_photo_url
+
+        self.progress("is measuring the design...")
+        measured = self.preflight_template(
+            template_id,
+            template_label,
+            step.category,
+            resolution,
+            values,
+        )
+        if measured.blockers:
+            issue = measured.blockers[0]
+            return self._ask(run_id, issue.say, [], result, status=issue.status)
+        if measured.warnings and not self.allow_template_warnings:
+            issue = measured.warnings[0]
+            return self._ask(run_id, issue.say, [], result, status=issue.status)
+        advisories = [safe(issue.advisory) for issue in measured.warnings if issue.advisory]
+
+        # A listing flyer without its photograph is not a draft. The template
+        # has already been checked, so the upload can resume this same run and
+        # compare the photo against the measured frame before anything builds.
+        if not self.hero_photo_url:
+            return self._ask(
+                run_id,
+                "Can you send me the image?",
+                [],
+                result,
+                status="needs_photo",
+                headline=people.announce(self.connection, intake),
+            )
+
+        # 6. Build only after all deterministic preflight checks pass.
+        store.set_status(
+            self.connection,
+            run_id,
+            "building",
+            f"preflight passed for {template_label}",
+        )
         if step.say:
             result.said.append(safe(step.say))
-
-        resolution = template_fields.resolve(self.read_slide_text(template_id))
-        values = self._values(intake, known)
 
         # What THIS design needs, not one global column set. Two flyers were
         # reviewed and their field sets differed; treating them as one is what
         # shipped a flyer carrying the literal words "Phone" and "Website".
         manifest = template_manifest.manifest_for(template_label)
-        values["address"] = template_manifest.normalise_address(values.get("address", ""))
-        values["hero_photo"] = self.hero_photo_url
         field_problems = template_manifest.validate(manifest, values)
         blocking = [item for item in field_problems if item.blocking]
         if blocking:
             return self._ask(run_id, blocking[0].say, [], result)
-        # Collected, not spoken here. Anything said mid-run while the run
-        # carries on reads as a question nobody is waiting to answer — Chase,
-        # watching one go past: "it asked a question and never allowed the user
-        # to respond". These are folded into the one message at the end.
-        advisories = [safe(item.say) for item in field_problems]
+        # The legacy manifest's character budgets are deliberately not spoken.
+        # Exact source-box geometry was measured above; repeating an older
+        # hand-entered character estimate can contradict that result. Required
+        # fields remain the manifest's responsibility, while layout advice now
+        # comes only from the measured preflight report.
 
         # An image URL is not checked by ending in .jpg. One flyer put the
         # template's own background illustration in the headshot frame because
@@ -372,7 +359,7 @@ class Runner:
 
         pairs = template_fields.replacements(resolution, values)
 
-        output_id, output_url = self.copy_template(template_id, self._name(intake))
+        output_id, output_url = self.copy_template(template_id, run_values.output_name(intake))
         changed = self.fill(output_id, pairs)
         logger.info("run %s filled %d field(s)", run_id, changed)
         if not pairs or changed != len(pairs):
@@ -405,7 +392,8 @@ class Runner:
                 "once. I stopped before changing any text."
             )
             result.said.append(spoken)
-            self.say(spoken, None)
+            posted_ts = self.say(spoken, self.origin_thread_ts or None)
+            self._remember_thread(run_id, posted_ts)
             return result
 
         # Read the flyer back and require every value to appear exactly as it
@@ -418,8 +406,30 @@ class Runner:
         #
         # A wrong price on a real address is the worst thing this system can
         # produce, so this is deterministic rather than a judgement.
+        readback = self._read_back(output_id)
+        if readback is None:
+            store.set_status(
+                self.connection,
+                run_id,
+                "needs_review",
+                "the filled flyer could not be read back for verification",
+                output_file_id=output_id,
+                output_url=output_url,
+            )
+            result.status = "needs_review"
+            result.output_url = output_url
+            spoken = safe(
+                "I filled the design, but Google Slides did not let me read it back to "
+                "verify the values. I have not sent it as finished."
+            )
+            result.said.append(spoken)
+            posted_ts = self.say(spoken, self.origin_thread_ts or None)
+            self._remember_thread(run_id, posted_ts)
+            return result
+
+        sent = {value for value in pairs.values() if value.strip()}
+        wrong = audit.values_missing_from(readback, values, sent)
         stray: list[str] = []
-        wrong = self._values_not_readable_back(output_id, values, pairs)
         if not wrong:
             # A phone number or email on the flyer that this run did not supply
             # belongs to the template's sample agent. A delivered flyer carried
@@ -431,7 +441,7 @@ class Runner:
             # Someone else's phone number and personal email on a client-facing
             # flyer is worse than any layout defect, so this is an absence check
             # and it is deterministic.
-            stray = self._foreign_contact_details(output_id, values)
+            stray = audit.foreign_content_in(readback, values, run_values.OFFICE_PHONE)
         if wrong or stray:
             store.set_status(
                 self.connection,
@@ -459,21 +469,27 @@ class Runner:
                 else f"I built the flyer but the {stray[0]}, so I have not sent it as finished."
             )
             result.said.append(spoken)
-            self.say(spoken, None)
+            posted_ts = self.say(spoken, self.origin_thread_ts or None)
+            self._remember_thread(run_id, posted_ts)
             return result
 
         self.progress("is placing the photo...")
-        placed = self.place_photo(output_id, self.hero_photo_url, template_label)
+        placed = self.place_photo(run_id, output_id, self.hero_photo_url, template_label)
         # The sample face is the most visible thing Gable gets wrong: one agent's
         # name beside another agent's photograph. Best effort — a design with no
         # headshot frame is still a deliverable flyer.
         headshot_url = values.get("headshot") or self.headshot_for(values.get("agent_name", ""))
+        headshot_failed = False
         if placed and headshot_url:
             self.progress("is putting the agent's face on it...")
-            if self.place_headshot(output_id, headshot_url):
+            headshot_result = self.place_headshot(output_id, headshot_url)
+            if headshot_result is True:
                 logger.info("replaced the sample headshot for run %s", run_id)
+            elif headshot_result is False:
+                headshot_failed = True
+                logger.error("could not replace the sample headshot for run %s", run_id)
             else:
-                logger.info("kept the design's own headshot for run %s", run_id)
+                logger.info("the design has no recognised headshot slot for run %s", run_id)
         if not placed:
             # The photo is the point of the flyer. Delivering without it, after
             # being given one, is worse than stopping.
@@ -492,7 +508,27 @@ class Runner:
                 "I have not sent it as finished."
             )
             result.said.append(spoken)
-            self.say(spoken, None)
+            posted_ts = self.say(spoken, self.origin_thread_ts or None)
+            self._remember_thread(run_id, posted_ts)
+            return result
+        if headshot_failed:
+            store.set_status(
+                self.connection,
+                run_id,
+                "needs_review",
+                "the agent headshot could not be placed",
+                output_file_id=output_id,
+                output_url=output_url,
+            )
+            result.status = "needs_review"
+            result.output_url = output_url
+            spoken = safe(
+                "I built the flyer but could not replace the sample headshot with the "
+                "agent's own photo. I have not sent it as finished."
+            )
+            result.said.append(spoken)
+            posted_ts = self.say(spoken, self.origin_thread_ts or None)
+            self._remember_thread(run_id, posted_ts)
             return result
 
         # 7a. Fit the text to its boxes. Slides cannot autofit over the API —
@@ -518,11 +554,18 @@ class Runner:
             for name, literal in resolution.fields.items()
             if literal in pairs and values.get(name, "").strip()
         }
-        verdict = judge("\n".join(self.read_slide_text(output_id)), expected, 1)
-        seen: Inspection = self.look_at(self.thumbnail(output_id))
+        final_text = self._read_back(output_id)
+        verdict = judge(final_text or "", expected, 1)
+        seen: Inspection = self.look_at(run_id, self.thumbnail(output_id))
 
         problems = list(verdict.problems)
-        if seen.checked and not seen.looks_right:
+        if final_text is None:
+            problems.insert(0, "the final text could not be read back for verification")
+        if not seen.checked:
+            problems.append("the visual inspection could not run")
+        elif not seen.confident:
+            problems.append("the visual inspection was inconclusive")
+        elif not seen.looks_right:
             problems.extend(seen.problems)
         if unreadable:
             problems.append(
@@ -540,8 +583,18 @@ class Runner:
             )
             result.status = "needs_review"
             result.output_url = output_url
-            self.progress("")
-            spoken = seen.say or verdict.say or safe(f"I rendered it, but {problems[0]}")
+            if not seen.checked:
+                spoken = safe(
+                    "I rendered it, but I could not complete the visual inspection. "
+                    "I have not sent it as finished."
+                )
+            elif not seen.confident:
+                spoken = safe(
+                    "I rendered it, but the visual inspection was inconclusive. "
+                    "I have not sent it as finished."
+                )
+            else:
+                spoken = seen.say or verdict.say or safe(f"I rendered it, but {problems[0]}")
             message = safe(
                 "\n".join(
                     [
@@ -567,7 +620,7 @@ class Runner:
         )
         result.status = "delivered"
         result.output_url = output_url
-        self.progress("")
+        photo_note = self._photo_note(run_id)
         # One message, carrying the link and everything worth knowing with it.
         # Four separate messages for one outcome is how a thread stops being
         # readable, and the last of them looked like a question.
@@ -575,6 +628,7 @@ class Runner:
             "\n".join(
                 [
                     f"Your flyer is ready. <{output_url}|Open the flyer>",
+                    *([photo_note] if photo_note else []),
                     *advisories,
                     *[
                         aside
@@ -615,9 +669,6 @@ class Runner:
         so a flat message leaves Carmen nowhere to put the photo.
         """
         asked = safe(question or "I need one more thing before I can build this.")
-        # Gable is about to wait for a person. Leaving the indicator up under a
-        # question reads as "still working on it", so nobody answers.
-        self.progress("")
         if headline and not self.origin_thread_ts:
             root_ts = self.say(safe(headline), None)
             posted_ts = self.say(asked, root_ts or None)
@@ -632,100 +683,22 @@ class Runner:
             status,
             asked[:200],
             slack_thread_ts=thread_root,
+            failure_reason=asked[:400],
         )
         result.status = status
         result.said.append(asked)
         result.questions = [asked, *[q.ask for q in questions[1:]]]
         return result
 
-    def _values(self, intake: Intake, known: dict[str, str]) -> dict[str, str]:
-        """What should end up on the flyer, from the form plus what was found."""
-        person = repo.find_salesperson(self.connection, intake.agent_email)
-        name = " ".join(
-            part for part in (person.get("first_name", ""), person.get("last_name", "")) if part
-        )
-        return {
-            "address": intake.address,
-            "price": intake.price or known.get("list_price", ""),
-            "beds": known.get("beds", ""),
-            "baths": known.get("baths", ""),
-            "square_feet": known.get("square_feet", ""),
-            "agent_name": name or intake.agent_name,
-            "agent_phone": person.get("phone", "") or OFFICE_PHONE,
-            "agent_email": intake.agent_email,
-            "open_house": intake.open_house,
-            # `fields.PATTERNS` recognises a website slot and this dictionary
-            # did not supply one, so `replacements()` skipped it and the literal
-            # word "Website" survived onto the flyer — which then failed its own
-            # quality check. The roster already carries the URL.
-            "website": person.get("brokerage_url", "") or DEFAULT_BROKERAGE_URL,
-            # Not a text replacement — `place_headshot` consumes this. Every
-            # agent's photo lives on cornerhouserealty.com and the roster
-            # mirrors it; an empty value leaves the design's own face alone.
-            "headshot": person.get("headshot_url", ""),
-            # Fields the designs carry that nothing was supplying, so their
-            # sample text printed on finished flyers.
-            "agent_title": "REALTOR",
-            "social_handle": DEFAULT_SOCIAL_HANDLE,
-            "neighborhood": _city_of(intake.address),
-            # The co-agent on a two-agent design. Empty on every other design,
-            # which leaves those slots to the single-agent values above.
-            **people.co_agent_values(self.connection, intake),
-            # A review post carries a client's words instead of a property.
-            **review_values(intake.request_type, intake.post_details or intake.extra_notes),
-        }
-
-    def _values_not_readable_back(
-        self, file_id: str, values: dict[str, str], pairs: dict[str, str]
-    ) -> list[str]:
-        """Which supplied values do not appear verbatim on the rendered flyer.
-
-        Args:
-            file_id: The filled presentation.
-            values: What the run intended to put on the flyer.
-            pairs: The literal-to-value replacements actually sent.
-
-        Returns:
-            Field names whose value is missing or corrupted, worst first.
-
-        Raises:
-            Nothing. A read failure returns no complaints rather than blocking a
-            flyer on a transient Slides error; the other guards still apply.
-        """
-        text = self._read_back(file_id)
-        if not text:
-            return []
-        sent = {value for value in pairs.values() if value.strip()}
-        return audit.values_missing_from(text, values, sent)
-
-    def _foreign_contact_details(self, file_id: str, values: dict[str, str]) -> list[str]:
-        """Contact details and sample content this run did not put on the flyer.
-
-        Args:
-            file_id: The filled presentation.
-            values: What the run supplied.
-
-        Returns:
-            A description of each stray value, worst first.
-
-        Raises:
-            Nothing.
-        """
-        text = self._read_back(file_id)
-        if not text:
-            return []
-        return audit.foreign_content_in(text, values, OFFICE_PHONE)
-
-    def _read_back(self, file_id: str) -> str:
-        """All text on the rendered flyer, or empty if it cannot be read.
+    def _read_back(self, file_id: str) -> str | None:
+        """All text on the rendered flyer, or None when verification failed.
 
         Args:
             file_id: The filled presentation.
 
         Returns:
-            The slide text joined by newlines. Empty on any failure, which lets
-            the audit checks pass rather than blocking a flyer on a transient
-            Slides error.
+            The slide text joined by newlines. None on any failure; an
+            unavailable proof is never treated as an approval.
 
         Raises:
             Nothing.
@@ -734,7 +707,18 @@ class Runner:
             return "\n".join(self.read_slide_text(file_id))
         except Exception:
             logger.exception("could not read the flyer back for verification")
+            return None
+
+    def _photo_note(self, run_id: str) -> str:
+        """Describe only the photo processing that actually happened."""
+        row = self.connection.execute(
+            "SELECT photo_source, ai_enhanced FROM runs WHERE run_id = ?", (run_id,)
+        ).fetchone()
+        if not row or row["photo_source"] not in {"carmen", "slack_upload"}:
             return ""
+        if int(row["ai_enhanced"] or 0):
+            return "I sharpened, enlarged, and fitted the photo and finished the flyer."
+        return "I resized and fitted the photo and finished the flyer."
 
     def _remember_thread(self, run_id: str, thread_ts: str) -> None:
         """Record which Slack thread a run is being discussed in.
@@ -787,7 +771,3 @@ class Runner:
         except Exception:
             return "needs_review"
         return str(row["status"]) if row else "needs_review"
-
-    def _name(self, intake: Intake) -> str:
-        """What the finished file is called in Drive, so Carmen can scan for it."""
-        return f"{intake.category} — {intake.address} — {intake.agent_name}".strip(" —")

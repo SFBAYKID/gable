@@ -54,13 +54,3 @@ def test_slide_size_defaults_match_the_template_library() -> None:
     """Corner House templates are Instagram Post 4:5, verified 1080x1350 on export."""
     settings = _load()
     assert (settings.slide_width_px, settings.slide_height_px) == (1080, 1350)
-
-
-def test_image_url_cap_cannot_be_raised_past_what_slides_accepts() -> None:
-    """Raising it would only produce URLs Google rejects at insertion time."""
-    with pytest.raises(ConfigError):
-        _load(GABLE_MAX_IMAGE_URL_BYTES="8192")
-
-
-def test_image_url_cap_can_be_lowered() -> None:
-    assert _load(GABLE_MAX_IMAGE_URL_BYTES="1024").max_image_url_bytes == 1024

@@ -13,7 +13,7 @@ import urllib.request
 import uuid
 from collections.abc import Callable
 from sqlite3 import Connection
-from typing import Any, Final
+from typing import Any
 
 from gable import spend
 from gable.agents.contacts import Contact, ContactsError, append_contact
@@ -22,104 +22,23 @@ from gable.config import Settings
 from gable.db import store
 from gable.listings.enrich import default_research
 from gable.listings.intake import Intake
-from gable.photos.fit import fit_locally
+from gable.photos.fit import assess, fit_locally, image_dimensions
 from gable.photos.headshots import url_for_agent as headshot_url_for
-from gable.photos.store import PhotoHost, publish_local, verify_public
+from gable.photos.store import publish_local, verify_public
 from gable.photos.verify import verify as verify_image
 from gable.pipeline.runner import Runner
 from gable.pipeline.vision import Inspection
 from gable.pipeline.vision import inspect as inspect_flyer
-from gable.slides import fitting
-from gable.slides.edits import replace_text
-from gable.slides.elements import descendants, font_size_pt, font_weight, text_content
+from gable.slides import fields as template_fields
+from gable.slides import preflight
+from gable.slides.elements import descendants, text_content
 from gable.slides.hero import find_headshot_frame, find_hero_frame
+from gable.slides.library import list_files as list_template_files
+from gable.slides.replacement import confirmed_replacement_count, safe_replacement_requests
 from gable.slides.selection import template_picker
 from gable.voice import is_clean
 
 logger = logging.getLogger("gable.live")
-
-#: The one folder a template may come from, as a child of the configured
-#: Templates folder. Carmen adds a design by dropping it in here and naming it
-#: exactly what the form calls that request type.
-GENERIC_TEMPLATES_FOLDER: Final[str] = "Generic Templates"
-
-
-def safe_replacement_requests(
-    presentation: dict[str, Any],
-    pairs: dict[str, str],
-) -> list[dict[str, Any]]:
-    """Build replacements only when no literal is embedded in longer text.
-
-    ``replaceAllText`` matches substrings. A literal such as ``Phone`` can
-    therefore hit both ``Phone`` and ``Phone Number`` while Google still
-    returns success. Reading the complete recursive text first turns that
-    silent corruption into a refusal before any batch is sent.
-
-    A literal appearing **twice as its own text element** is a different thing
-    and is allowed. Several designs show the address or the agent name in two
-    places on purpose — one of them is called "Address Twice" — and refusing
-    those conflated a legitimate repeat with the corruption this guards against.
-    It blocked 13 of the 45 designs, which is what prompted the distinction.
-
-    Args:
-        presentation: Current Slides presentation payload.
-        pairs: Literal text to replacement value.
-
-    Returns:
-        One request per pair, or an empty list when any literal is absent or
-        appears inside longer text anywhere in the design.
-
-    Raises:
-        Nothing.
-    """
-    page_ids = [str(page.get("objectId") or "") for page in presentation.get("slides", [])]
-    texts = [
-        text_content(element)
-        for page in presentation.get("slides", [])
-        for element in descendants(page.get("pageElements", []))
-    ]
-    requests: list[dict[str, Any]] = []
-    for literal, value in pairs.items():
-        total = sum(text.count(literal) for text in texts)
-        standalone = sum(1 for text in texts if text.strip() == literal)
-        if total == 0:
-            logger.error("refused a replacement for a literal that is not on the slide")
-            return []
-        if total != standalone:
-            # Some occurrence is embedded in longer text, so replacing it would
-            # corrupt that text. This is the case the guard exists for.
-            logger.error(
-                "refused an unsafe text replacement: %d occurrence(s), %d standalone",
-                total,
-                standalone,
-            )
-            return []
-        requests.extend(replace_text(literal, value, page_ids, allow_short=True))
-    return requests
-
-
-def _implied_font_size_pt(height_emu: float) -> float:
-    """Estimate a text box's font size from its height.
-
-    Args:
-        height_emu: The box's rendered height in EMU.
-
-    Returns:
-        A point size, or 0.0 when the height is unusable.
-
-    Raises:
-        Nothing.
-
-    Note:
-        # ASSUMPTION: a single-line box is laid out at roughly 1.2x leading, so
-        # the type is about 0.8 of the box height. Confirmed well enough to
-        # catch overflow rather than to reproduce the designer's exact size —
-        # this feeds the fitter, which only ever shrinks text that does not fit.
-        # A rendered flyer comparing designed and fitted sizes would refine it.
-    """
-    if height_emu <= 0:
-        return 0.0
-    return max(1.0, (height_emu / fitting.EMU_PER_POINT) / 1.2)
 
 
 def place_hero_photo(
@@ -256,7 +175,7 @@ def place_headshot(
     slides: Any,  # noqa: ANN401 - googleapiclient resource, untyped upstream
     file_id: str,
     url: str,
-) -> bool:
+) -> bool | None:
     """Put the agent's own face on the flyer.
 
     A flyer shipped carrying one agent's name beside a different agent's
@@ -270,9 +189,10 @@ def place_headshot(
         url: A public image URL for this agent's headshot.
 
     Returns:
-        True when Google accepted the replacement. False when no headshot frame
-        is recognisable or the call fails — both leave the design untouched,
-        which is better than pasting a face over something else.
+        True when Google accepted the replacement, None when the design has no
+        recognisable headshot slot, and False when a slot was found but its
+        replacement failed. A headshot-free design is valid; leaving a known
+        sample face in place is not.
 
     Raises:
         Nothing. A missing headshot is a flyer worth reviewing, not a crash.
@@ -284,7 +204,7 @@ def place_headshot(
         # pass over the finished flyer is what would catch it today.
     """
     if not url:
-        return False
+        return None
     try:
         presentation = slides.presentations().get(presentationId=file_id).execute()
         pages = presentation.get("slides", [])
@@ -297,7 +217,7 @@ def place_headshot(
         frame = find_headshot_frame(page, slide_w, slide_h, hero.object_id if hero else "")
         if frame is None:
             logger.info("no headshot frame recognised; leaving the design alone")
-            return False
+            return None
         face_id = f"gableFace_{uuid.uuid4().hex}"
         requests: list[dict[str, Any]] = [
             {"deleteObject": {"objectId": frame.object_id}},
@@ -344,6 +264,8 @@ def build_runner(
     hero_photo_url: str = "",
     origin_thread_ts: str = "",
     progress: Callable[[str], None] = lambda _stage: None,
+    upscale_photo: Callable[[str, bytes, int, int], bytes] | None = None,
+    allow_template_warnings: bool = False,
 ) -> Runner:
     """Assemble a `Runner` that talks to the real services.
 
@@ -357,6 +279,9 @@ def build_runner(
         hero_photo_url: A fitted, published photo when resuming a paused run.
         origin_thread_ts: Root Slack thread that a resumed run must preserve.
         progress: Names the current stage for Slack's waiting indicator.
+        upscale_photo: One policy and spend-guarded real-photo enlargement.
+        allow_template_warnings: Continue past measured, non-blocking layout
+            warnings only after Carmen explicitly says to use the design as-is.
 
     Returns:
         A ready `Runner`.
@@ -364,6 +289,11 @@ def build_runner(
     Raises:
         Nothing.
     """
+    # Filled when the aspect-preserved human upload is read for its one frame
+    # fit. The final visual gate sees both this source and Google's rendered
+    # flyer, so an enhancement cannot change the house and still pass merely
+    # because the resulting layout is tidy.
+    vision_reference = b""
 
     def say(text: str, thread: str | None) -> str:
         # The last gate before Slack. A message that breaks the house style is
@@ -374,79 +304,16 @@ def build_runner(
             return ""
         return str(slack_post(text, thread) or "")
 
-    def generic_templates_folder_id() -> str:
-        """Find the one folder templates are allowed to come from.
-
-        Resolved by name under the configured Templates folder rather than
-        configured separately, so Carmen adding a design is a drag into a
-        folder and nothing else.
-        """
-        response = (
-            drive.files()
-            .list(
-                corpora="drive",
-                driveId=settings.drive_id,
-                includeItemsFromAllDrives=True,
-                supportsAllDrives=True,
-                q=(
-                    f"'{settings.drive_templates_folder_id}' in parents"
-                    " and mimeType='application/vnd.google-apps.folder'"
-                    f" and name='{GENERIC_TEMPLATES_FOLDER}'"
-                    " and trashed=false"
-                ),
-                fields="files(id,name)",
-                pageSize=10,
-            )
-            .execute()
-        )
-        folders = response.get("files", [])
-        if not folders:
-            logger.error("the %s folder is missing from the drive", GENERIC_TEMPLATES_FOLDER)
-            return ""
-        return str(folders[0]["id"])
-
     def list_templates() -> list[dict[str, str]]:
-        # Templates come from one folder and nowhere else.
-        #
-        # This used to find any presentation in the drive carrying a
-        # `gable_role=template` property, which ignored where the file lived.
-        # On 2026-08-12 that pool held eleven files, seven of them inside
-        # Kelsey Mahon's own folder, so any agent's listing could be rendered
-        # onto a design filed as another agent's — the exact thing one design
-        # meaning one file is supposed to prevent.
-        #
-        # Every page is followed. One page of 200 worked only while the drive
-        # held fewer than 200 presentations, and every finished flyer lands in
-        # the same drive; once about two hundred accumulated the templates fell
-        # off the first page and Gable reported having no design for anything.
-        folder_id = generic_templates_folder_id()
-        if not folder_id:
-            return []
-        templates: list[dict[str, str]] = []
-        page_token: str | None = None
-        while True:
-            response = (
-                drive.files()
-                .list(
-                    corpora="drive",
-                    driveId=settings.drive_id,
-                    includeItemsFromAllDrives=True,
-                    supportsAllDrives=True,
-                    q=(
-                        f"'{folder_id}' in parents"
-                        " and mimeType='application/vnd.google-apps.presentation'"
-                        " and trashed=false"
-                    ),
-                    fields="nextPageToken,files(id,name)",
-                    pageSize=200,
-                    pageToken=page_token,
-                )
-                .execute()
+        return [
+            {"id": item.file_id, "name": item.name}
+            for item in list_template_files(
+                drive,
+                settings.drive_id,
+                settings.drive_templates_folder_id,
             )
-            templates.extend({"id": f["id"], "name": f["name"]} for f in response.get("files", []))
-            page_token = response.get("nextPageToken")
-            if not page_token:
-                return templates
+            if item.is_slides
+        ]
 
     def read_slide_text(file_id: str) -> list[str]:
         presentation = slides.presentations().get(presentationId=file_id).execute()
@@ -485,52 +352,11 @@ def build_runner(
             .batchUpdate(presentationId=file_id, body={"requests": requests})
             .execute()
         )
-        return sum(
-            item.get("replaceAllText", {}).get("occurrencesChanged", 0)
-            for item in reply.get("replies", [])
-        )
+        return confirmed_replacement_count(reply, len(requests))
 
-    def read_text_boxes(file_id: str) -> list[fitting.TextBox]:
+    def read_text_boxes(file_id: str) -> list[Any]:
         presentation = slides.presentations().get(presentationId=file_id).execute()
-        boxes: list[fitting.TextBox] = []
-        for page in presentation.get("slides", []):
-            for element in descendants(page.get("pageElements", [])):
-                text = text_content(element)
-                if not text:
-                    continue
-                size_pt = font_size_pt(element)
-                transform = element.get("transform", {})
-                size = element.get("size", {})
-                width = size.get("width", {}).get("magnitude", 0) * transform.get("scaleX", 1)
-                height = size.get("height", {}).get("magnitude", 0) * transform.get("scaleY", 1)
-
-                # Slides reports no fontSize on a run that inherits its size from
-                # the theme or placeholder, which is most of them on an imported
-                # deck. `plan_fits` skips any box reporting zero, so the boxes
-                # most likely to overflow were the exact ones never checked — a
-                # rendered flyer showed $685,000 clipped to "$685,00" with the
-                # last digit wrapped, and the agent name overlapping the line
-                # beneath it. Estimating from the box geometry brings those back
-                # under the fitter.
-                if size_pt <= 0 and height > 0:
-                    size_pt = _implied_font_size_pt(height)
-
-                # How many lines the box can hold at this size, so a two-line
-                # box is not shrunk as though it were one.
-                lines = 1
-                if size_pt > 0 and height > 0:
-                    lines = max(1, int((height / fitting.EMU_PER_POINT) // (size_pt * 1.2)))
-                boxes.append(
-                    fitting.TextBox(
-                        object_id=element["objectId"],
-                        text=text,
-                        font_size_pt=size_pt,
-                        width_emu=float(width),
-                        lines=lines,
-                        weight=font_weight(element),
-                    )
-                )
-        return boxes
+        return preflight.text_boxes(presentation)
 
     def apply(file_id: str, requests: list[dict[str, Any]]) -> None:
         if not requests:
@@ -563,13 +389,50 @@ def build_runner(
         verdict = verify_image(url, slot)
         return verdict.ok, verdict.say
 
-    def look_at(image_bytes: bytes) -> Inspection:
+    def preflight_template(
+        file_id: str,
+        template_label: str,
+        category: str,
+        resolution: template_fields.Resolution,
+        values: dict[str, str],
+    ) -> preflight.Report:
+        """Read current Drive content and measure it before creating a copy."""
+        presentation = slides.presentations().get(presentationId=file_id).execute()
+        photo_size: tuple[int, int] | None = None
+        photo_url = values.get("hero_photo", "")
+        if photo_url:
+            verdict = verify_image(photo_url, "any")
+            if not verdict.ok:
+                return preflight.Report(
+                    issues=(
+                        preflight.Issue(
+                            "unusable_photo",
+                            f"I checked the supplied photo before building, but {verdict.say}. "
+                            "Send another image and I will check the design again.",
+                            blocking=True,
+                            status="needs_photo",
+                        ),
+                    )
+                )
+            photo_size = (verdict.width, verdict.height)
+        return preflight.analyze(
+            presentation,
+            template_label,
+            category,
+            resolution,
+            values,
+            slide_px=(settings.slide_width_px, settings.slide_height_px),
+            photo_size=photo_size,
+        )
+
+    def look_at(run_id: str, image_bytes: bytes) -> Inspection:
         """Run the paid visual check only while the hard budget permits it."""
         if not settings.openai_image_api_key or not image_bytes:
             return inspect_flyer(
                 image_bytes,
                 api_key=settings.openai_image_api_key,
                 model=settings.vision_model,
+                reference_image_bytes=vision_reference,
             )
         estimate = spend.Estimate(
             service="openai",
@@ -585,20 +448,23 @@ def build_runner(
                     image_bytes,
                     api_key=settings.openai_image_api_key,
                     model=settings.vision_model,
+                    reference_image_bytes=vision_reference,
                 ),
+                run_id=run_id,
             )
         except spend.BudgetExceededError:
             return Inspection(looks_right=False, confident=False, checked=False)
 
-    def place_photo(file_id: str, url: str, template_label: str) -> bool:
-        """Put a centred 4:5 hero behind a template's measured masks.
+    def place_photo(run_id: str, file_id: str, url: str, template_label: str) -> bool:
+        """Fit the original once to the measured frame and place it.
 
         Three things were learned the hard way, and each is why a line here
         looks the way it does.
 
-        **Do not infer a frame from size.** Imported photos, white card panels,
-        and whole element groups can all look like large text-free shapes in
-        the API. The manifest names the exact removable raster-art layer.
+        **Do not choose the largest shape blindly.** Imported photos, white
+        card panels, and whole element groups can all look like large text-free
+        shapes in the API. The shared hero-frame detector applies the same
+        measured structural rules used by preflight and refuses ambiguity.
 
         **Crop to the frame, not to the canvas.** The upload is fitted to the
         slide's 4:5 canvas when it arrives, which is the wrong shape for a
@@ -616,15 +482,16 @@ def build_runner(
             file_id,
             url,
             template_label,
-            refit=refit_to_frame,
+            refit=lambda existing, width, height: refit_to_frame(run_id, existing, width, height),
             slide_px=(settings.slide_width_px, settings.slide_height_px),
         )
 
-    def refit_to_frame(existing: str, width_px: int, height_px: int) -> str:
-        """Recrop an already-published photo to a frame's exact pixel size.
+    def refit_to_frame(run_id: str, existing: str, width_px: int, height_px: int) -> str:
+        """Fit the preserved upload directly to the frame's exact pixel size.
 
         Args:
-            existing: The public URL of the fitted photo.
+            run_id: Run whose paid-call ceiling and audit flag apply.
+            existing: Public URL of the aspect-preserved upload.
             width_px: The frame's width in pixels.
             height_px: The frame's height in pixels.
 
@@ -637,9 +504,28 @@ def build_runner(
             Nothing. Placement treats an empty URL as a failure and stops for
             review rather than posting a letterboxed flyer.
         """
+        nonlocal vision_reference
+        used_enhancement = False
         try:
+            store.set_status(
+                connection,
+                run_id,
+                "building",
+                "fitting the supplied photo to the measured frame",
+                ai_enhanced=0,
+            )
             with urllib.request.urlopen(existing, timeout=30) as response:
                 original = response.read()
+            vision_reference = original
+            source_width, source_height = image_dimensions(original)
+            decision = assess(source_width, source_height, width_px, height_px)
+            if decision.needs_model and upscale_photo is not None:
+                try:
+                    progress("is sharpening and enlarging the photo...")
+                    original = upscale_photo(run_id, original, width_px, height_px)
+                    used_enhancement = True
+                except Exception:
+                    logger.exception("automatic photo enlargement fell back to local fitting")
             recropped = fit_locally(original, width_px, height_px)
             url = publish_local(settings.photo_public_root, settings.photo_public_base, recropped)
         except Exception:
@@ -649,6 +535,17 @@ def build_runner(
         if not usable:
             logger.error("the recropped hero photo is not fetchable: %s", detail)
             return ""
+        store.set_status(
+            connection,
+            run_id,
+            "building",
+            (
+                "used one fidelity-checked photo enlargement"
+                if used_enhancement
+                else "used local photo fitting"
+            ),
+            ai_enhanced=int(used_enhancement),
+        )
         return url
 
     def record_unknown_agent(intake: Intake) -> str:
@@ -727,6 +624,7 @@ def build_runner(
         check_photo=check_photo,
         look_at=look_at,
         read_text_boxes=read_text_boxes,
+        preflight_template=preflight_template,
         apply=apply,
         thumbnail=thumbnail,
         hero_photo_url=hero_photo_url,
@@ -741,24 +639,5 @@ def build_runner(
             settings.photo_public_base,
         ),
         progress=progress,
-    )
-
-
-def photo_host(settings: Settings) -> PhotoHost:
-    """The droplet that serves hero photos.
-
-    Args:
-        settings: Parsed configuration.
-
-    Returns:
-        A configured host.
-
-    Raises:
-        Nothing.
-    """
-    del settings  # the host is fixed infrastructure, not yet configurable
-    return PhotoHost(
-        ssh_target="root@143.110.146.87",
-        ssh_key_path="/root/.ssh/gable_droplet",
-        public_base="http://143.110.146.87",
+        allow_template_warnings=allow_template_warnings,
     )

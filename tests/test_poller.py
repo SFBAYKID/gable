@@ -245,6 +245,31 @@ def test_a_sheet_failure_does_not_stop_the_watcher(db: sqlite3.Connection) -> No
     assert _poller(db, Broken(), []).one_pass() == 0
 
 
+def test_a_template_scan_failure_does_not_block_known_listing_work(
+    db: sqlite3.Connection,
+) -> None:
+    sheet = FakeSheet([HEADER])
+    repo.adopt_backfill(db, [])
+    seen: list[repo.Submission] = []
+
+    def fail_scan() -> int:
+        msg = "temporary Drive read failure"
+        raise RuntimeError(msg)
+
+    poller = Poller(
+        client=sheet,
+        connection=db,
+        responses_tab="Form Responses 1",
+        sync_roster=lambda: 0,
+        on_submission=seen.append,
+        scan_templates=fail_scan,
+    )
+    sheet.rows.append(_row("8/2/2026", "2 B Rd, Baltimore, MD 21202"))
+
+    assert poller.one_pass() == 1
+    assert len(seen) == 1
+
+
 def test_one_bad_submission_does_not_stop_the_batch(db: sqlite3.Connection) -> None:
     """ARCHITECTURE 4.2: one bad row must never stop a batch."""
     sheet = FakeSheet([HEADER])

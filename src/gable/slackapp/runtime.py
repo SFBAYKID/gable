@@ -17,12 +17,15 @@ from typing import Any
 from gable import spend
 from gable.agents.contacts import sync_contacts
 from gable.config import ConfigError, Settings
+from gable.db import store
 from gable.db.schema import apply_migrations, connect
 from gable.logging_setup import configure_logging
 from gable.photos.enhance import EnhancementError, upscale_real_photo
 from gable.pipeline.live import build_runner
 from gable.pipeline.poller import Poller
 from gable.pipeline.runner import Runner
+from gable.pipeline.template_triage import TemplateTriage
+from gable.pipeline.template_vision import inspect_source_template
 from gable.runtime import RuntimeComponents, serve
 from gable.sheets import repository as repo
 from gable.sheets.client import SheetClient
@@ -30,6 +33,7 @@ from gable.slackapp.app import build_app
 from gable.slackapp.brain import Decision, think
 from gable.slackapp.editing import SlideEditor
 from gable.slackapp.photos import PhotoHandoff
+from gable.slides.library import list_files as list_template_files
 
 logger = logging.getLogger("gable.slack.runtime")
 
@@ -139,6 +143,35 @@ def build_components(settings: Settings) -> RuntimeComponents:
         )
         return str(response.get("ts") or thread_ts or "")
 
+    def template_triage_for(
+        triage_connection: Connection,
+        triage_drive: Any,  # noqa: ANN401 - googleapiclient resource
+        triage_slides: Any,  # noqa: ANN401
+    ) -> TemplateTriage:
+        """Bind source-template measurement to one thread's Google clients."""
+        return TemplateTriage(
+            connection=triage_connection,
+            list_templates=lambda: list_template_files(
+                triage_drive,
+                settings.drive_id,
+                settings.drive_templates_folder_id,
+            ),
+            read_presentation=lambda file_id: (
+                triage_slides.presentations().get(presentationId=file_id).execute()
+            ),
+            say=slack_post,
+            look_at=lambda file_id: inspect_source_template(
+                triage_connection,
+                triage_slides,
+                file_id,
+                api_key=settings.openai_image_api_key,
+                model=settings.vision_model,
+            ),
+            slide_px=(settings.slide_width_px, settings.slide_height_px),
+        )
+
+    template_triage = template_triage_for(connection, drive, slides)
+
     def runner_for_photo(
         connection_for_event: Connection,
         photo_url: str,
@@ -165,6 +198,13 @@ def build_components(settings: Settings) -> RuntimeComponents:
             hero_photo_url=photo_url,
             origin_thread_ts=thread_ts,
             progress=progress,
+            upscale_photo=lambda run_id, image, width, height: upscale_photo(
+                connection_for_event,
+                run_id,
+                image,
+                width,
+                height,
+            ),
         )
 
     def upscale_photo(
@@ -191,15 +231,18 @@ def build_components(settings: Settings) -> RuntimeComponents:
         db_path=settings.db_path,
         bot_token=settings.slack_bot_token,
         allowed_channel=settings.slack_channel_id,
-        target_width=settings.slide_width_px,
-        target_height=settings.slide_height_px,
+        max_edge_px=settings.photo_max_edge_px,
+        jpeg_quality=settings.photo_jpeg_quality,
         public_root=settings.photo_public_root,
         public_base=settings.photo_public_base,
         runner_for=runner_for_photo,
-        upscale=upscale_photo,
     )
 
-    def execute_action(decision: Decision, thread_ts: str) -> str:
+    def execute_action(
+        decision: Decision,
+        thread_ts: str,
+        progress: Callable[[str], None],
+    ) -> str:
         """Use thread-owned clients to apply one conversational edit."""
         action_connection = connect(settings.db_path)
         try:
@@ -209,6 +252,84 @@ def build_components(settings: Settings) -> RuntimeComponents:
             action_slides = build(
                 "slides", "v1", credentials=action_credentials, cache_discovery=False
             )
+            if decision.tool == "rebuild_flyer":
+                run = store.run_for_thread(action_connection, thread_ts)
+                if run is None:
+                    template = store.template_for_thread(action_connection, thread_ts)
+                    if template is None:
+                        return (
+                            "I could not match this thread to a listing or template, so I "
+                            "have not changed anything."
+                        )
+                    if str(decision.arguments.get("mode") or "") != "check_updated":
+                        return (
+                            "This thread is about a source template, not a listing. Update "
+                            "the design and tell me to check it again."
+                        )
+                    progress("is measuring the updated template...")
+                    action_drive = build(
+                        "drive", "v3", credentials=action_credentials, cache_discovery=False
+                    )
+                    return template_triage_for(
+                        action_connection,
+                        action_drive,
+                        action_slides,
+                    ).recheck(thread_ts, progress)
+                stored = store.load_submission(action_connection, run.response_row_id)
+                if stored is None:
+                    return (
+                        "I found the listing thread but not its request details, so I "
+                        "have not rebuilt anything."
+                    )
+                mode = str(decision.arguments.get("mode") or "")
+                if mode not in {"check_updated", "run_anyway"}:
+                    return (
+                        "Tell me whether you updated the template or want me to use the "
+                        "current design as it is."
+                    )
+                action_drive = build(
+                    "drive", "v3", credentials=action_credentials, cache_discovery=False
+                )
+                captured: list[str] = []
+
+                def capture(text: str, _requested_thread: str | None) -> str:
+                    captured.append(text)
+                    return thread_ts
+
+                runner = build_runner(
+                    settings,
+                    action_connection,
+                    action_drive,
+                    action_slides,
+                    capture,
+                    hero_photo_url=run.photo_url,
+                    origin_thread_ts=thread_ts,
+                    progress=progress,
+                    upscale_photo=lambda run_id, image, width, height: upscale_photo(
+                        action_connection,
+                        run_id,
+                        image,
+                        width,
+                        height,
+                    ),
+                    allow_template_warnings=mode == "run_anyway",
+                )
+                submission = repo.Submission(
+                    response_row_id=stored.response_row_id,
+                    sheet_row=stored.sheet_row,
+                    submitted_at=stored.submitted_at,
+                    intake=stored.intake,
+                    content_hash=stored.content_hash,
+                )
+                result = runner.resume(submission, run.run_id)
+                if captured:
+                    return captured[-1]
+                return (
+                    "I rechecked the template, but the run did not produce an outcome I "
+                    "could report. I left the listing paused."
+                    if result.needs_a_human
+                    else "I could not finish the rebuild, so I left the current flyer unchanged."
+                )
             return SlideEditor(action_connection, action_slides).execute(decision, thread_ts)
         except Exception:
             logger.exception("a Slack edit could not construct its Google client")
@@ -284,6 +405,7 @@ def build_components(settings: Settings) -> RuntimeComponents:
             drive, connection, settings.drive_id, settings.drive_templates_folder_id
         ),
         on_submission=on_submission,
+        scan_templates=template_triage.scan_new,
         schedule=settings.poll_schedule,
         max_per_pass=settings.max_batch,
     )

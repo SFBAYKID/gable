@@ -4,7 +4,8 @@ from __future__ import annotations
 
 from typing import Any
 
-from gable.pipeline.live import place_hero_photo, safe_replacement_requests
+from gable.pipeline.live import place_hero_photo
+from gable.slides.replacement import confirmed_replacement_count, safe_replacement_requests
 
 
 class FakeSlides:
@@ -142,6 +143,26 @@ def test_hero_photo_success_is_based_on_the_slides_reply() -> None:
     assert requests[2]["updatePageElementsZOrder"]["pageElementObjectIds"] == [hero_id]
 
 
+def test_hero_photo_is_refitted_to_the_measured_frame_once() -> None:
+    slides = FakeSlides()
+    measured: list[tuple[str, int, int]] = []
+
+    def refit(url: str, width: int, height: int) -> str:
+        measured.append((url, width, height))
+        return "https://images.example/fitted.jpg"
+
+    assert place_hero_photo(
+        slides,
+        "deck-1",
+        "https://images.example/original.jpg",
+        "New Listing",
+        refit=refit,
+    )
+    assert measured == [("https://images.example/original.jpg", 864, 648)]
+    request = slides.body["requests"][1]["createImage"]
+    assert request["url"] == "https://images.example/fitted.jpg"
+
+
 def test_hero_photo_reports_a_slides_failure_instead_of_raising() -> None:
     assert (
         place_hero_photo(
@@ -249,3 +270,22 @@ def test_replacement_counts_text_inside_imported_groups() -> None:
 
     assert len(requests) == 1
     assert requests[0]["replaceAllText"]["pageObjectIds"] == ["page-1"]
+
+
+def test_repeated_standalone_fields_count_as_one_successful_request() -> None:
+    response = {
+        "replies": [
+            {"replaceAllText": {"occurrencesChanged": 2}},
+            {"replaceAllText": {"occurrencesChanged": 1}},
+        ]
+    }
+
+    assert confirmed_replacement_count(response, 2) == 2
+    assert confirmed_replacement_count({"replies": response["replies"][:1]}, 2) == -1
+    assert (
+        confirmed_replacement_count(
+            {"replies": [{"replaceAllText": {"occurrencesChanged": 0}}]},
+            1,
+        )
+        == -1
+    )

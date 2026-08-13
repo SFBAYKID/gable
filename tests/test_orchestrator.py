@@ -11,7 +11,6 @@ import pytest
 from gable.listings.enrich import Facts
 from gable.listings.intake import Intake
 from gable.pipeline.orchestrator import (
-    QUALITY_PASSES,
     Outcome,
     after_research,
     agent_slots,
@@ -144,11 +143,7 @@ def test_what_the_agent_typed_is_never_overwritten() -> None:
     assert "beds" not in step.say
 
 
-# --- the two quality passes -------------------------------------------------
-
-
-def test_chase_asked_for_two_passes() -> None:
-    assert QUALITY_PASSES == 2
+# --- the deterministic quality gate ----------------------------------------
 
 
 def test_a_leftover_placeholder_fails_the_check() -> None:

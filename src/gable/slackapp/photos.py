@@ -2,10 +2,10 @@
 
 Slack's private URL is only a transport. The upload is downloaded with the bot
 token, checked before any authorization header can leave Slack's own hosts,
-fitted to the 1080 by 1350 hero frame, published into the droplet's nginx
-directory, verified anonymously, and attached to the same paused database run.
-A genuinely undersized source gets one guarded high-fidelity edit and otherwise
-falls back to the untouched original pixels. No new run or retry is opened.
+normalised without changing its composition, published, verified anonymously,
+and attached to the same paused database run. The exact crop and any necessary
+upscale happen later, after the selected template's real frame is measured, so
+the human photo is never cropped twice. No new run or retry is opened.
 """
 
 from __future__ import annotations
@@ -17,14 +17,13 @@ import urllib.request
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from sqlite3 import Connection
 from typing import Any, Final, Protocol
 
 from PIL import Image
 
 from gable.db import store
 from gable.db.schema import connect
-from gable.photos.fit import assess, fit_locally, image_dimensions
+from gable.photos.fit import normalise_for_fitting
 from gable.photos.store import PublishError, publish_local, verify_public
 from gable.pipeline.runner import RunResult
 from gable.sheets import repository as repo
@@ -51,9 +50,6 @@ class ResumesRun(Protocol):
     def resume(self, submission: repo.Submission, run_id: str) -> RunResult:
         """Continue one existing run."""
         ...
-
-
-UpscalesPhoto = Callable[[Connection, str, bytes, int, int], bytes]
 
 
 def download_private_image(
@@ -144,12 +140,11 @@ class PhotoHandoff:
     db_path: Path
     bot_token: str
     allowed_channel: str
-    target_width: int
-    target_height: int
+    max_edge_px: int
+    jpeg_quality: int
     public_root: Path
     public_base: str
     runner_for: Callable[..., ResumesRun]
-    upscale: UpscalesPhoto | None = None
     download: Callable[[str, str, int], bytes] = download_private_image
     publish: Callable[[Path, str, bytes], str] = publish_local
     verify: Callable[[str], tuple[bool, str]] = verify_public
@@ -216,39 +211,17 @@ class PhotoHandoff:
                     file_info.get("url_private_download") or file_info.get("url_private") or ""
                 )
                 image_bytes = self.download(private_url, self.bot_token, MAX_UPLOAD_BYTES)
-                width, height = image_dimensions(image_bytes)
-                assessment = assess(
-                    width,
-                    height,
-                    self.target_width,
-                    self.target_height,
+                progress("is preparing the photo...")
+                prepared = normalise_for_fitting(
+                    image_bytes,
+                    max_edge_px=self.max_edge_px,
+                    quality=self.jpeg_quality,
                 )
-                ai_enhanced = False
-                needed_enlargement = assessment.needs_model
-                if needed_enlargement and self.upscale is not None:
-                    try:
-                        progress("is sharpening and enlarging the photo...")
-                        image_bytes = self.upscale(
-                            connection,
-                            run.run_id,
-                            image_bytes,
-                            self.target_width,
-                            self.target_height,
-                        )
-                        ai_enhanced = True
-                    except Exception:
-                        # Keep Carmen's original and continue with the local
-                        # high-quality resize. The final flyer vision pass is
-                        # still the delivery gate; a failed model call must not
-                        # turn into a demand that she find the same photo again.
-                        logger.exception("automatic photo enlargement fell back to the original")
-                progress("is fitting the photo to the template...")
-                fitted = fit_locally(image_bytes, self.target_width, self.target_height)
-                public_url = self.publish(self.public_root, self.public_base, fitted)
+                public_url = self.publish(self.public_root, self.public_base, prepared)
                 usable, _detail = self.verify(public_url)
                 if not usable:
                     return (
-                        "I fitted the photo, but the flyer service could not fetch it. "
+                        "I prepared the photo, but the flyer service could not fetch it. "
                         "I left the run paused."
                     )
             except PublishError:
@@ -268,10 +241,10 @@ class PhotoHandoff:
                 connection,
                 run.run_id,
                 "needs_photo",
-                "Carmen supplied a fitted and verified hero photo",
+                "a person supplied an aspect-preserved and verified hero photo",
                 photo_url=public_url,
-                photo_source="carmen",
-                ai_enhanced=int(ai_enhanced),
+                photo_source="slack_upload",
+                ai_enhanced=0,
             )
             progress("is building the flyer...")
             runner = self.runner_for(connection, public_url, thread_ts, progress)
@@ -281,7 +254,6 @@ class PhotoHandoff:
             # last one restates what the thread already says.
             if result.said:
                 return ""
-            action = "sharpened, enlarged, and fitted" if ai_enhanced else "resized and fitted"
-            return f"I {action} the photo, but I could not finish the flyer. I stopped there."
+            return "I prepared the photo, but I could not finish the flyer. I stopped there."
         finally:
             connection.close()

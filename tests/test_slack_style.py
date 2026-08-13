@@ -322,7 +322,11 @@ def test_an_action_reply_comes_from_the_executor_after_it_runs() -> None:
     )
     calls: list[str] = []
 
-    def execute(_decision: Decision, thread_ts: str) -> str:
+    def execute(
+        _decision: Decision,
+        thread_ts: str,
+        _progress: Callable[[str], None],
+    ) -> str:
         calls.append(thread_ts)
         return "Done. I changed the price text to 32 points."
 

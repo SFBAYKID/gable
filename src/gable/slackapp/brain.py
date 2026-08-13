@@ -68,10 +68,10 @@ HOW YOU SPEAK
 
 WHAT YOU KNOW
 - Agents submit a Google Form. Each row becomes a flyer.
-- The request type on the form picks the template. Templates live in a shared
-  Drive folder: a general set everyone uses, plus a folder per agent for anyone
-  who has their own. If no template is filed for a request type, you say so and
-  stop. You never substitute a different design.
+- The request type on the form picks the template. Templates live only in the
+  shared Generic Templates folder and the file name must match the request type.
+  If no matching template is filed, you say so and stop. You never substitute
+  a different design.
 - The agent's name, phone, email and headshot come from the roster. You do not
   ask for them and you do not invent them.
 - You look up public facts yourself — beds, baths, square footage — from the
@@ -85,8 +85,10 @@ WHAT YOU CANNOT DO — never offer any of these
   history. The only photo you get is the one someone sends you.
 - You cannot choose a photo for someone, or "pick the best" one. You are not
   shown a set to choose from. Ask for the image.
-- You cannot change a template's design, colours, fonts or layout to taste. You
-  fill the design as it was drawn. Carmen changes designs, not you.
+- You do not redesign a source template to taste. You can apply an explicit,
+  unambiguous correction to a flyer already built in this thread. Carmen edits
+  source templates; after she does, you can read the current file and check or
+  rebuild from it.
 - You cannot estimate or guess a price, a date, or any fact about a property.
 - Offering something on this list is worse than saying you cannot do it, because
   someone will be waiting for a thing that is never coming.
@@ -104,6 +106,12 @@ HOW YOU BEHAVE
   question.
 - When Carmen asks for a change to a flyer, choose the matching tool. When she
   is chatting, just reply.
+- If Gable warned that template content may not fit, "run anyway" means rebuild
+  with the current template and accept only non-blocking preflight warnings.
+  "Yes, run again" means reload and recheck the current source template. Treat
+  a vague reply such as "try again", "check again", or "I updated it" as
+  ambiguous unless the person names the template. Never treat an unreadable or
+  structurally unsafe template as overridable.
 - Before you offer to do something, check it against WHAT YOU CANNOT DO. An
   eager answer that promises the impossible costs more than a short honest one.
 """
@@ -212,8 +220,21 @@ TOOLS: Final[list[dict[str, Any]]] = [
         "type": "function",
         "function": {
             "name": "rebuild_flyer",
-            "description": "Start the flyer again from the template, keeping the data.",
-            "parameters": {"type": "object", "properties": {}},
+            "description": (
+                "Reload the current source template and rebuild with the saved listing data. "
+                "Use check_updated after Carmen edits it; use run_anyway only when she "
+                "explicitly accepts a non-blocking fit or crop warning."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "mode": {
+                        "type": "string",
+                        "enum": ["check_updated", "run_anyway"],
+                    }
+                },
+                "required": ["mode"],
+            },
         },
     },
     {
@@ -311,6 +332,10 @@ def think(
         Nothing. This runs in a Slack handler; a raised exception there is a
         message Carmen never receives. Every failure becomes a plain sentence.
     """
+    shortcut = _rebuild_shortcut(message)
+    if shortcut is not None:
+        return shortcut
+
     key = api_key or os.environ.get("OPENAI_IMAGE_API_KEY", "")
     if not key:
         return Decision(
@@ -374,6 +399,45 @@ def think(
         said = "I'm not sure what you'd like me to do there. Could you say a bit more?"
 
     return Decision(reply=_make_safe(said), tool=tool_name, arguments=arguments)
+
+
+def _rebuild_shortcut(message: str) -> Decision | None:
+    """Resolve the two template-warning answers without probabilistic routing.
+
+    "Yes, run again" is the product's promise that Gable reloads the current
+    Drive source after Carmen changes it. "Run anyway" means the opposite: she
+    accepts the current source's nonblocking warning. Confusing them either
+    ignores her correction or bypasses it, so these small explicit phrases do
+    not need a paid model call.
+    """
+    words_only = "".join(
+        character if character.isalnum() or character.isspace() else " "
+        for character in message.casefold()
+    )
+    folded = " ".join(words_only.split())
+    if folded in {
+        "yes run again",
+        "run again",
+        "i updated the template",
+        "check the template again",
+        "check the updated template",
+    }:
+        return Decision(
+            reply="I will reload the updated source template.",
+            tool="rebuild_flyer",
+            arguments={"mode": "check_updated"},
+        )
+    if folded in {
+        "run anyway",
+        "use the current template as is",
+        "use current template as is",
+    }:
+        return Decision(
+            reply="I will use the current design as it is.",
+            tool="rebuild_flyer",
+            arguments={"mode": "run_anyway"},
+        )
+    return None
 
 
 #: What Gable says when it has chosen an action and the model supplied no words.

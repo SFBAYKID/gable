@@ -39,20 +39,17 @@ def _load(**overrides: str) -> Settings:
 
 def test_defaults_match_dotenv_example() -> None:
     settings = _load()
-    assert settings.photo_policy is PhotoPolicy.GENERATE_WITH_APPROVAL
-    assert settings.photo_min_confidence == 0.75
+    assert settings.photo_policy is PhotoPolicy.RETRIEVE_ONLY
     assert settings.poll_interval_seconds == 600
     assert settings.poll_busy_interval_seconds == 120
     assert settings.max_batch == 25
-    assert settings.max_description_chars == 400
-    assert settings.max_retries == 3
     assert settings.max_image_calls_per_listing == 1
     assert settings.photo_max_edge_px == 2400
     assert settings.photo_jpeg_quality == 85
     assert settings.photo_public_root == Path("/var/www/gable-photos")
     assert settings.photo_public_base == "http://143.110.146.87"
     assert settings.conversation_model == "gpt-5-mini"
-    assert settings.vision_model == "gpt-5-mini"
+    assert settings.vision_model == "gpt-5.6-sol"
     assert settings.image_model_hq == "gpt-image-2"
     assert settings.tab_responses == "Form Responses 1"
     assert settings.db_path == Path("/opt/gable/var/gable.db")
@@ -149,8 +146,10 @@ def test_service_account_path_accepted_when_it_exists(tmp_path: Path) -> None:
 
 
 @pytest.mark.parametrize("raw", ["true", "TRUE", "1", "yes", "on"])
-def test_boolean_true_spellings(raw: str) -> None:
-    assert _load(GABLE_DRY_RUN=raw).dry_run is True
+def test_the_unimplemented_dry_run_switch_fails_closed(raw: str) -> None:
+    with pytest.raises(ConfigError) as excinfo:
+        _load(GABLE_DRY_RUN=raw)
+    assert any("not a supported isolation mode" in problem for problem in excinfo.value.problems)
 
 
 @pytest.mark.parametrize("raw", ["false", "FALSE", "0", "no", "off"])
@@ -163,12 +162,6 @@ def test_typo_in_boolean_is_rejected_not_treated_as_false() -> None:
     with pytest.raises(ConfigError) as excinfo:
         _load(GABLE_DRY_RUN="ture")
     assert any("not a boolean" in problem for problem in excinfo.value.problems)
-
-
-def test_out_of_range_values_are_rejected() -> None:
-    with pytest.raises(ConfigError) as excinfo:
-        _load(GABLE_PHOTO_MIN_CONFIDENCE="1.5")
-    assert any("above the maximum" in problem for problem in excinfo.value.problems)
 
 
 def test_poll_interval_floor_is_enforced() -> None:
@@ -231,40 +224,32 @@ def test_unknown_enum_lists_the_valid_options() -> None:
 
 
 @pytest.mark.parametrize(
-    ("policy", "generates", "enhances", "needs_approval"),
+    ("policy", "enhances"),
     [
-        (PhotoPolicy.RETRIEVE_ONLY, False, True, False),
-        (PhotoPolicy.GENERATE_WITH_APPROVAL, True, True, True),
-        (PhotoPolicy.GENERATE_FREELY, True, True, False),
-        (PhotoPolicy.NO_AI, False, False, False),
+        (PhotoPolicy.RETRIEVE_ONLY, True),
+        (PhotoPolicy.GENERATE_WITH_APPROVAL, True),
+        (PhotoPolicy.GENERATE_FREELY, True),
+        (PhotoPolicy.NO_AI, False),
     ],
 )
-def test_policy_semantics(
-    policy: PhotoPolicy, generates: bool, enhances: bool, needs_approval: bool
-) -> None:
-    """All four policies are implemented faithfully (CLAUDE.md section 8)."""
-    assert policy.allows_generation is generates
+def test_policy_semantics(policy: PhotoPolicy, enhances: bool) -> None:
+    """Only supplied-photo reprocessing is connected at runtime."""
     assert policy.allows_reprocessing is enhances
-    assert policy.requires_approval_before_generating is needs_approval
 
 
-def test_generate_freely_without_an_image_key_is_rejected() -> None:
-    """The one unsatisfiable combination: auto-generate, nothing to generate with."""
+@pytest.mark.parametrize("policy", ["generate_with_approval", "generate_freely"])
+def test_generation_policies_are_rejected_because_no_generator_is_connected(
+    policy: str,
+) -> None:
     with pytest.raises(ConfigError) as excinfo:
-        _load(GABLE_PHOTO_POLICY="generate_freely")
-    assert any("OPENAI_IMAGE_API_KEY" in problem for problem in excinfo.value.problems)
-
-
-def test_generate_freely_with_an_image_key_is_accepted() -> None:
-    settings = _load(GABLE_PHOTO_POLICY="generate_freely", OPENAI_IMAGE_API_KEY="sk-abc123def456")
-    assert settings.generation_available is True
+        _load(GABLE_PHOTO_POLICY=policy)
+    assert any("no synthetic-photo generator" in problem for problem in excinfo.value.problems)
 
 
 def test_no_image_key_still_boots() -> None:
     """A deployment that never touches an image model is a normal state."""
     settings = _load()
     assert settings.images_available is False
-    assert settings.generation_available is False
     assert settings.reprocessing_enabled is False
 
 
@@ -288,23 +273,14 @@ def test_no_ai_policy_overrides_the_reprocess_flag() -> None:
     )
     assert settings.photo_reprocess is True
     assert settings.reprocessing_enabled is False
-    assert settings.generation_available is False
 
 
-def test_ai_keys_are_read() -> None:
-    settings = _load(OPENAI_IMAGE_API_KEY="sk-img", ANTHROPIC_API_KEY="sk-ant")
+def test_live_ai_key_is_read() -> None:
+    settings = _load(OPENAI_IMAGE_API_KEY="sk-img")
     assert settings.openai_image_api_key == "sk-img"
-    assert settings.anthropic_api_key == "sk-ant"
 
 
 # --- cross-field checks -----------------------------------------------------
-
-
-def test_non_https_spaces_base_is_rejected() -> None:
-    """Google Slides fetches inserted images over the public internet, via HTTPS."""
-    with pytest.raises(ConfigError) as excinfo:
-        _load(SPACES_PUBLIC_BASE="http://gable-photos.nyc3.digitaloceanspaces.com")
-    assert any("https" in problem for problem in excinfo.value.problems)
 
 
 def test_disabling_redaction_is_refused() -> None:

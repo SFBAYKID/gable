@@ -29,18 +29,21 @@ An agent — say **Lolo Simmons** — submits the form.
 
 1. **Poll.** Gable reads `Form Responses 1` on the §2.6 schedule and sees a new
    row: name, email, address, listing details.
-2. **Identify.** It joins to `Sales_People` on first name, last name and email,
-   resolving *Lolo Simmons → Template 1*, plus her phone number and headshot.
-3. **Fetch the template.** Template 1 is copied from the shared drive.
-4. **Ask for the hero image.** Gable posts in Slack — *"New listing for Lolo
-   Simmons at 123 Main St. Which photo do you want as the hero?"* — and waits.
-5. **Receive it.** The user drops an image into the thread.
-6. **Fit the image to the frame.** The photo is reprocessed so it genuinely sits
-   right in the template. This is the hardest part of the product — §4.5b.
-7. **Render.** Text and photo fill a copy of the template (§4.7).
-8. **Check its own work.** A vision pass asks whether the result actually looks
-   correct — §4.7b.
-9. **Deliver.** Gable posts a clickable link to the finished Slides file. Carmen
+2. **Identify.** It joins to the Drive-hosted contact workbook and headshot
+   folder on submitted agent identity.
+3. **Select and preflight.** The request type names one file in `Generic
+   Templates`. Gable reloads that source and measures its fields, text capacity,
+   photo frame and this listing's actual values before copying anything.
+4. **Pause if needed.** Structural defects stop. A usable text or crop warning
+   asks whether to run as-is or recheck an updated source.
+5. **Receive the hero image.** The user drops one image into the owned thread;
+   its full composition is preserved until the exact frame is known.
+6. **Fit once.** Pillow crops and resizes to the measured frame. Only enlargement
+   beyond 2x may use one fidelity-gated GPT Image 2 edit.
+7. **Render and prove.** A copy is filled, read back, rendered, and compared
+   with the supplied photo by `gpt-5.6-sol`. Unavailable or uncertain
+   inspection blocks delivery.
+8. **Deliver.** Gable posts a clickable link to the finished Slides file. Carmen
    opens and edits it, or replies in the thread and Gable redoes it.
 
 If anything is missing or malformed at any point — no phone number, no address,
@@ -59,17 +62,19 @@ Google Form ─────────► Google Sheet
                  │    ↓                     │
                  │  normalize ──────────────┼─► ASK if a field is missing ─┐
                  │    ↓                     │                              │
-                 │  identify agent ─────────┼─► Sales_People → template    │
+                 │  identify agent ─────────┼─► Drive roster + headshot     │
+                 │    ↓                     │                              │
+                 │  preflight source ───────┼─► exact Slides geometry       │
                  │    ↓                     │                              │
                  │  ASK for hero image ─────┼──────────────────────────────┤
                  │    ↓                     │                              │
                  │  fit image to frame ─────┼─► Pillow, free; a model only  │
                  │    ↓                     │                              │
-                 │  store photo ────────────┼─► public HTTPS URL           │
+                 │  store photo ────────────┼─► public fetchable URL       │
                  │    ↓                     │                              ▼
                  │  render ─────────────────┼─► Drive: copy + batchUpdate  Slack
                  │    ↓                     │                            thread
-                 │  inspect the render ─────┼─► Anthropic vision           ▲
+                 │  inspect the render ─────┼─► GPT-5.6 Sol vision          ▲
                  │    ↓                     │                              │
                  │  deliver the link ───────┼──────────────────────────────┘
                  └──────────────────────────┘
@@ -190,13 +195,10 @@ operating timezone, full stop.
 
 ## 3. Data model
 
-One Google Sheets workbook, four tabs. This is the whole persistence layer —
-there is no database. At this volume a database would be overhead, and keeping
-state in the Sheet means Carmen and Chase can inspect and correct it without
-tooling.
-
-Only `Form Responses 1` exists today. `Agents`, `Runs` and `Templates` are
-additive and are waiting on decision D3 in `STATUS.md`.
+There are three stores with separate ownership: the form-response tab is
+read-only input, the shared drive holds templates, contacts, headshots and
+editable output, and SQLite holds every derived submission, run transition,
+template audit, cached fact and paid-call reservation.
 
 ### 3.1 Tab `Form Responses 1` — read only, never written
 
@@ -225,10 +227,10 @@ and `Notes`, because the social-media team's notes are a different field. A tab
 whose header names none of the email, request type and address is **refused**,
 not guessed at.
 
-**Absent, and needed by the template:** description and beds/baths/square
-footage, which are researched (§4.3b), and the agent's phone, which comes from
-`Sales_People`. The request type decides which column is the price — a sold post
-carries a closing price, a price improvement carries a new price.
+Beds, baths and square footage are public facts researched by address when a
+design needs them. Agent phone and headshot come from the Drive roster sources.
+The request type decides which form column is the price — a sold post carries a
+closing price and a price improvement carries a new price.
 
 ### 3.2 The three sources in the shared drive
 
@@ -301,25 +303,23 @@ Read `Form Responses 1`. Diff against terminal rows in `Runs`. Emit new rows.
 Bounded: never process more than `GABLE_MAX_BATCH` (default 25) per cycle, so a
 backfill cannot exhaust the droplet.
 
-### 4.2 Normalize (`listings/normalize.py`)
+### 4.2 Parse and normalise (`listings/intake.py`, `listings/address.py`)
 
-Raw row → `Listing`. Trim whitespace, lowercase the email, title-case the
-address, parse the price into both a number and a display string, and format the
-phone as **`(818) 259-7432`**.
+Raw row becomes an `Intake`. Header mapping supplies the fields, whitespace and
+email casing are normalised, the address is canonicalised without inventing a
+ZIP, and the request type chooses the relevant price column.
 
 That phone format is deliberate. E.164 (`+18182597432`) is correct for dialling
 APIs and wrong for print — nobody puts a plus sign on a flyer. Gable's output is
 read by a human, so the human format wins.
 
-Validation failures do not raise. They produce a `Listing` with a populated
-`problems` list, and the orchestrator decides what to do. A missing description
-should not take down the process.
+Validation decisions are pure outcomes; the runner records and asks rather than
+raising out of the batch.
 
 ### 4.3b Ask for what is missing
 
-The form does not collect a phone number, a price, or beds/baths/sqft, and its
-address column is empty on every row seen so far. So "a required field is
-absent" is the **normal** path, not an exception.
+The form does not collect every field every design may need. A required field
+being absent is a normal paused state, not an exception.
 
 When a field the template needs is missing or malformed, Gable asks for that
 specific field, naming the listing:
@@ -332,34 +332,28 @@ It never invents a value and never silently drops a field. Status is
 `needs_info`, and the listing is **paused, not failed** — it waits indefinitely
 and re-enters on `/gable run`.
 
-Where the answer belongs to the agent rather than the listing — a phone number,
-a headshot — Gable offers to write it to `Sales_People` so it is asked once ever
-rather than once per listing.
+Agent details are maintained in the Drive contact workbook and headshot folder;
+an unambiguous brokerage lookup may append a missing contact, never overwrite
+one.
 
-### 4.3 Verify (`listings/verify.py`)
+### 4.3 Research public facts (`listings/enrich.py`)
 
-Fetch the agent's brokerage page with Firecrawl. Compare the submitted name,
-email, and phone against what the site says.
+Firecrawl searches by address for beds, baths, square footage and a list price.
+Only sourced, plausible values are retained, and submitted values are never
+overwritten. Results are cached by normalised address in SQLite and every paid
+call crosses the shared spend guard. An unknown agent is separately searched on
+the brokerage's own domain and appended to the Drive contact workbook only when
+the page names that person unambiguously.
 
-**Verification advises; it never overwrites.** If the form says
-`jon@example.com` and the site says `john@example.com`, Gable flags the
-discrepancy in Slack and uses the form value. Silently "correcting" a contact
-detail is how a flyer ships with a phone number nobody answers.
+There is no fixed description-length setting. The current source text box and
+the actual replacement are measured before build; a visible rendered result is
+checked again afterwards.
 
-Cache results per `brokerage_url` for 24 hours. Every agent from the same
-brokerage would otherwise refetch the same page.
+### 4.4 Ask for the hero image (`slackapp/photos.py`)
 
-Description length: Slides imposes no practical cap on replacement text, so the
-real limit is the template's text box — text that overflows its shape does not
-reflow the design, it just overruns. Truncate at a configurable
-`GABLE_MAX_DESCRIPTION_CHARS` (default 400) on a word boundary and flag when
-truncation happened, so Carmen knows to check the layout.
-
-### 4.4 Ask for the hero image (`photos/resolver.py`)
-
-**In practice this is where every listing goes.** The form's `Upload photos`
-column was empty on every row observed, so the cascade in `CLAUDE.md` §8 usually
-falls straight through to "ask".
+This is the only connected hero source. Gable does not choose among form, Drive,
+brokerage or web candidates. It asks for exactly one image in the listing's
+owned Slack thread and keeps that file as the source of truth.
 
 Gable asks in the thread and waits:
 
@@ -370,23 +364,17 @@ Status is `needs_photo`. A photo a human supplies is **final** — never
 second-guessed by a confidence score, never overwritten, never "improved" into a
 different subject.
 
-The cascade still exists for the cases where a photo *is* available. Each source
-is an adapter with a uniform signature returning `PhotoResult | None`, so sources
-can be reordered or disabled by configuration without touching the resolver.
-
-Every result records its provenance. `photo_source` in `Runs` is not decoration —
-it is the audit trail for how a picture ended up on a flyer.
-
-**Never substitute a photo the resolver is not confident matches the address.** A
-flyer with no photo gets caught by Carmen. A flyer with the wrong house ships.
-Confidence below `GABLE_PHOTO_MIN_CONFIDENCE` routes to "ask Carmen," not to the
-next source.
+The private Slack URL is host-checked before the bot credential is attached,
+downloads are capped at 25 MB, and the published derivative records
+`photo_source=slack_upload`. The upload is oriented and stripped of metadata but
+not cropped until preflight has measured the actual template frame.
 
 ### 4.5 Store photo (`photos/store.py`)
 
-Slides needs a **public HTTPS URL**. Verified against Google's API reference on
-2026-08-10: max **2 kB of URL** (`GABLE_MAX_IMAGE_URL_BYTES=2048`), max **50 MB**,
-max **25 megapixels**, and **PNG / JPEG / GIF only**.
+Slides needs a publicly fetchable image URL. Verified against Google's API
+reference on 2026-08-10: max 2 kB of URL, 50 MB, 25 megapixels, and PNG, JPEG or
+GIF. Fixed provider limits stay in the image boundary instead of operator
+settings.
 
 Two consequences worth stating plainly, because both have bitten this design:
 
@@ -422,18 +410,14 @@ Options, in preference order:
    may still use the SSH publisher. It costs nothing beyond a droplet already
    paid for. A photo only has to survive one fetch, so the host needs no
    durability.
-2. **DigitalOcean Spaces** — S3-compatible, public-read, stable URLs. Still the
-   better answer if photo hosting ever outgrows one box, and `SPACES_*` remains
-   in config for that day. Not needed now.
-3. Cloudflare R2 — S3-compatible with a free tier; costs a second vendor.
-4. Google Drive public links — **do not, and now we know why.** See the table.
+2. An object store if photo hosting ever outgrows one box; none is connected.
+3. Google Drive public links — **do not, and now we know why.** See the table.
 
-Normalize before upload: convert to JPEG, strip EXIF (it can carry the
-photographer's GPS coordinates), and fit to exactly 1080 by 1350. Slack download
-size is hard-capped at 25 MB before Pillow opens it. This bounds transport bytes,
-not decoded pixel memory; measure live RSS on representative phone photos before
-adding a systemd memory limit. The fitted output is content-addressed and
-atomically published.
+Normalise before upload: convert to JPEG, apply EXIF orientation, strip metadata,
+and reduce only an unnecessarily large edge. Do not crop to the slide canvas;
+the exact hero frame is not known yet. Slack download size is hard-capped at 25
+MB before Pillow opens it. The derivative is content-addressed and atomically
+published.
 
 ### 4.5b Fit the photo to the frame (`photos/fit.py`)
 
@@ -447,19 +431,21 @@ bottom third. Scaling it naively produces a stretched house, or a roofline
 guillotined at the top — errors that are glaring to a client and invisible to a
 script checking that the file is a valid JPEG.
 
-The common path is deterministic. Pillow applies EXIF orientation, centre-crops
-to 4:5, strips metadata, and resamples to 1080 by 1350. Up to a 2x enlargement
-stays local. It is fast, free, and cannot invent a different house.
+The common path is deterministic. Pillow centre-crops once to the **measured
+hero frame** and resamples to that frame's pixel dimensions. Up to a 2x
+enlargement stays local. Crop loss above 30 percent is reported before build
+and requires an explicit instruction to continue.
 
 Only a source that would need more than 2x enlargement takes the image-edit
-path in `photos/enhance.py`. Gable first makes the exact deterministic 4:5
+path in `photos/enhance.py`. Gable first makes the exact deterministic frame
 composition, then sends that derivative to `GABLE_IMAGE_MODEL_HQ` for
 super-resolution with a preservation-only prompt. GPT Image 2 runs at medium
 quality and high input fidelity, returns one image, and gets no automatic retry.
-The output must still be large enough, remain within a low-frequency composition
-distance from the supplied photo, and avoid the seam gate. Failure at any of
-those checks falls back to the locally resized original; the rendered-flyer
-vision pass remains the final delivery gate.
+The output must still be large enough and remain within a low-frequency
+composition distance from the supplied photo. Failure falls back to the locally
+resized original; the rendered-flyer vision pass remains the final delivery
+gate. A numeric seam detector was removed after calibration showed that it
+could not distinguish a pasted sky from a normal roofline or treeline.
 
 **Needs verification:** the 0.18 composition-distance threshold has unit coverage
 but no watched live calibration. It is a coarse refusal layer, not certification.
@@ -468,11 +454,9 @@ The original Slack upload is never overwritten. SQLite records `ai_enhanced`
 only when the model result survives those checks. The paid edit is limited to
 one attempt per listing and reserves $0.25 under the shared $50 guard.
 
-**Reprocessing and generation stay on separate code paths.** Reprocessing
-reshapes a real photograph of the real property. Generation invents a subject: it
-is policy-gated, off by default, and always disclosed — an image model cannot
-know what 123 Main St looks like, and a wrong house on marketing for a real
-address is not a stylistic choice.
+Synthetic property-photo generation is not connected. The database retains the
+disclosure flag required by the runtime contract, but the running system has no
+generator or approval flow and never claims otherwise.
 
 ### 4.6 Look up template (`slides/selection.py`)
 
@@ -487,66 +471,69 @@ Listing, Open House, New Listing with Open House, Sold, Under Contract, Client
 Review Post, Price Reduction, End of Year Brag Post, Video Editing Request,
 Postcard Order.
 
-### 4.7 Render (`slides/renderer.py` + `slides/client.py`)
+Before a listing copy is created, `slides/preflight.py` reads the current source
+object graph. It requires one slide, resolves fillable text, refuses unsafe
+substring replacements, identifies one hero frame, converts its geometry to
+pixels, and measures the listing's actual values against the source boxes. A
+result below 8 points is structural; a smaller but readable result is an
+explicit run-or-update choice.
 
-Split deliberately — see §2.5. The renderer is pure; the client does the I/O.
+`pipeline/template_triage.py` applies the same structural checks plus standard
+capacity targets when a new file appears. The initial folder is adopted
+silently; later file IDs that pass them receive a placeholder-aware visual check
+for clipping, overlap, spacing, alignment, padding, and off-canvas artwork, then
+one owned Slack thread. A reply that the source was updated reloads the same
+Drive file under the native waiting state and names both measurement and visual
+inspection as they run.
 
-**The template contract.** Text placeholders are `{{name}}` tokens in text boxes
-over the background: `{{price}}`, `{{address}}`, `{{agent_name}}`, and so on. The
-hero photo is a **shape containing the literal text `{{hero_photo}}`** —
-`replaceAllShapesWithImage` swaps that shape for the image and scales it into the
-shape's bounds preserving aspect ratio, which is why the shape's size and
-position define the photo's frame.
+### 4.7 Render (`pipeline/live.py`)
 
-Documentation this was verified against (2026-08-10):
-<https://developers.google.com/workspace/slides/api/guides/merge> and
-<https://developers.google.com/workspace/slides/api/reference/rest/v1/presentations/request>.
+Templates may use bracketed labels, bare labels, or known sample values. The
+resolver maps the source's literal text to semantic fields. Every replaced
+literal must occupy its own text element because Slides replacement is substring
+based; repeated standalone fields are valid and each request must report at
+least one changed occurrence.
 
-**A placeholder present in the template but absent from the data is left as-is,
-not blanked.** `unfilled_placeholders` reports them so the orchestrator can flag
-the listing. The alternative — silently blanking — produces a post with an empty
-price box that looks finished.
-
-The client's sequence: copy the template file inside the shared drive, send one
-`batchUpdate`, and leave the result in `GABLE_DRIVE_OUTPUT_FOLDER_ID`. One Slides
-file per request, not per batch — Carmen opens a link, not a spreadsheet.
-
-The concrete Slides operations now live in `pipeline/live.py`: template copy,
-text replacement, photo placement, text fitting, thumbnail fetch, and batch
-update. Pure request builders remain separate so edits can be tested without
-Google credentials.
+The live sequence is: copy inside the shared drive, replace text, read every
+supplied value back verbatim, reject foreign sample contact details, replace the
+measured hero frame, replace a recognisable headshot frame, shrink only changed
+text that needs it, and render a thumbnail. A missing required value, failed
+readback, incomplete Google reply, unsafe match, or failed headshot blocks
+delivery. Pure request builders remain separate so mutations are testable
+without credentials.
 
 ### 4.7b Inspect the render before delivering
 
-Gable **looks at its own output.** `pages.getThumbnail` returns a PNG of the
-rendered post; a vision pass over it asks the questions a script cannot:
+Gable **looks at Google's actual output.** `pages.getThumbnail` returns a PNG;
+`gpt-5.6-sol` receives both the preserved human photo and the render at original
+image detail through one Responses API call and must return a strict schema. It
+checks what source rectangles cannot:
 
 - Does the photo actually sit correctly in the frame, or is it stretched,
   squashed, or cropped through the middle of the house?
+- Is it still the same property and composition as the human-supplied photo?
 - Is any text overflowing its box or colliding with the background art?
-- Is a `{{placeholder}}` still visible anywhere on the page?
+- Is a fillable label or sample value still visible anywhere on the page?
 
 This exists because the failure mode here is *silent*. A render can succeed at
 every API level — valid file, valid image, HTTP 200 throughout — and still be
 obviously wrong to any human who looks at it. The API cannot tell you the
 roofline is cut off. A model looking at the picture can.
 
-A render that fails inspection is **not delivered as if it were fine.** Gable
-says what looked wrong and offers to retry with different framing.
-
-This is also why `ANTHROPIC_API_KEY` matters as much as the image key: one model
-makes the picture fit, the other checks whether it did.
+A render that fails inspection is not delivered as fine. Neither is a render
+whose inspection was unavailable, malformed, refused, or low-confidence. The
+OpenAI call shares the hard spend ledger; no Anthropic runtime path exists.
 
 ### 4.8 Deliver (`slackapp/`)
 
-Post to `C0BP597644B`: a Block Kit summary per listing (address, agent, template,
-photo thumbnail, provenance badge, any flags), **a link to the rendered Slides
-file**, and buttons for `Approve`, `Replace photo`, `Skip`.
+Post only to the configured Gable channel, inside the listing's owned thread: a
+plain-language outcome and a descriptive link to the rendered Slides file.
 
 There is no attachment and nothing to download. The link is the deliverable —
 Carmen opens the live Slides file and edits it, or replies in the thread.
 
-Anything AI-generated gets a loud, unmissable badge. Not a footnote.
+Gable never publishes or exports the file. Carmen decides what leaves the
+building.
 
 ---
 
@@ -613,14 +600,13 @@ Two rules keep this from being noise:
 
 ### 4A.3 Tools, not a script
 
-The model is given tools — look up an agent, fetch a template, reprocess an
-image, render, re-render one field, ask a question, write a value back to
-`Sales_People` — and decides which to call.
+The Slack model is given bounded tools for explicit flyer edits, status,
+clarification, and reloading a corrected source template. The listing pipeline
+itself performs research and rendering in a fixed, auditable order.
 
-That is what lets Carmen say *"make the price bigger and use the other photo"*
-and have it work, without anyone having anticipated that sentence. A branching
-script would need every phrasing enumerated in advance; a tool-using model needs
-the tools to be correct and the intent to be confirmed.
+That is what lets Carmen phrase an edit naturally while pure request builders
+and exact-target checks decide whether it is safe. Ambiguous targets are a
+question, and a missing or multiply matched element is never ranked or guessed.
 
 ### 4A.4 Never claim more than it did
 
@@ -636,17 +622,12 @@ it without looking.
 
 ## 5. Where photos come from
 
-The form asks for photos twice — `Upload photos` and `Upload high-resolution
-property photos` — and both are usually empty. So the built path is **the ask**:
-Gable stops before rendering anything and requests the image in the listing
-thread (§4.4), and Carmen's reply is fitted, published and attached to that same
-paused run. This is deliberately the common case rather than a fallback.
-
-`photos/resolver.py` holds the full cascade — form upload, the designated Drive
-folder, the listing agent's own brokerage site, broader web, the ask, and then
-generation only where `GABLE_PHOTO_POLICY` permits it. Do not architect around
-generation as the primary source; `CLAUDE.md` §8 explains why, and the default
-is `generate_with_approval`.
+The only connected hero source is **the ask**. Gable stops before rendering and
+requests one image in the listing thread; Carmen's or Chase's reply is prepared,
+published and attached to that same paused run. Form-photo selection, Drive
+selection, brokerage and web lookup, MLS access, and generation are not built.
+The default policy is `retrieve_only`; `no_ai` additionally disables paid
+enlargement of the supplied real photo.
 
 ---
 
@@ -654,16 +635,17 @@ is `generate_with_approval`.
 
 | Failure | Behavior |
 |---|---|
-| Sheet unreachable | Exponential backoff, alert Slack after 3 consecutive failures |
-| Google token expired | Refresh; on failure alert Slack, do not crash-loop |
-| Firecrawl down | Skip verification, flag the listing, continue |
+| Sheet unreachable | Log the pass failure and retry on the next scheduled pass |
+| Google client failure | Record or report the affected operation; do not claim success |
+| Firecrawl down | Leave public facts unresolved and pause rather than invent them |
 | No photo found | Status `needs_photo`, ask Carmen, do not block the batch |
-| Unknown agent | Status `needs_template`, ask Carmen |
-| Spaces upload fails | Retry 3×, then fail that listing only |
+| Unknown agent | Search the brokerage roster; ask if no unambiguous contact is found |
+| Local photo publish fails | Keep that listing paused and report the failed stage |
 | Slack disconnect | Bolt reconnects; log it, never exit |
-| Slides `batchUpdate` rejects a request | Fail that listing, keep the copied file, report the Google error verbatim in Slack |
-| Template missing a `{{...}}` the data fills | Render anyway; report the unfilled names so Carmen can check the layout |
-| Image model 429 / outage | Fall back to the unreprocessed real photo; never block on an AI call |
+| Slides mutation is rejected or incomplete | Stop that listing and translate the failure into plain language |
+| Template field is missing or unsafe | Stop before copy and ask for a source-template correction |
+| Image edit outage | Fall back to local fitting; final visual inspection still decides delivery |
+| Vision unavailable or inconclusive | Status `needs_review`; never deliver as ready |
 | Drive quota / non-shared drive | Refused at startup by `config.py`, not at render time |
 
 **One listing failing must never stop the batch.** Wrap per-listing processing so
@@ -684,9 +666,8 @@ an exception marks that row failed and the loop continues.
   an option. **Access is bounded by sharing, not by scope:** the account is given
   the intake Sheet and the "Gable" shared drive explicitly, and a service account
   inherits nothing else. It can reach what it was handed and nothing more.
-- Within the Sheet, Gable still **only ever appends to `Runs`** and reads
-  everything else. `Form Responses 1` is never written. That is enforced in code,
-  not by permissions.
+- The Sheet is read-only at runtime. Derived submissions, runs, transitions,
+  template audits and spend live in SQLite; `Form Responses 1` is never written.
 - Firewall: outbound only, plus SSH from known addresses.
 - Never persist a scraped image longer than needed to upload it.
 
@@ -703,8 +684,10 @@ Named so nobody wastes time adding them:
 - **Automatic publishing anywhere.** Gable renders and posts a link; Carmen holds
   the final say. It never publishes to a social account.
 - **Direct contact with real-estate agents.** Gable talks to Carmen and Chase.
-- **Its own image CDN.** The droplet serves photos over http, and Slides copies
-  each one into the presentation at insertion. Nothing needs to stay up.
+- **A photo discovery cascade or synthetic-property generator.** The supplied
+  Slack photo is the only connected hero source.
+- **An object-store CDN.** The droplet serves photos over http, and Slides copies
+  each one into the presentation at insertion. Nothing needs long-term hosting.
 
 ---
 
@@ -789,12 +772,15 @@ Append to this table. Do not rewrite history — if a decision reverses, add a n
 | 2026-08-12 | Responses columns are located by **header text**, and a tab with no recognisable header is refused | Fixed positions are only ever true of one tab. `Testing_1` splits the agent's name into `First Name` and `Second Name`, shifting every column from D rightward by one and heading row 2 under a blank row; read positionally its row 78 yields the service-guidelines paragraph as the request type, "Instagram Story" as the property address, and no price — all of which look like data downstream. `intake.columns_from_header` maps by name, `repository.find_header` locates the header row, and `maps_a_response_row` refuses a tab that names none of the email, request type and address rather than guessing. Also corrects §3.1, which described nine columns from a pre-API browser reading, and removes the `Templates` and `Runs` tab designs that D3 replaced with SQLite. |
 | 2026-08-12 | The picker takes the best design **that has been imported**, unless the submission named the missing one | Only the top-ranked candidate was ever looked for in Drive, so Just Sold — which has eleven eligible designs and one imported — reported having none filed at all, in front of a customer. `rank` already drops functional mismatches rather than demoting them, so everything it returns is usable and the order is preference; an absent candidate is now skipped and the next taken, with the fallback logged. This does **not** reverse the earlier "missing exact Drive file becomes needs_template" row, it narrows it: a design that won on a cue was explicitly asked for in the notes, and substituting another answers a different question than the agent asked, so a missing cue-matched design still stops and asks. |
 | 2026-08-12 | **Reverses the posted-message indicator:** every user response uses Slack's native purple thread status | Chase identified the posted animation as a regression from the native purple treatment that had visibly worked. Slack's current method reference and March 2026 scope update explicitly support channel apps through `chat:write`, including auto-opening the reply thread. The prior single live call that returned `ok` without visible output was not enough evidence to remove the product behavior. Mentions, follow-ups, edits, and photo work now share one timed status; after six seconds it reports the actual stage, and every exit clears it. |
-| 2026-08-12 | **Template choice is a naming rule, not a selector.** One folder; the file's name is the form's request type | Chase set this with Carmen directly, and it replaces the scored catalogue. Templates live only in `Templates / Generic Templates`, and each is named exactly what the form calls that request type — `Sold` on the form uses a file called `Sold`. The picker matches on that name, tolerating only case and stray spacing, and refuses on a duplicate name rather than choosing. Two things drove it: Carmen maintains the designs, and a convention she can verify by looking at a folder is one she can keep correct, whereas a ranking that reads her notes is not; and the previous lookup found any presentation in the drive carrying a `gable_role` property regardless of folder, so seven of the eleven it offered were filed inside Kelsey Mahon's own folder and any agent's listing could have been rendered onto another agent's design. `slides/catalog.py`, `rank`, `purpose_for` and `slides/routing.py`'s agent-override rule no longer decide anything; they are kept, unwired, pending a decision on deleting them. |
+| 2026-08-12 | **Template choice is a naming rule, not a selector.** One folder; the file's name is the form's request type | Chase set this with Carmen directly, and it replaces the scored catalogue. Templates live only in `Templates / Generic Templates`, and each is named exactly what the form calls that request type — `Sold` on the form uses a file called `Sold`. The picker matches on that name, tolerating only case and stray spacing, and refuses on a duplicate name rather than choosing. Two things drove it: Carmen maintains the designs, and a convention she can verify by looking at a folder is one she can keep correct, whereas a ranking that reads her notes is not; and the previous lookup found any presentation in the drive carrying a `gable_role` property regardless of folder, so seven of the eleven it offered were filed inside Kelsey Mahon's own folder and any agent's listing could have been rendered onto another agent's design. The obsolete catalogue, ranker, purpose resolver, and agent-override routing modules have been removed rather than left as a second unwired selection system. |
 | 2026-08-12 | The form splits the agent's name into `First Name` and `Second Name` | Chase's request to the customer, so the sheet is easier to parse than a single `Name of Agent` free-text field. Already supported: `intake.columns_from_header` reads either shape, and joins the pair when there is no single name column. |
 | 2026-08-12 | The roster moves out of the workbook tab and into the drive, and a **headshot is republished, never linked from Drive** | The `Sales_People` tab was deleted, so every run died on `Unable to parse range`. Contacts now come from `Agents Contact Information / Sales_Agents_Contact_Information.xlsx` and faces from `Head Shots`, each matched by name. The face cannot be handed to Slides as a Drive URL (§4.3 item 1), so it is downloaded with the service account and published through nginx like a hero photo; `publish_local` is content-addressed so each is written once. `agents/contacts.py` mirrors the workbook into the existing `salespeople` table, which left `find_salesperson` and its callers untouched. |
 | 2026-08-12 | **A missing price no longer stops a sold post** — the flyer is built, the link posted, and the price offered afterwards | Chase's rule. A flyer with a photo, an agent, an address and a design should not wait on a number that can be typed into the thread in seconds. The offer is made **only when the chosen design has a price field**: the live `Sold` design carries the address and the agent card and no price at all, and offering to add one there promises something that cannot be done. |
 | 2026-08-12 | Deleted every module unreachable from the entry points — about 3,000 lines of `src` and 1,600 of tests | Reachability from `slackapp.runtime`, `cli` and `tools/run_row` found thirteen orphans: `measure`, `registry`, `renderer`, `routing`, `catalog`, `blocks`, `handlers`, `quality`, `resolver`, `sources`, `verify`, `models` and `normalize` (whose one live function became `listings/headers.py`). Some were days old and never wired; keeping them meant the next agent reading a routing rule that routes nothing. `boto3` went with them, since Spaces was abandoned for nginx, and `openpyxl` became an explicit dependency. |
 | 2026-08-12 | **Ordinary Slack replies are gated by thread-root ownership** | Gable answered Chase's keyword selection inside a Monarch Website Watcher thread because the handler treated every `thread_ts` as Gable context. It now answers without a repeated mention only when Gable authored the root or the root originally mentioned Gable. Direct mentions still work in foreign threads, but do not transfer ownership. Root lookup failures stay silent, and the bounded cache prevents one Slack read per later reply. |
 | 2026-08-12 | The hero photo is cropped to the **frame's** shape, not the slide's canvas | `createImage` fits an image inside the box it is given rather than filling it. The upload is fitted to the slide's 1080x1350 canvas when it arrives in Slack — aspect 0.80 — and the `Sold` design's photo area is the full width by 37% of the height, aspect 2.14. The photo was therefore drawn at the band's height and centred: a narrow column of photograph with the layout showing either side and the design's angled mask exposed. It is now recropped to the measured frame's pixel size (1078 by 504 here) before placement. This affected every design whose photo area is not 4:5, which is nearly all of them. |
-| 2026-08-12 | **A question means Gable is waiting.** Anything it is not waiting for is a statement, said once, at the end | A non-blocking advisory — "the address is 45 characters and this design fits about 42, shall I shorten it?" — was posted mid-build and then ignored by Gable itself, which shrank the text and delivered. Four messages reached the thread for one flyer. Advisories are now collected and folded into a single closing message with the link, phrased as what was done; the photo handoff stays silent when the run has already spoken; and the waiting indicator is taken down before any question is asked. Only the states that genuinely stop — no photo, no design, an unusable address, a contradiction — ask anything. |
+| 2026-08-12 | **A question means Gable is waiting.** Anything it is not waiting for is a statement, said once, at the end | A non-blocking advisory — "the address is 45 characters and this design fits about 42, shall I shorten it?" — was posted mid-build and then ignored by Gable itself, which shrank the text and delivered. Four messages reached the thread for one flyer. Advisories are now collected and folded into a single closing message with the link, phrased as what was done; the photo handoff stays silent when the run has already spoken; and the native waiting state remains through the question or outcome post, then clears. Only the states that genuinely stop — no photo, no design, an unusable address, a contradiction — ask anything. |
 | 2026-08-12 | A new submission is **two messages**: the listing announced, the photo requested as a reply | The combined one-liner started no thread, and `PhotoHandoff` matches an upload to a run by the thread it arrives in — so there was nowhere valid to put the photo and the run would have waited forever. |
+| 2026-08-12 | **Current-source geometry preflight precedes every copy; GPT-5.6 Sol is a fail-closed rendered gate** | Google already exposes the editable object's dimensions and transform, which is more trustworthy than inferring them from pixels. Preflight now measures this listing's actual values and supplied photo before mutation. The rendered thumbnail still catches masks, overlaps and crops that rectangles cannot; original-detail Responses output must be complete, strict, confident and positive or delivery stops. |
+| 2026-08-12 | New files in `Generic Templates` receive proactive structure, capacity, and visual triage | The first scan adopts existing files without flooding Slack. A later Google Slides file is measured and, if deterministic checks pass, visually inspected in an owned thread; duplicate names and non-Slides uploads are refused. "Check the updated template" reloads the current source under the same native waiting state, while "run anyway" overrides only readable, non-structural listing warnings. |
+| 2026-08-12 | A Slack upload keeps its aspect ratio until the measured frame is known | The old handoff cropped to the 4:5 canvas and placement cropped again to the template's often-wide frame, permanently deleting useful pixels. There is now one frame-aware crop, a pre-build crop-loss warning, local enlargement through 2x, and at most one fidelity-gated GPT Image 2 edit beyond it. Synthetic property generation remains unconnected and is not advertised as available. |

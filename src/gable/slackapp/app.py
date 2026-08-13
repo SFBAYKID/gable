@@ -63,7 +63,7 @@ FALLBACK: Final[str] = (
 
 ProgressReporter = Callable[[str], None]
 FileShareHandler = Callable[[dict[str, Any], Any, ProgressReporter], str]
-ActionHandler = Callable[[Decision, str], str]
+ActionHandler = Callable[[Decision, str, ProgressReporter], str]
 Thinker = Callable[..., Decision]
 
 ACTION_STAGES: Final[dict[str, str]] = {
@@ -155,6 +155,7 @@ def reply_for_decision(
     decision: Decision,
     action_handler: ActionHandler | None = None,
     thread_ts: str = "",
+    progress: ProgressReporter = lambda _stage: None,
 ) -> str:
     """Choose an honest reply while action execution is being connected.
 
@@ -162,6 +163,8 @@ def reply_for_decision(
         decision: What the conversational model selected.
         action_handler: Executes a selected tool against the thread's flyer.
         thread_ts: Thread that identifies the database run.
+        progress: Updates the same native waiting state while a long action
+            moves through its real stages.
 
     Returns:
         The model's reply for conversation and clarification. For an action no
@@ -174,7 +177,7 @@ def reply_for_decision(
     if not decision.wants_action or decision.tool == "ask_clarifying":
         return decision.reply
     if action_handler is not None:
-        return action_handler(decision, thread_ts)
+        return action_handler(decision, thread_ts, progress)
     return "I understood the change, but I could not apply it. I have not changed the flyer."
 
 
@@ -314,7 +317,14 @@ def answer_mention(
                 decision = thinker(asked, speaker=speaker)
                 logger.info("replying (tool=%s)", decision.tool or "none")
                 waiting.stage(stage_for_decision(decision))
-                answer = safe_reply(reply_for_decision(decision, action_handler, str(thread or "")))
+                answer = safe_reply(
+                    reply_for_decision(
+                        decision,
+                        action_handler,
+                        str(thread or ""),
+                        waiting.stage,
+                    )
+                )
                 # Said inside the block on purpose: the native state remains up
                 # until the answer is in the thread, then Slack clears it.
                 say(text=answer, thread_ts=thread)
@@ -367,7 +377,12 @@ def answer_thread_reply(
                     decision = thinker(asked, speaker=speaker)
                     logger.info("replying to thread (tool=%s)", decision.tool or "none")
                     waiting.stage(stage_for_decision(decision))
-                    answer = reply_for_decision(decision, action_handler, thread)
+                    answer = reply_for_decision(
+                        decision,
+                        action_handler,
+                        thread,
+                        waiting.stage,
+                    )
                 say(text=safe_reply(answer), thread_ts=thread)
             except Exception:
                 logger.exception("thread response failed")

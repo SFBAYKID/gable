@@ -52,6 +52,9 @@ class Poller:
     #: tab name and never learns which is which.
     sync_roster: Callable[[], int]
     on_submission: Callable[[repo.Submission], None]
+    #: Reviews newly added source files. The first call adopts the existing
+    #: catalogue silently, so enabling this cannot flood Slack on deployment.
+    scan_templates: Callable[[], int] = lambda: 0
     schedule: PollSchedule = field(default_factory=PollSchedule)
     max_per_pass: int = MAX_PER_PASS
     _stopping: bool = False
@@ -95,15 +98,30 @@ class Poller:
         """
         try:
             self.sync_roster()
-            submissions = repo.read_submissions(self.client, self.responses_tab)
-        except SheetError:
-            logger.exception("could not read the sheet this pass")
-            return 0
         except Exception:
             # A roster that cannot be read must not look like an empty one:
             # every flyer would quietly carry the office number and the design's
             # own face. Skip the pass and say so instead.
             logger.exception("could not refresh the agent roster this pass")
+            return 0
+
+        try:
+            scanned = self.scan_templates()
+            if scanned:
+                logger.info("reviewed %d newly uploaded template(s)", scanned)
+        except Exception:
+            # A template-folder read must not stop unrelated, already-known
+            # listing designs from being used. The listing preflight is still
+            # the hard gate before a copy is created.
+            logger.exception("could not scan new templates this pass")
+
+        try:
+            submissions = repo.read_submissions(self.client, self.responses_tab)
+        except SheetError:
+            logger.exception("could not read the sheet this pass")
+            return 0
+        except Exception:
+            logger.exception("could not read the sheet this pass")
             return 0
 
         pending = repo.new_submissions(self.connection, submissions)

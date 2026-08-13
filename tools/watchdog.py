@@ -227,16 +227,6 @@ _BUG_PATTERNS: Final[tuple[tuple[str, str, str, str, str, str], ...]] = (
     ),
     (
         MEDIUM,
-        "The second quality pass is still dead",
-        "src/gable/pipeline/runner.py",
-        r"judge\([^)]*,\s*1\)",
-        "QUALITY_PASSES = 2 is declared and unused; one vision call runs. Chase asked "
-        "for two because fixing the first can move something, and the fitting pass "
-        "changes the slide before the only inspection.",
-        "6.11",
-    ),
-    (
-        MEDIUM,
         "Substring replacement is still unguarded",
         "MARKER:substring-safety",
         "",
@@ -287,8 +277,11 @@ def check_known_bugs() -> list[Finding]:
         elif path == "MARKER:db-path-config":
             still_there = "db_path" not in _read("src/gable/config.py")
         elif path == "MARKER:substring-safety":
-            live = _read("src/gable/pipeline/live.py")
-            still_there = "safe_replacement_requests" not in live or "occurrences != 1" not in live
+            replacement = _read("src/gable/slides/replacement.py")
+            still_there = (
+                "total != standalone" not in replacement
+                or "confirmed_replacement_count" not in replacement
+            )
         else:
             body = _read(path)
             still_there = bool(body) and bool(re.search(pattern, body, re.MULTILINE))

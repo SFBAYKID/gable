@@ -18,6 +18,7 @@ from gable.db.schema import apply_migrations, connect
 from gable.listings.enrich import Facts
 from gable.listings.intake import from_row
 from gable.pipeline.runner import Runner
+from gable.pipeline.vision import Inspection
 from gable.sheets import repository as repo
 
 
@@ -97,7 +98,13 @@ class Recorder:
         self.copied = True
         return ("out-1", "https://docs.google.com/presentation/d/out-1/edit")
 
-    def place_photo(self, file_id: str, url: str, template_label: str) -> bool:  # noqa: ARG002
+    def place_photo(
+        self,
+        _run_id: str,
+        _file_id: str,
+        _url: str,
+        _template_label: str,
+    ) -> bool:
         """Pretend the hero photo went on, and remember that it did."""
         self.photo_placed = True
         return True
@@ -125,6 +132,7 @@ def _runner(db: sqlite3.Connection, rec: Recorder, facts: Facts | None = None) -
         read_slide_text=rec.read,
         copy_template=rec.copy,
         fill=rec.fill,
+        look_at=lambda _run_id, _image: Inspection(looks_right=True, confident=True),
         research=lambda _address: (
             facts
             or Facts(
@@ -414,6 +422,117 @@ def test_a_template_without_a_field_does_not_fail_the_check(db: sqlite3.Connecti
     assert result.status == "delivered"
 
 
+def test_a_design_without_a_headshot_slot_can_still_be_delivered(
+    db: sqlite3.Connection,
+) -> None:
+    """No slot is a design choice, distinct from a failed replacement."""
+    submission = _submission(rid="rid-no-headshot-slot")
+    _record(db, submission)
+    runner = _runner(db, Recorder())
+    db.execute(
+        "UPDATE salespeople SET headshot_url = ? WHERE email = ?",
+        ("http://example.invalid/lolo.jpg", "lolo@cornerhouserealty.com"),
+    )
+    runner.place_headshot = lambda _file_id, _url: None
+
+    result = runner.run(submission)
+
+    assert result.status == "delivered"
+
+
+def test_a_found_headshot_slot_that_fails_to_change_blocks_delivery(
+    db: sqlite3.Connection,
+) -> None:
+    """A known sample face must not survive beside another agent's name."""
+    submission = _submission(rid="rid-headshot-failed")
+    _record(db, submission)
+    runner = _runner(db, Recorder())
+    db.execute(
+        "UPDATE salespeople SET headshot_url = ? WHERE email = ?",
+        ("http://example.invalid/lolo.jpg", "lolo@cornerhouserealty.com"),
+    )
+    runner.place_headshot = lambda _file_id, _url: False
+
+    result = runner.run(submission)
+
+    assert result.status == "needs_review"
+    assert any("sample headshot" in message for message in result.said)
+
+
+def test_a_preflight_warning_pauses_before_copy_and_run_anyway_resumes(
+    db: sqlite3.Connection,
+) -> None:
+    """A measured warning is a real choice, and an explicit answer is honored."""
+    from gable.slides.preflight import Issue, Report
+
+    submission = _submission(rid="rid-preflight-warning")
+    _record(db, submission)
+    rec = Recorder()
+    runner = _runner(db, rec)
+    runner.preflight_template = lambda *_args: Report(
+        issues=(
+            Issue(
+                "tight_agent_email",
+                "The agent email needs more room. Run anyway or update the template?",
+                advisory="I sized the agent email down to fit.",
+            ),
+        )
+    )
+
+    paused = runner.run(submission)
+    assert paused.status == "needs_template"
+    assert rec.copied is False
+
+    runner.allow_template_warnings = True
+    resumed = runner.resume(submission, paused.run_id)
+    assert resumed.status == "delivered"
+    assert resumed.output_url
+    assert any("sized the agent email down" in message for message in resumed.said)
+
+
+def test_a_structural_preflight_problem_cannot_be_overridden(db: sqlite3.Connection) -> None:
+    from gable.slides.preflight import Issue, Report
+
+    submission = _submission(rid="rid-preflight-blocker")
+    _record(db, submission)
+    rec = Recorder()
+    runner = _runner(db, rec)
+    runner.allow_template_warnings = True
+    runner.preflight_template = lambda *_args: Report(
+        issues=(Issue("no_frame", "I could not identify the photo frame.", blocking=True),)
+    )
+
+    result = runner.run(submission)
+    assert result.status == "needs_template"
+    assert rec.copied is False
+
+
+def test_an_updated_template_can_be_rechecked_before_a_photo_exists(
+    db: sqlite3.Connection,
+) -> None:
+    """Template triage happens before the photo question, so its rerun must too."""
+    from gable.slides.preflight import Issue, Report
+
+    submission = _submission(rid="rid-template-before-photo")
+    _record(db, submission)
+    rec = Recorder()
+    runner = _runner(db, rec)
+    runner.hero_photo_url = ""
+    runner.preflight_template = lambda *_args: Report(
+        issues=(Issue("tight_email", "The email section needs more room."),)
+    )
+
+    paused = runner.run(submission)
+    assert paused.status == "needs_template"
+    assert rec.copied is False
+
+    runner.preflight_template = lambda *_args: Report()
+    resumed = runner.resume(submission, paused.run_id)
+    assert resumed.status == "needs_photo"
+    assert rec.copied is False
+    assert any("send me the image" in message.lower() for message in resumed.said)
+
+
 # --- text fitting and the vision pass ---------------------------------------
 
 
@@ -506,7 +625,7 @@ def test_a_flyer_the_vision_pass_rejects_is_not_delivered(db: sqlite3.Connection
     _record(db, submission)
     rec = Recorder()
     runner = _runner(db, rec)
-    runner.look_at = lambda _image: Inspection(
+    runner.look_at = lambda _run_id, _image: Inspection(
         looks_right=False, confident=True, problems=["the price is cut off at the box edge"]
     )
     result = runner.run(submission)
@@ -515,16 +634,21 @@ def test_a_flyer_the_vision_pass_rejects_is_not_delivered(db: sqlite3.Connection
     assert any("cut off" in said for said in rec.said)
 
 
-def test_a_vision_check_that_could_not_run_does_not_block_delivery(
+def test_a_vision_check_that_could_not_run_blocks_delivery(
     db: sqlite3.Connection,
 ) -> None:
-    """A check that fails is "not checked", and must not stop a good flyer.
-
-    The default thumbnail callable returns no bytes, which is exactly that case.
-    """
+    """An unavailable proof cannot silently degrade into approval."""
     submission = _submission(rid="rid-novision")
     _record(db, submission)
-    assert _runner(db, Recorder()).run(submission).status == "delivered"
+    runner = _runner(db, Recorder())
+    runner.look_at = lambda _run_id, _image: Inspection(
+        looks_right=False,
+        confident=False,
+        checked=False,
+    )
+    result = runner.run(submission)
+    assert result.status == "needs_review"
+    assert any("could not complete the visual inspection" in message for message in result.said)
 
 
 # --- the photo is not optional ----------------------------------------------
@@ -613,6 +737,7 @@ def test_a_photo_that_will_not_go_on_stops_delivery(db: sqlite3.Connection) -> N
     class NoPlace(Recorder):
         def place_photo(
             self,
+            _run_id: str,
             _file_id: str,
             _url: str,
             _template_label: str,

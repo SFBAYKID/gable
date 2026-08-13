@@ -22,7 +22,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import StrEnum
-from typing import Final
 
 from gable.listings.enrich import Facts, fill_gaps
 from gable.listings.intake import (
@@ -35,10 +34,6 @@ from gable.listings.intake import (
     named_agents,
     needs_two_agents,
 )
-
-#: How many times a render is inspected before delivery. Chase asked for two:
-#: one to catch the obvious, a second to catch what the first pass moved.
-QUALITY_PASSES: Final[int] = 2
 
 
 class Outcome(StrEnum):

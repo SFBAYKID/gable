@@ -185,7 +185,7 @@ def upscale_real_photo(
     Raises:
         EnhancementError: when the provider fails or returns invalid bytes.
         EnhancementQualityError: when the result changes the composition or
-            contains a strong horizontal seam.
+            remains too small for the requested frame.
         OSError: when the original upload is not a readable image.
     """
     if not api_key or not model:
@@ -247,5 +247,7 @@ def upscale_real_photo(
     # other, and an earlier revision rejected 100% of enlargements including a
     # plain resize with no model in it. It is recorded for triage; the vision
     # pass over the rendered flyer is what decides whether the photo looks
-    # wrong. See `photos.verify.seam_score` for the measurements.
+    # wrong. The discarded seam detector could not distinguish a pasted sky
+    # from an ordinary roofline or treeline; the rendered vision gate handles
+    # visible seams with the rest of the flyer instead.
     return fitted

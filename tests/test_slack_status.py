@@ -267,19 +267,18 @@ def test_thinking_failure_reports_before_native_state_clears() -> None:
     assert order == ["status:is thinking...", f"answer:{FALLBACK}", "status:"]
 
 
-def test_an_empty_stage_takes_the_indicator_down() -> None:
-    """Asking a question ends the work, so the pulsing has to stop.
-
-    Left up underneath a question it reads as "still working on it", and nobody
-    answers a question the app appears to still be thinking about.
-    """
+def test_an_empty_stage_cannot_clear_the_indicator_before_the_answer() -> None:
+    """Only the response context clears status after its message is posted."""
     client = FakeClient()
     waiting = Working(client, "C1", "1786.1")
     waiting.start()
     waiting.stage("")
 
-    assert waiting._done.is_set()
-    assert client.statuses[-1]["status"] == "", "Slack is told nothing is happening"
+    try:
+        assert not waiting._done.is_set()
+        assert client.statuses[-1]["status"] == "is thinking..."
+    finally:
+        waiting.stop()
 
 
 def test_a_real_stage_keeps_the_indicator_running() -> None:

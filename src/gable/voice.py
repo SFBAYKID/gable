@@ -22,7 +22,7 @@ of Gable, not of Slack: CLAUDE.md §6 forbids anything in `src/gable/` importing
 from `slackapp/`, and the pipeline needs these rules too. `slackapp.style`
 re-exports it so existing imports keep working.
 
-Does not handle: Block Kit assembly (that is `blocks.py`) or posting.
+Does not handle: posting to Slack.
 """
 
 from __future__ import annotations

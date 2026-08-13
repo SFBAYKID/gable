@@ -27,7 +27,7 @@ from typing import Final
 
 #: Bumped whenever a migration is added. `apply_migrations` uses it to decide
 #: what still needs running.
-SCHEMA_VERSION: Final[int] = 2
+SCHEMA_VERSION: Final[int] = 3
 
 #: Each migration is (version, sql). They run in order and only once. Never edit
 #: one that has shipped — add another, the same rule as the decision log.
@@ -155,6 +155,31 @@ MIGRATIONS: Final[tuple[tuple[int, str], ...]] = (
         -- A real photo enlarged by an image model is not synthetic, but the
         -- distinction must survive the Slack handoff and later audit.
         ALTER TABLE runs ADD COLUMN ai_enhanced INTEGER NOT NULL DEFAULT 0;
+        """,
+    ),
+    (
+        3,
+        """
+        -- Source-template checks are separate from listing runs. The first
+        -- catalogue scan adopts existing files silently; later file ids are
+        -- new uploads and receive one measured Slack review.
+        CREATE TABLE IF NOT EXISTS template_audits (
+            file_id          TEXT PRIMARY KEY,
+            name             TEXT NOT NULL,
+            modified_time    TEXT NOT NULL DEFAULT '',
+            status           TEXT NOT NULL,
+            summary          TEXT NOT NULL DEFAULT '',
+            slack_thread_ts  TEXT NOT NULL DEFAULT '',
+            checked_at       TEXT NOT NULL
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_template_audits_thread
+            ON template_audits (slack_thread_ts);
+
+        CREATE TABLE IF NOT EXISTS template_scan_state (
+            singleton   INTEGER PRIMARY KEY CHECK (singleton = 1),
+            adopted_at  TEXT NOT NULL
+        );
         """,
     ),
 )

@@ -43,15 +43,6 @@ ASPECT_BOUNDS: Final[dict[str, tuple[float, float]]] = {
 #: Below this the image is too small to print without visible softness.
 MIN_EDGE_PX: Final[int] = 200
 
-#: A seam must be at least this many grey levels (0-255) of row-to-row jump.
-#: Calibrated 2026-08-11 against real photos rather than guessed.
-_MIN_SEAM_JUMP: Final[float] = 6.0
-
-#: Grid the seam check samples on. Coarse enough to be cheap, fine enough that
-#: a one-pixel paste line still lands on its own row.
-_SEAM_COLS: Final[int] = 64
-_SEAM_ROWS: Final[int] = 128
-
 _TIMEOUT_SECONDS: Final[int] = 30
 #: Enough to identify format and size without pulling a whole photo.
 _HEADER_BYTES: Final[int] = 65536
@@ -99,7 +90,8 @@ def verify(url: str, slot: str = "any", timeout: int = _TIMEOUT_SECONDS) -> Verd
             content_type = (response.headers.get("Content-Type") or "").split(";")[0].strip()
             head = response.read(_HEADER_BYTES)
     except urllib.error.HTTPError as exc:
-        return Verdict(ok=False, say=f"that image link came back as unavailable ({exc.code})")
+        del exc
+        return Verdict(ok=False, say="that image link came back as unavailable")
     except Exception:
         return Verdict(ok=False, say="I could not reach that image link")
 
@@ -123,7 +115,13 @@ def verify(url: str, slot: str = "any", timeout: int = _TIMEOUT_SECONDS) -> Verd
             content_type=content_type,
         )
 
-    if min(width, height) < MIN_EDGE_PX:
+    # An aspect-preserved human upload is checked as ``any`` before its actual
+    # template frame is known. A small source is still usable: the guarded
+    # fidelity-preserving upscale handles it, and the local original remains
+    # the fallback. AGENTS.md explicitly forbids asking for a larger copy merely
+    # because the upload is small. Slot-specific assets such as headshots keep
+    # the minimum because there is no upscale path for them.
+    if slot != "any" and min(width, height) < MIN_EDGE_PX:
         return Verdict(
             ok=False,
             say=f"that image is only {width} by {height}, too small to print cleanly",
@@ -148,73 +146,3 @@ def verify(url: str, slot: str = "any", timeout: int = _TIMEOUT_SECONDS) -> Verd
         )
 
     return Verdict(ok=True, width=width, height=height, content_type=content_type)
-
-
-def seam_score(image_bytes: bytes) -> float:
-    """How likely an image has a hard horizontal seam across it.
-
-    A failed sky replacement leaves a straight line where the new sky was
-    pasted in. One reached a flyer, which is why this exists.
-
-    **This is a weak signal and must not be used as a hard gate.** Measured
-    2026-08-11 against real photographs: a deliberately seamed image scored
-    1.83 on the underlying ratio and the same image unseamed scored 1.79. Two
-    percent apart. Ordinary listing photos are full of full-width horizontal
-    transitions — a treeline, a roofline, a kerb, the edge of a lawn — and at
-    any sampling resolution cheap enough to run inline, those are the same
-    measurement as a pasted sky.
-
-    Three designs were tried and all three failed the same way; the earlier two
-    are described in the body below. Use this to *rank* or to log, and let the
-    vision pass over the rendered flyer be the thing that actually decides.
-    `enhance.composition_distance` is the reliable numeric check — it catches
-    the failure that matters, which is the model returning a different house.
-
-    Args:
-        image_bytes: The image to check.
-
-    Returns:
-        0.0 for no detectable seam, rising with confidence, capped at 1.0.
-        Treat anything under roughly 0.8 as uninformative rather than as a pass.
-
-    Raises:
-        Nothing.
-    """
-    try:
-        with Image.open(io.BytesIO(image_bytes)) as opened:
-            grey = opened.convert("L").resize((_SEAM_COLS, _SEAM_ROWS))
-            pixels = [
-                [float(grey.getpixel((x, y))) for x in range(_SEAM_COLS)]  # type: ignore[arg-type]
-                for y in range(_SEAM_ROWS)
-            ]
-    except Exception:
-        return 0.0
-
-    # What separates a pasted sky from a roofline is UNIFORMITY, not size.
-    #
-    # Two earlier versions of this compared row-mean brightness and both were
-    # wrong, verified against real photos on 2026-08-11. Comparing the biggest
-    # row jump to the median made a clean gradient sky score 1.0, because its
-    # median is near zero. Adding an absolute floor did not help either: the
-    # roofline of a house is a genuine, large, horizontal brightness step, so
-    # every ordinary listing photo still scored 1.0 and the quality gate
-    # rejected every enhancement — including a plain resize with no model in it.
-    #
-    # A failed sky replacement shifts EVERY column by nearly the same amount,
-    # so the per-column deltas cluster tightly around their mean. A roofline
-    # shifts some columns hugely (sky to shingle) and others not at all (sky to
-    # sky), so the same deltas are spread wide. Comparing the mean jump to its
-    # own spread separates them; comparing magnitudes never can.
-    best = 0.0
-    for y in range(1, _SEAM_ROWS - 1):
-        deltas = [pixels[y + 1][x] - pixels[y][x] for x in range(_SEAM_COLS)]
-        mean = sum(deltas) / _SEAM_COLS
-        if abs(mean) < _MIN_SEAM_JUMP:
-            continue
-        variance = sum((d - mean) ** 2 for d in deltas) / _SEAM_COLS
-        # The +1 keeps a perfectly flat region from dividing by zero and also
-        # stops a trivially small jump from scoring high on tidiness alone.
-        best = max(best, abs(mean) / (variance**0.5 + 1.0))
-
-    # Below ~1.0 the spread swamps the jump, which is an edge, not a seam.
-    return min(1.0, max(0.0, (best - 1.0) / 3.0))

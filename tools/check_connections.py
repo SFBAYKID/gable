@@ -1,4 +1,4 @@
-"""Prove every credential in `.env` actually works, without printing any of them.
+"""Prove every runtime credential in `.env` works, without printing any of them.
 
 Not a unit test — this makes real network calls. Run it after changing `.env`,
 after rotating a key, and as the first step of debugging "why is nothing
@@ -137,54 +137,41 @@ def check_slack_channel(env: dict[str, str]) -> Result:
     return Result("Slack channel", FAIL, str(body.get("error")))
 
 
-def check_anthropic(env: dict[str, str]) -> Result:
-    """/v1/models — cheapest authenticated call that proves the key works."""
-    key = env.get("ANTHROPIC_API_KEY")
-    if not key:
-        return Result("Anthropic", SKIP, "ANTHROPIC_API_KEY not set")
-    status, body = http_json(
-        "https://api.anthropic.com/v1/models?limit=1",
-        headers={"x-api-key": key, "anthropic-version": "2023-06-01"},
-    )
-    if status == 200:
-        models = body.get("data", [])
-        first = models[0].get("id") if models else "none listed"
-        return Result("Anthropic", OK, f"key valid, models reachable (e.g. {first})")
-    return Result("Anthropic", FAIL, f"HTTP {status}: {body.get('error', {}).get('message', body)}")
-
-
-def check_openai_images(env: dict[str, str]) -> Result:
-    """Prove the image key authenticates, via /v1/models.
+def check_openai_models(env: dict[str, str]) -> Result:
+    """Prove the OpenAI key and every configured runtime model are available.
 
     No generation call is made: that costs money, and this script is meant to
     be cheap enough to run on every deploy.
     """
     key = env.get("OPENAI_IMAGE_API_KEY")
     if not key:
-        return Result("OpenAI (images)", SKIP, "OPENAI_IMAGE_API_KEY not set")
+        return Result("OpenAI", SKIP, "OPENAI_IMAGE_API_KEY not set")
     status, body = http_json(
         "https://api.openai.com/v1/models", headers={"Authorization": f"Bearer {key}"}
     )
     if status == 200:
         ids = {m.get("id") for m in body.get("data", []) if isinstance(m.get("id"), str)}
-        wanted = env.get("GABLE_IMAGE_MODEL", "gpt-image-2")
+        wanted = {
+            env.get("GABLE_CONVERSATION_MODEL", "gpt-5-mini"),
+            env.get("GABLE_VISION_MODEL", "gpt-5.6-sol"),
+            env.get("GABLE_IMAGE_MODEL_HQ", "gpt-image-2"),
+        }
         # Sort descending so the NEWEST model leads. Sorting ascending once made
         # gpt-image-1 look like the latest available, which it is not.
         image_models = sorted((i for i in ids if "image" in i), reverse=True)
-        if wanted in ids:
+        missing = sorted(wanted - ids)
+        if not missing:
             return Result(
-                "OpenAI (images)",
+                "OpenAI",
                 OK,
-                f"key valid; {wanted} available (newest visible: {image_models[0]})",
+                f"key valid; configured models available: {', '.join(sorted(wanted))}",
             )
         return Result(
-            "OpenAI (images)",
+            "OpenAI",
             FAIL,
-            f"GABLE_IMAGE_MODEL={wanted} NOT available to this key. Visible: {image_models[:4]}",
+            f"configured model(s) unavailable: {missing}. Visible image models: {image_models[:4]}",
         )
-    return Result(
-        "OpenAI (images)", FAIL, f"HTTP {status}: {body.get('error', {}).get('message', body)}"
-    )
+    return Result("OpenAI", FAIL, f"HTTP {status}: {body.get('error', {}).get('message', body)}")
 
 
 def check_firecrawl(env: dict[str, str]) -> Result:
@@ -302,8 +289,7 @@ def main() -> int:
         check_slack_bot(env),
         check_slack_app(env),
         check_slack_channel(env),
-        check_anthropic(env),
-        check_openai_images(env),
+        check_openai_models(env),
         check_firecrawl(env),
         *check_google(env),
     ]

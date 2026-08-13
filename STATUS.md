@@ -1,6 +1,27 @@
 # Gable — status, and what's needed from Chase
 
-Last updated 2026-08-11 by the building agent.
+Last updated 2026-08-12 by the building agent.
+
+## 2026-08-12 current quality gate
+
+The current implementation and research findings are in
+`AUDIT_2026-08-12.md`. Source-template geometry preflight now runs before any
+copy, newly uploaded templates receive proactive structure and capacity triage,
+followed by a placeholder-aware visual layout check, and an updated source can
+be reloaded from the same Slack thread under the native waiting state. Slack
+photos retain their composition until the exact
+hero frame is measured, and the final `gpt-5.6-sol` inspection compares that
+source with the render and fails closed when unavailable or uncertain.
+
+The recoverable live template smoke test copied `Sold`, detected its address
+capacity at roughly 34 average characters against the 52-character
+certification target, recorded `needs_template`, and moved the temporary copy
+to Drive trash. The actual `Sold` thumbnail also passed a guarded live vision
+call. Neither result is represented as Carmen's visual certification of a
+fully populated production flyer.
+
+The sections below are chronological evidence and may describe an older state;
+the dated audit and `ARCHITECTURE.md` are authoritative for current behavior.
 
 **Handing off?** Read `TEMPLATE_CERTIFICATION.md` for what is actually proven
 and which numbers can be trusted, `TEMPLATE_ISSUES.md` for the seven defects
@@ -258,8 +279,8 @@ record of what was rejected:
 **D2 — RESOLVED, then replaced on 2026-08-12.** Template choice is a naming
 rule, not a selector: one folder, and the file is named exactly what the form
 calls the request type. The scored catalogue and its notes-reading ranking are
-superseded — see the decision log, and `slides/catalog.py` for the 45-entry
-inventory that no longer routes anything.
+superseded — see the decision log. Their 45-entry inventory was removed with
+the other unreachable selection modules and no longer exists in runtime code.
 
 **D3 — RESOLVED.** Derived state lives in SQLite. Gable reads form responses,
 mirrors the salesperson roster, and never modifies the response tab.

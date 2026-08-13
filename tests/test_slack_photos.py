@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import io
 import sqlite3
-from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -108,7 +107,6 @@ def _handoff(
     path: Path,
     seen: list[str],
     image: bytes | None = None,
-    upscale: Callable[[sqlite3.Connection, str, bytes, int, int], bytes] | None = None,
 ) -> PhotoHandoff:
     supplied = image if image is not None else _jpeg()
 
@@ -126,12 +124,11 @@ def _handoff(
         db_path=path,
         bot_token="test-token",
         allowed_channel=CHANNEL,
-        target_width=1080,
-        target_height=1350,
+        max_edge_px=2400,
+        jpeg_quality=85,
         public_root=path.parent / "photos",
         public_base="http://198.51.100.7",
         runner_for=runner_for,
-        upscale=upscale,
         download=lambda _url, _token, _limit: supplied,
         publish=lambda _root, _base, fitted: PUBLIC_URL if fitted else "",
         verify=lambda _url: (True, "image/jpeg"),
@@ -167,7 +164,7 @@ def test_one_thread_image_resumes_the_same_run_without_a_new_attempt(tmp_path: P
     photo = connection.execute(
         "SELECT photo_url, photo_source, ai_enhanced FROM runs WHERE run_id = ?", (run_id,)
     ).fetchone()
-    assert tuple(photo) == (PUBLIC_URL, "carmen", 0)
+    assert tuple(photo) == (PUBLIC_URL, "slack_upload", 0)
     connection.close()
 
 
@@ -181,7 +178,7 @@ def test_photo_handoff_reports_truthful_stages_during_a_long_wait(tmp_path: Path
 
     assert stages == [
         "is reading the photo...",
-        "is fitting the photo to the template...",
+        "is preparing the photo...",
         "is building the flyer...",
     ]
 
@@ -231,59 +228,39 @@ def test_a_non_image_upload_leaves_the_run_paused(tmp_path: Path) -> None:
     connection.close()
 
 
-def test_a_tiny_upload_is_upscaled_automatically_and_resumes_the_run(tmp_path: Path) -> None:
-    path = tmp_path / "gable.db"
-    run_id = _paused_database(path)
-    seen: list[str] = []
-    calls: list[tuple[str, int, int]] = []
-
-    def upscale(
-        _connection: sqlite3.Connection,
-        received_run_id: str,
-        _image: bytes,
-        width: int,
-        height: int,
-    ) -> bytes:
-        calls.append((received_run_id, width, height))
-        return _jpeg(width, height)
-
-    said = _handoff(path, seen, _jpeg(200, 200), upscale).handle(_event(), FakeSlackClient())
-
-    # The upscale still happened; the run just speaks for itself afterwards.
-    assert said == ""
-    assert calls == [(run_id, 1080, 1350)]
-    assert seen == ["response-1", run_id]
-    connection = connect(path)
-    row = connection.execute("SELECT ai_enhanced FROM runs WHERE run_id = ?", (run_id,)).fetchone()
-    assert row["ai_enhanced"] == 1
-    connection.close()
-
-
-def test_a_failed_ai_upscale_uses_the_original_without_asking_again(tmp_path: Path) -> None:
+def test_a_tiny_upload_is_kept_for_frame_aware_upscaling_and_resumes(tmp_path: Path) -> None:
     path = tmp_path / "gable.db"
     run_id = _paused_database(path)
     seen: list[str] = []
 
-    def fail(
-        _connection: sqlite3.Connection,
-        _run_id: str,
-        _image: bytes,
-        _width: int,
-        _height: int,
-    ) -> bytes:
-        msg = "fixed test failure"
-        raise RuntimeError(msg)
+    said = _handoff(path, seen, _jpeg(200, 200)).handle(_event(), FakeSlackClient())
 
-    said = _handoff(path, seen, _jpeg(200, 200), fail).handle(_event(), FakeSlackClient())
-
-    # Nothing, on purpose: the run posted its own outcome and its link, so a
-    # line here would be a fourth message restating the thread.
+    # The template runner owns any upscale because only it knows the real
+    # frame. The handoff preserves the source and resumes the same run.
     assert said == ""
     assert seen == ["response-1", run_id]
     connection = connect(path)
     row = connection.execute("SELECT ai_enhanced FROM runs WHERE run_id = ?", (run_id,)).fetchone()
     assert row["ai_enhanced"] == 0
     connection.close()
+
+
+def test_the_handoff_preserves_aspect_instead_of_cropping_twice(tmp_path: Path) -> None:
+    path = tmp_path / "gable.db"
+    _paused_database(path)
+    seen: list[str] = []
+    published: list[bytes] = []
+    handoff = _handoff(path, seen, _jpeg(2400, 1200))
+
+    def publish(_root: Path, _base: str, image: bytes) -> str:
+        published.append(image)
+        return PUBLIC_URL
+
+    object.__setattr__(handoff, "publish", publish)
+    handoff.handle(_event(), FakeSlackClient())
+
+    with Image.open(io.BytesIO(published[0])) as prepared:
+        assert prepared.size == (2400, 1200)
 
 
 def test_a_listing_can_never_buy_a_second_upscale(tmp_path: Path) -> None:

@@ -6,12 +6,11 @@ counts; the other carries neither. Treating them as one schema is what produced
 a flyer with the literal words "Phone" and "Website" on it, and another whose
 "Website" wrapped mid-word in a box too narrow for a single word.
 
-So a template declares its own fields, and each field declares:
-
-* whether it is **required** — an empty required field is a hard stop, never a
-  flyer with a label where a value should be
-* its **max_chars** — a measured budget, not a guess, so overflow is caught
-  before rendering rather than mangled by fitting afterwards
+So a template declares its own fields and whether each is **required**. An empty
+required field is a hard stop, never a flyer with a label where a value should
+be. Text capacity is measured from the current Slides geometry by
+``slides.preflight``; the old hand-entered character budgets were removed
+because they could disagree with the source file after Carmen edited it.
 
 `validate()` is pure and returns problems in Carmen's words. Nothing renders
 until it comes back clean.
@@ -42,16 +41,9 @@ class Field:
     name: str
     kind: str = TEXT
     required: bool = False
-    #: Measured from the box: how many characters fit at the design's own size.
-    #: Zero means unmeasured, and unmeasured fields are not budget-checked.
-    max_chars: int = 0
     #: For an image slot: roughly what shape it is, so a headshot cannot be
     #: filled with a landscape photo.
     aspect: str = ""
-
-    def over_budget(self, value: str) -> bool:
-        """Whether a value is too long for this slot."""
-        return bool(self.max_chars) and len(value.strip()) > self.max_chars
 
 
 @dataclass(frozen=True, slots=True)
@@ -60,10 +52,6 @@ class Manifest:
 
     template: str
     fields: tuple[Field, ...] = ()
-    #: Exact raster-art layer replaced by the hero photo. Imported PowerPoint
-    #: photos arrive as ordinary shapes, so type and size cannot identify them
-    #: safely; this id is measured per template instead.
-    hero_object_id: str = ""
 
     def required_names(self) -> tuple[str, ...]:
         """Fields that must be filled for this template to be renderable."""
@@ -74,21 +62,23 @@ class Manifest:
         return next((f for f in self.fields if f.name == name), None)
 
 
-#: Slots common to most listing designs. Budgets are measured from the boxes on
-#: the Corner House deck at their own font sizes, not guessed.
-_ADDRESS = Field("address", ADDRESS, required=True, max_chars=42)
-_PRICE = Field("price", MONEY, required=True, max_chars=12)
-_AGENT = Field("agent_name", TEXT, required=True, max_chars=22)
-_PHONE = Field("agent_phone", PHONE, required=True, max_chars=16)
-_EMAIL = Field("agent_email", EMAIL, required=False, max_chars=30)
-_WEBSITE = Field("website", TEXT, required=False, max_chars=24)
-_BEDS = Field("beds", TEXT, required=True, max_chars=4)
-_BATHS = Field("baths", TEXT, required=True, max_chars=4)
-_SQFT = Field("square_feet", TEXT, required=True, max_chars=8)
-# The Corner House deck is Instagram 4:5 throughout, so a hero is portrait.
-_HERO = Field("hero_photo", IMAGE, required=True, aspect="portrait")
+#: Slots common to most listing designs. Current source-box geometry supplies
+#: capacity; this manifest only says which values may be left empty.
+_ADDRESS = Field("address", ADDRESS, required=True)
+_PRICE = Field("price", MONEY, required=True)
+_AGENT = Field("agent_name", TEXT, required=True)
+_PHONE = Field("agent_phone", PHONE, required=True)
+_EMAIL = Field("agent_email", EMAIL, required=False)
+_WEBSITE = Field("website", TEXT, required=False)
+_BEDS = Field("beds", TEXT, required=True)
+_BATHS = Field("baths", TEXT, required=True)
+_SQFT = Field("square_feet", TEXT, required=True)
+# Source uploads retain their full composition until the exact frame is
+# measured. Rejecting a landscape source merely because the slide is portrait
+# caused the image to be cropped once at upload and again at placement.
+_HERO = Field("hero_photo", IMAGE, required=True, aspect="any")
 _HEADSHOT = Field("headshot", IMAGE, required=False, aspect="square")
-_OPEN_HOUSE = Field("open_house", DATETIME, required=True, max_chars=28)
+_OPEN_HOUSE = Field("open_house", DATETIME, required=True)
 
 #: Per-template manifests. A template absent from here falls back to
 #: `DEFAULT_LISTING`, which is deliberately conservative.
@@ -108,24 +98,14 @@ MANIFESTS: Final[dict[str, Manifest]] = {
             _HERO,
             _HEADSHOT,
         ),
-        # ASSUMPTION: Drive copies preserve Slides object ids. A copied live
-        # template plus a rendered thumbnail would confirm this after any
-        # template replacement; the source file was inspected on 2026-08-11.
-        hero_object_id="p1_i3",
     ),
     "Just Listed — Plus Open House — Offered At": Manifest(
         "Just Listed — Plus Open House — Offered At",
         (_ADDRESS, _PRICE, _BEDS, _BATHS, _SQFT, _AGENT, _PHONE, _OPEN_HOUSE, _HERO, _HEADSHOT),
-        # ASSUMPTION: This id remains stable until Carmen replaces the source
-        # template. Re-running template certification would confirm it.
-        hero_object_id="p1_i10",
     ),
     "Just Sold — With Beds, Baths and SqFt": Manifest(
         "Just Sold — With Beds, Baths and SqFt",
         (_ADDRESS, _PRICE, _BEDS, _BATHS, _SQFT, _AGENT, _PHONE, _EMAIL, _HERO, _HEADSHOT),
-        # ASSUMPTION: This id remains stable until Carmen replaces the source
-        # template. Re-running template certification would confirm it.
-        hero_object_id="p1_i3",
     ),
 }
 
@@ -242,20 +222,6 @@ def validate(manifest: Manifest, values: dict[str, str]) -> list[Problem]:
 
         if not value:
             continue
-
-        if slot.over_budget(value):
-            readable = slot.name.replace("_", " ")
-            problems.append(
-                Problem(
-                    slot.name,
-                    # A statement, not a question. Gable does not stop for this
-                    # — the fitter shrinks the text and the flyer is delivered —
-                    # and a question nobody is waiting for an answer to is worse
-                    # than saying nothing.
-                    f"The {readable} is longer than this design's box, so I sized it down to fit.",
-                    blocking=False,
-                )
-            )
 
         if slot.kind is ADDRESS and not ADDRESS_SHAPE.match(value):
             problems.append(
