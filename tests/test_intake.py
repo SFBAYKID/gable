@@ -173,13 +173,22 @@ def test_sold_without_a_closing_price_no_longer_stops_the_build() -> None:
     thread in two seconds after the link arrives.
     """
     assert incoherences(_intake(request_type="Sold")) == []
-    note = price_note(_intake(request_type="Sold"))
+    note = price_note(_intake(request_type="Sold"), design_shows_a_price=True)
     assert "no price" in note.lower()
     assert "give me the price" in note.lower()
 
 
 def test_a_sold_post_with_a_price_says_nothing_afterwards() -> None:
-    assert price_note(_intake(request_type="Sold", closing_price="$450,000")) == ""
+    assert price_note(_intake(request_type="Sold", closing_price="$450,000"), True) == ""
+
+
+def test_a_design_with_no_price_slot_is_not_offered_a_price() -> None:
+    """The live `Sold` design carries an address and an agent card, no price.
+
+    Offering to add one there promises something that cannot be done, and the
+    next message has to take it back.
+    """
+    assert price_note(_intake(request_type="Sold"), design_shows_a_price=False) == ""
 
 
 def test_sold_with_a_closing_price_is_not_asked_about() -> None:

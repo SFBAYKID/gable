@@ -487,20 +487,28 @@ def incoherences(intake: Intake) -> list[Question]:
     return asks
 
 
-def price_note(intake: Intake) -> str:
+def price_note(intake: Intake, design_shows_a_price: bool) -> str:
     """What to say after delivering a flyer whose price was never supplied.
 
     Args:
         intake: The submission.
+        design_shows_a_price: Whether the chosen design actually has somewhere
+            to put one.
 
     Returns:
-        Chase's sentence, or empty when the price was there or is not expected
-        for this kind of post.
+        Chase's sentence, or empty when the price was supplied, is not expected
+        for this kind of post, or has nowhere to go.
 
     Raises:
         Nothing.
+
+    Note:
+        The design check is not a detail. The `Sold` design carries the address
+        and the agent card and **no price at all**, so offering to add one to it
+        promises something that cannot be done — which is worse than saying
+        nothing, because the next message has to take it back.
     """
-    if not intake.is_sold or intake.price:
+    if not design_shows_a_price or not intake.is_sold or intake.price:
         return ""
     return (
         "There was no price so I built without the price added. "

@@ -552,7 +552,7 @@ class Runner:
         thread_root = self.origin_thread_ts or posted_ts
         # The link goes first. A flyer that is otherwise complete should not
         # wait on a number the agent can supply in two seconds afterwards.
-        note = price_note(intake)
+        note = price_note(intake, "price" in resolution.fields)
         if note:
             result.said.append(safe(note))
             self.say(safe(note), thread_root or None)
