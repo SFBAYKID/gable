@@ -112,9 +112,6 @@ class Settings:
     google_service_account_file: Path
     sheet_id: str
     tab_responses: str
-    tab_agents: str
-    tab_runs: str
-    tab_templates: str
 
     # --- Google Drive ---
     # A Shared Drive, never a My Drive folder: service accounts have a 0 GB
@@ -268,9 +265,6 @@ class Settings:
             ),
             sheet_id=reader.required("GABLE_SHEET_ID"),
             tab_responses=reader.str_value("GABLE_TAB_RESPONSES", "Form Responses 1"),
-            tab_agents=reader.str_value("GABLE_TAB_AGENTS", "Sales_People"),
-            tab_runs=reader.str_value("GABLE_TAB_RUNS", "Runs"),
-            tab_templates=reader.str_value("GABLE_TAB_TEMPLATES", "Templates"),
             drive_id=reader.str_value("GABLE_DRIVE_ID", ""),
             drive_templates_folder_id=reader.str_value("GABLE_DRIVE_TEMPLATES_FOLDER_ID", ""),
             drive_output_folder_id=reader.str_value("GABLE_DRIVE_OUTPUT_FOLDER_ID", ""),

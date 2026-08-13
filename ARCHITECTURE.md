@@ -147,14 +147,13 @@ drive* are owned by the drive, not the account, so the quota never applies.
 `config.py` rejects a non-shared drive id at startup rather than letting this
 surface at runtime, on the first real listing, as an opaque Google error.
 
-### 2.5 Why the renderer is pure and the client is not
+### 2.5 Why request building is pure and the client is not
 
-`slides/renderer.py` takes domain objects and returns JSON-serializable request
-dicts. No network, no credentials, no Google client. That split means the entire
-fill behaviour is unit-tested — 36 tests today — without a service account
-existing, and leaves `slides/client.py` holding nothing but I/O. It is also why
-the renderer was testable before Google access existed; the live service-account
-path has since been verified separately.
+`slides/edits.py`, `fields.py`, `fitting.py` and `manifest.py` take values and
+return JSON-serializable Slides requests. No network, no credentials, no Google
+client. `pipeline/live.py` is the only module holding both the settings and the
+concrete clients, which keeps every decision unit-testable without a service
+account existing and puts the I/O in one reviewable place.
 
 ### 2.6 The polling schedule
 
@@ -231,64 +230,51 @@ footage, which are researched (§4.3b), and the agent's phone, which comes from
 `Sales_People`. The request type decides which column is the price — a sold post
 carries a closing price, a price improvement carries a new price.
 
-### 3.2 Tab `Sales_People` — identity and template map
+### 3.2 The three sources in the shared drive
 
-The join that turns "Lolo Simmons" into a template, a phone number and a
-headshot. Matched on **first name, last name and email** — email alone is the
-primary key, but the name columns are what a human reads when correcting a row.
+Everything a flyer needs that the form does not supply lives in the drive beside
+the templates, and **each is found by name, never by position**:
 
-**What is actually in the live tab, read 2026-08-10 through the service
-account.** The tab exists and is named `Sales_People` (underscore), not
-`Salespeople`. It has four columns and one data row:
-
-| | A | B | C | D |
-|---|---|---|---|---|
-| row 1 | *(blank)* | | | |
-| row 2 | `Email` | `First Name` | `Last Name` | `Template` |
-| row 3 | `lolo@cornerhouserealty.com` | `Lolo ` | `Simmons` | `1` |
-
-Three things in that to build against, not around:
-
-- **The header is on row 2.** Row 1 is blank. Anything that assumes `A1` is the
-  header reads an empty row and matches nothing. Find the header row by content.
-- **`Lolo ` carries a trailing space.** Real data from a real form. Every join
-  key gets trimmed before comparison, or Lolo never matches herself.
-- **`Template` holds `1`, not a Drive file id.** It is legacy human shorthand,
-  not a safe production key. Runtime selection now combines the request type
-  and all notes fields with the explicit 45-entry catalogue, then requires an
-  exact Drive filename; it never treats `1` as a file id.
-
-The columns below are the target shape. Everything past `Template` is absent
-today and must be added before the feature that reads it ships.
-
-| Column | Type | Notes |
+| Folder | Holds | Matched by |
 |---|---|---|
-| `first_name` | str | Display name on the post. Trim on read |
-| `last_name` | str | |
-| `email` | str | Primary key, lowercased on read |
-| `phone` | str | **Not collected by the form.** Lives here so it is entered once per agent, not once per listing. Rendered as `(818) 259-7432` |
-| `brokerage_url` | str | Firecrawl verification target |
-| `slides_template_id` | str | Drive **file id** of that agent's template — never a filename, so renaming a file cannot silently break the mapping |
-| `template_label` | str | What Carmen sees in Slack |
-| `photo_folder_id` | str | Optional per-agent Drive folder |
-| `headshot_url` | str | Public URL; many Corner House templates embed the agent's photo, so this is a second dynamic image alongside the hero |
-| `active` | bool | Inactive agents are skipped with a Slack notice |
+| `Generic Templates` | the designs | file name **is** the form's request type: `Sold` |
+| `Head Shots` | the agents' faces | file name **is** the agent's name: `Andy Jang.jpg` |
+| `Agents Contact Information` | `Sales_Agents_Contact_Information.xlsx` | `Email`, then first and last name |
 
-An unknown agent is **not** an error to swallow. Gable posts to Slack asking
-which template to use and pauses that listing.
+`agents/contacts.py` reads the workbook — one sheet, `Email | First Name |
+Last Name | Phone` — and mirrors it into the local `salespeople` table on every
+pass, so `find_salesperson` and its callers did not change when the source did.
+It is a **working document**: an agent nobody has recorded is looked up on
+cornerhouserealty.com and appended, never overwritten, and what was written is
+said out loud in Slack with the page it came from.
 
-**Why the headshot is a field and not a template:** the Corner House library
-bakes an agent photo into many designs. One template per agent per request type
-would be ~40 × N templates and unmaintainable. Treating the headshot as a second
-`replaceAllShapesWithImage` target keeps it at ~40 total.
+The header row is located rather than assumed, in the workbook and on every
+tab. This is not defensive habit — it is the two failures of 2026-08-12. The
+form split its agent name across two columns, which shifted every column after
+it and made a positional read return "Instagram Story" as a property address;
+and the roster's header moved from row 2 to row 1, after which the sync stored
+**nobody** for a day while every flyer quietly carried the brokerage's main
+number and the design's own stock face.
+
+**A headshot cannot be handed to Slides as a Drive URL** (§4.3 item 1 of
+`CLAUDE.md`). `photos/headshots.py` downloads it with the service account and
+republishes it through the droplet's nginx root, exactly as a hero photo is
+published; `publish_local` is content-addressed, so each face is written once
+and reused. No file for an agent leaves the design's own face in place, which is
+a flyer worth a look rather than a failed run. Matching is exact — a flyer
+carrying one agent's name beside another agent's photograph is worse than one
+carrying a placeholder, and only the second is obvious to whoever reviews it.
+
+An unknown agent is **not** an error to swallow, and a roster that cannot be
+read is never treated as an empty one.
 
 ### 3.3 Run records — append-only log and idempotency guard
 
 **These live in SQLite (`db/store.py`), not in a sheet tab.** Decision D3: a
 `Runs` tab and a `Templates` tab were both specified here and neither was built.
-Derived state belongs in the database, and the template catalogue is data in
-`slides/catalog.py` resolved against the Drive folders, so a design is added by
-dropping it in a folder rather than by maintaining a second index by hand.
+Derived state belongs in the database, and a design is added by dropping it in
+the Generic Templates folder under the right name rather than by maintaining a
+second index by hand.
 
 A run carries its `run_id`, the `response_row_id` it belongs to, its `status`
 (`pending`/`needs_photo`/`needs_info`/`needs_template`/`needs_review`/
@@ -792,3 +778,6 @@ Append to this table. Do not rewrite history — if a decision reverses, add a n
 | 2026-08-12 | **Reverses the posted-message indicator:** every user response uses Slack's native purple thread status | Chase identified the posted animation as a regression from the native purple treatment that had visibly worked. Slack's current method reference and March 2026 scope update explicitly support channel apps through `chat:write`, including auto-opening the reply thread. The prior single live call that returned `ok` without visible output was not enough evidence to remove the product behavior. Mentions, follow-ups, edits, and photo work now share one timed status; after six seconds it reports the actual stage, and every exit clears it. |
 | 2026-08-12 | **Template choice is a naming rule, not a selector.** One folder; the file's name is the form's request type | Chase set this with Carmen directly, and it replaces the scored catalogue. Templates live only in `Templates / Generic Templates`, and each is named exactly what the form calls that request type — `Sold` on the form uses a file called `Sold`. The picker matches on that name, tolerating only case and stray spacing, and refuses on a duplicate name rather than choosing. Two things drove it: Carmen maintains the designs, and a convention she can verify by looking at a folder is one she can keep correct, whereas a ranking that reads her notes is not; and the previous lookup found any presentation in the drive carrying a `gable_role` property regardless of folder, so seven of the eleven it offered were filed inside Kelsey Mahon's own folder and any agent's listing could have been rendered onto another agent's design. `slides/catalog.py`, `rank`, `purpose_for` and `slides/routing.py`'s agent-override rule no longer decide anything; they are kept, unwired, pending a decision on deleting them. |
 | 2026-08-12 | The form splits the agent's name into `First Name` and `Second Name` | Chase's request to the customer, so the sheet is easier to parse than a single `Name of Agent` free-text field. Already supported: `intake.columns_from_header` reads either shape, and joins the pair when there is no single name column. |
+| 2026-08-12 | The roster moves out of the workbook tab and into the drive, and a **headshot is republished, never linked from Drive** | The `Sales_People` tab was deleted, so every run died on `Unable to parse range`. Contacts now come from `Agents Contact Information / Sales_Agents_Contact_Information.xlsx` and faces from `Head Shots`, each matched by name. The face cannot be handed to Slides as a Drive URL (§4.3 item 1), so it is downloaded with the service account and published through nginx like a hero photo; `publish_local` is content-addressed so each is written once. `agents/contacts.py` mirrors the workbook into the existing `salespeople` table, which left `find_salesperson` and its callers untouched. |
+| 2026-08-12 | **A missing price no longer stops a sold post** — the flyer is built, the link posted, and the price offered afterwards | Chase's rule. A flyer with a photo, an agent, an address and a design should not wait on a number that can be typed into the thread in seconds. The offer is made **only when the chosen design has a price field**: the live `Sold` design carries the address and the agent card and no price at all, and offering to add one there promises something that cannot be done. |
+| 2026-08-12 | Deleted every module unreachable from the entry points — about 3,000 lines of `src` and 1,600 of tests | Reachability from `slackapp.runtime`, `cli` and `tools/run_row` found thirteen orphans: `measure`, `registry`, `renderer`, `routing`, `catalog`, `blocks`, `handlers`, `quality`, `resolver`, `sources`, `verify`, `models` and `normalize` (whose one live function became `listings/headers.py`). Some were days old and never wired; keeping them meant the next agent reading a routing rule that routes nothing. `boto3` went with them, since Spaces was abandoned for nginx, and `openpyxl` became an explicit dependency. |

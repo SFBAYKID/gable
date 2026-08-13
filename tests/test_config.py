@@ -55,7 +55,6 @@ def test_defaults_match_dotenv_example() -> None:
     assert settings.vision_model == "gpt-5-mini"
     assert settings.image_model_hq == "gpt-image-2"
     assert settings.tab_responses == "Form Responses 1"
-    assert settings.tab_agents == "Sales_People"
     assert settings.db_path == Path("/opt/gable/var/gable.db")
 
 
@@ -71,7 +70,7 @@ def test_settings_are_frozen() -> None:
 
 
 def test_whitespace_is_stripped() -> None:
-    assert _load(GABLE_TAB_RUNS="  Runs  ").tab_runs == "Runs"
+    assert _load(GABLE_TAB_RESPONSES="  Form Responses 1  ").tab_responses == "Form Responses 1"
 
 
 # --- required values --------------------------------------------------------

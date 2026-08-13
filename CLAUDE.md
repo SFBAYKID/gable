@@ -331,11 +331,13 @@ gable/
 ├── tools/
 │   ├── check_connections.py     # prove every .env credential works, live
 │   ├── adopt_backfill.py        # mark existing rows as history, build none
-│   └── run_workflows.py         # four end-to-end runs against live services
+│   └── run_row.py               # start one row by tab and number, or resume it
 ├── src/gable/
 │   ├── config.py                # frozen settings dataclass, env parsing
 │   ├── logging_setup.py         # structured logging + secret redaction
-│   ├── models.py                # Listing, AgentProfile, RunRecord, PhotoResult
+│   ├── agents/
+│   │   ├── contacts.py          # the roster workbook in Drive: read, mirror, append
+│   │   └── lookup.py            # an unknown agent, found on the brokerage site
 │   ├── sheets/
 │   │   ├── client.py            # Google Sheets API wrapper
 │   │   └── repository.py        # tab reads/writes, idempotency
@@ -343,38 +345,34 @@ gable/
 │   │   ├── schema.py            # tables and migrations (SQLite)
 │   │   └── store.py             # submissions, runs, facts, spend
 │   ├── listings/
-│   │   ├── intake.py            # the eleven columns that matter
+│   │   ├── intake.py            # the eleven columns that matter, found by header
+│   │   ├── headers.py           # how a header is compared, never a position
+│   │   ├── address.py           # casing and punctuation, nothing invented
 │   │   ├── enrich.py            # look up beds, baths, square footage
-│   │   ├── normalize.py         # raw row -> Listing, validation
-│   │   └── verify.py            # Firecrawl agent-detail verification
+│   │   └── review.py            # a client review, read out of what was typed
 │   ├── photos/
 │   │   ├── fit.py               # decides whether a model is needed at all
-│   │   ├── resolver.py          # the cascade, policy enforcement
-│   │   ├── sources.py           # form / drive / web source adapters
+│   │   ├── headshots.py         # the agent's face, from Drive, republished
 │   │   ├── enhance.py           # guarded high-fidelity upscale of a REAL photo only
-│   │   ├── quality.py           # warn when a photo is too small for the frame
 │   │   └── store.py             # publish to the droplet over http
 │   ├── slides/
-│   │   ├── renderer.py          # pure batchUpdate builder for a fill
 │   │   ├── edits.py             # one tool per change Carmen can ask for
 │   │   ├── geometry.py          # move, resize, delete — the transform traps
 │   │   ├── elements.py          # recurse through imported element groups
-│   │   ├── selection.py         # notes-aware template purpose and routing
-│   │   ├── edit_common.py       # shared colours, guards, request type
-│   │   ├── measure.py           # measure a template once; fingerprint it
-│   │   ├── registry.py          # new / unchanged / touched / changed
-│   │   ├── routing.py           # agent override, else the master folder
-│   │   └── catalog.py           # the 45 templates, labelled
+│   │   ├── selection.py         # the design named for the form's request type
+│   │   ├── fields.py            # what a design's text means
+│   │   ├── fitting.py           # shrink text that does not fit its box
+│   │   ├── manifest.py          # what a design needs before it renders
+│   │   ├── hero.py              # measure the photo and headshot frames
+│   │   └── edit_common.py       # shared colours, guards, request type
 │   ├── slackapp/
 │   │   ├── app.py               # Socket Mode listener
 │   │   ├── brain.py             # reads intent, picks a tool, asks when unsure
 │   │   ├── editing.py           # execute edits on the thread's Slides file
 │   │   ├── photos.py            # Slack upload to fitted same-run resume
 │   │   ├── runtime.py           # production Slack + poller assembly
-│   │   ├── blocks.py            # Block Kit builders
 │   │   ├── status.py            # a working indicator that cannot break the work
-│   │   ├── style.py             # the house style, enforced
-│   │   └── handlers.py          # commands, actions, mentions
+│   │   └── style.py             # the house style, enforced
 │   ├── pipeline/
 │   │   ├── schedule.py          # when to poll: busy hours vs quiet
 │   │   ├── poller.py            # the watch loop, and the backfill refusal

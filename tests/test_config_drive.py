@@ -50,10 +50,6 @@ def test_blank_drive_id_is_allowed() -> None:
     assert _load(GABLE_DRIVE_ID="").drive_id == ""
 
 
-def test_templates_tab_defaults() -> None:
-    assert _load().tab_templates == "Templates"
-
-
 def test_slide_size_defaults_match_the_template_library() -> None:
     """Corner House templates are Instagram Post 4:5, verified 1080x1350 on export."""
     settings = _load()
