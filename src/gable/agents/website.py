@@ -338,7 +338,11 @@ def validate_contact(
             "I could not find one exact agent profile on the official Corner House Realty website"
         )
         return ContactCheck(problem=_pause(label, f"{detail}."))
-    if _name_key(profile.name) != _name_key(name):
+    # `lookup_official_profile` has already proven this profile belongs to this
+    # agent, by their email or their filed direct phone. Re-refusing on the name
+    # would undo that: the site says "Bobby Carr" and he brands himself "Bobby
+    # Carr The Dog Walking Realtor", and neither is wrong.
+    if _name_key(profile.name) != _name_key(name) and not _is_branded_form_of(name, profile.name):
         return ContactCheck(
             problem=_pause(
                 label,

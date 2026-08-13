@@ -398,3 +398,51 @@ def test_official_lookup_refuses_two_exact_profiles_instead_of_picking_one() -> 
 
     assert found.profile is None
     assert "more than one exact profile" in found.problem
+
+
+def test_a_branded_name_still_takes_its_title_from_the_official_profile() -> None:
+    """Bobby Carr brands himself; the site does not. He still gets his credential.
+
+    The lookup has already proven the profile by email or filed phone, so
+    re-refusing on the name would undo that proof and deny him every design
+    that prints a credential.
+    """
+    workbook = Contact(
+        "robertfcarrjr@gmail.com", "Bobby", "Carr The Dog Walking Realtor", "443.790.4765"
+    )
+
+    checked = validate_contact(
+        "Bobby Carr The Dog Walking Realtor",
+        "robertfcarrjr@gmail.com",
+        workbook,
+        lambda _name, _email: _profile(
+            name="Bobby Carr",
+            email="robertfcarrjr@gmail.com",
+            phone="443.790.4765",
+        ),
+        require_title=True,
+    )
+
+    assert checked.ready is True
+    assert checked.title == "REALTOR®"
+    assert checked.name == "Bobby Carr The Dog Walking Realtor", "the filed name is what prints"
+
+
+def test_a_genuinely_different_official_name_is_still_refused() -> None:
+    """Loose on branding is not loose on identity: a different person still stops."""
+    workbook = Contact("sam@cornerhouserealty.com", "Samuel", "Smith", "443.509.4299")
+
+    checked = validate_contact(
+        "Samuel Smith",
+        "sam@cornerhouserealty.com",
+        workbook,
+        lambda _name, _email: _profile(
+            name="Craig Johnson",
+            email="sam@cornerhouserealty.com",
+            phone="443.509.4299",
+        ),
+        require_title=True,
+    )
+
+    assert checked.ready is False
+    assert "does not match the submitted name" in checked.problem
