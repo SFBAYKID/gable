@@ -9,6 +9,7 @@ one place and the sequence in another.
 from __future__ import annotations
 
 import logging
+import urllib.request
 import uuid
 from collections.abc import Callable
 from sqlite3 import Connection
@@ -21,8 +22,9 @@ from gable.config import Settings
 from gable.db import store
 from gable.listings.enrich import default_research
 from gable.listings.intake import Intake
+from gable.photos.fit import fit_locally
 from gable.photos.headshots import url_for_agent as headshot_url_for
-from gable.photos.store import PhotoHost
+from gable.photos.store import PhotoHost, publish_local, verify_public
 from gable.photos.verify import verify as verify_image
 from gable.pipeline.runner import Runner
 from gable.pipeline.vision import Inspection
@@ -125,6 +127,8 @@ def place_hero_photo(
     file_id: str,
     url: str,
     template_label: str,
+    refit: Callable[[str, int, int], str] = lambda existing, _w, _h: existing,
+    slide_px: tuple[int, int] = (1080, 1350),
 ) -> bool:
     """Replace the measured hero frame and verify the API accepted it.
 
@@ -132,6 +136,12 @@ def place_hero_photo(
         slides: A Slides v1 resource.
         file_id: The copied presentation to edit.
         url: A public image URL already verified by the runner.
+        refit: Re-crops the published photo to an exact pixel size and returns
+            a new public URL. **Load-bearing**: `createImage` fits an image
+            inside the box it is given rather than filling it, so a photo whose
+            aspect differs from the frame's is scaled down and centred with the
+            design showing around it.
+        slide_px: The slide's pixel size, for converting frame EMU to pixels.
         template_label: Catalogue filename. Kept for logging and for the
             caller's signature; the frame itself is now measured from the
             presentation rather than looked up by name, because a stored id
@@ -179,13 +189,26 @@ def place_hero_photo(
             logger.error("hero photo placement could not confirm the measured layer")
             return False
 
+        # Crop the photo to the frame's own shape before placing it. Slides
+        # preserves an image's aspect ratio inside the box it is given, so a
+        # 4:5 photo handed to this design's 2.14:1 top band was scaled to the
+        # band's height and centred — a narrow column of photograph with the
+        # grey layout showing on both sides and the design's angled mask left
+        # exposed. Caught on a finished flyer on 2026-08-12.
+        frame_width_px = max(1, round(frame.width / slide_w * slide_px[0]))
+        frame_height_px = max(1, round(frame.height / slide_h * slide_px[1]))
+        placed_url = refit(url, frame_width_px, frame_height_px)
+        if not placed_url:
+            logger.error("the hero photo could not be recropped to the frame")
+            return False
+
         hero_id = f"gableHero_{uuid.uuid4().hex}"
         requests: list[dict[str, Any]] = [
             {"deleteObject": {"objectId": target_id}},
             {
                 "createImage": {
                     "objectId": hero_id,
-                    "url": url,
+                    "url": placed_url,
                     "elementProperties": {
                         "pageObjectId": page["objectId"],
                         # The frame's own bounds, not the whole slide. Sizing to
@@ -577,16 +600,56 @@ def build_runner(
         and whole element groups can all look like large text-free shapes in
         the API. The manifest names the exact removable raster-art layer.
 
-        **Use the full slide bounds.** Slack already fits the photo to the
-        template's 1080 by 1350 canvas. Matching that 4:5 box keeps it centred
-        without letterboxing; the surviving design panels mask the parts that
-        are not meant to show.
+        **Crop to the frame, not to the canvas.** The upload is fitted to the
+        slide's 4:5 canvas when it arrives, which is the wrong shape for a
+        design whose photo is a wide top band. `createImage` fits an image
+        inside its box rather than filling it, so that photo was scaled to the
+        band's height and centred, leaving the layout showing on both sides.
+        It is recropped to the measured frame's own pixel size first.
 
         **Replace the placeholder, do not sit behind it.** These designs ship
         with sky-and-grass artwork in the photo frame. A photo merely sent to
         the back hides behind it, so the placeholder is removed first.
         """
-        return place_hero_photo(slides, file_id, url, template_label)
+        return place_hero_photo(
+            slides,
+            file_id,
+            url,
+            template_label,
+            refit=refit_to_frame,
+            slide_px=(settings.slide_width_px, settings.slide_height_px),
+        )
+
+    def refit_to_frame(existing: str, width_px: int, height_px: int) -> str:
+        """Recrop an already-published photo to a frame's exact pixel size.
+
+        Args:
+            existing: The public URL of the fitted photo.
+            width_px: The frame's width in pixels.
+            height_px: The frame's height in pixels.
+
+        Returns:
+            A new public URL, or an empty string when the recrop or the publish
+            fails. `publish_local` is content-addressed, so a frame shape that
+            recurs across flyers is written once.
+
+        Raises:
+            Nothing. Placement treats an empty URL as a failure and stops for
+            review rather than posting a letterboxed flyer.
+        """
+        try:
+            with urllib.request.urlopen(existing, timeout=30) as response:
+                original = response.read()
+            recropped = fit_locally(original, width_px, height_px)
+            url = publish_local(settings.photo_public_root, settings.photo_public_base, recropped)
+        except Exception:
+            logger.exception("the hero photo could not be recropped to its frame")
+            return ""
+        usable, detail = verify_public(url)
+        if not usable:
+            logger.error("the recropped hero photo is not fetchable: %s", detail)
+            return ""
+        return url
 
     def record_unknown_agent(intake: Intake) -> str:
         """Find an agent the roster has never seen, write them down, and say so.
