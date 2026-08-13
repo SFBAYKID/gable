@@ -141,13 +141,20 @@ ssh -i ~/.ssh/gable_droplet root@143.110.146.87 \
   "Form Responses 1" 47'
 ```
 
-Expected first half:
+Expected first half for a source with no current preflight warning:
 
 1. Gable posts one channel announcement naming `Sold`, Mike Kulnich, and
    703 Perception Way, Aberdeen, MD 21001.
 2. Gable replies to that announcement with “Can you send me the image?”
 3. The database run is `needs_photo`, and the Slack root timestamp belongs to
    that run.
+
+As of 2026-08-13, line 47 and the current Sold source have one measured warning:
+the 38-character address needs about 5 percent more width at the current type
+size. Gable correctly reports that before asking for a photo. For this controlled
+test, reply “Run anyway” in the owned thread; Gable should resume the same run
+and ask for the image. Widening the address section in the source and asking
+Gable to check it again is the production-quality alternative.
 
 Upload exactly one property image as a reply to Gable's question. Do not start
 a new channel message. The owned-thread upload should automatically:

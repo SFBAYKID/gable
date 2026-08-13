@@ -21,10 +21,18 @@ Ruff, strict Mypy, 892 Pytest tests, Vulture, dependency integrity, diff
 integrity, and the 800-line source ceiling pass. The live release row is Form
 Responses 1 line 47: Mike Kulnich, Sold, 703 Perception Way, Aberdeen, MD 21001.
 
-The final deployment and paid end-to-end run require credential rotation first.
-The prior OpenAI exposure remains recorded below, and Slack's settings page also
-surfaced the installed bot token during this audit. Neither secret is repeated
-or stored in the repository.
+Commit `84cc543` is deployed and active in monarch-bot-playground. All configured
+service connections pass. The line-47 run is paused as `needs_photo` in its
+owned Slack thread after two truthful preflight findings: Mike's exact portrait
+was missing from Head Shots and was recovered from his existing Gable example,
+and the Sold source needs about five percent more address width. The latter was
+accepted for this test only; final readback and visual inspection still apply.
+
+The run is waiting for Chase to upload the promised property image. The prior
+OpenAI exposure remains recorded below, and Slack's settings page also surfaced
+the installed bot token during this audit. Neither secret is repeated or stored
+in the repository. The explicit playground test is using the already-installed
+credentials; rotate both before pointing Gable at the production channel.
 
 ## 2026-08-12 current quality gate
 
