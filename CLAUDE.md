@@ -352,7 +352,8 @@ gable/
 │   ├── config.py                # frozen settings dataclass, env parsing
 │   ├── logging_setup.py         # structured logging + secret redaction
 │   ├── agents/
-│   │   └── contacts.py          # read-only roster workbook mirrored atomically
+│   │   ├── contacts.py          # read-only roster workbook mirrored atomically
+│   │   └── website.py           # official-domain fallback for workbook blanks
 │   ├── sheets/
 │   │   ├── client.py            # Google Sheets API wrapper
 │   │   └── repository.py        # tab reads/writes, idempotency
@@ -389,6 +390,7 @@ gable/
 │   │   ├── app.py               # Socket Mode listener
 │   │   ├── batches.py           # ready-only multi-listing summary
 │   │   ├── brain.py             # reads intent, picks a tool, asks when unsure
+│   │   ├── context.py           # bounded owned-thread turns + listing facts
 │   │   ├── editing.py           # execute edits on the thread's Slides file
 │   │   ├── photos.py            # Slack upload to fitted same-run resume
 │   │   ├── routing.py           # keep ordinary replies inside Gable-owned threads
@@ -396,10 +398,11 @@ gable/
 │   │   ├── status.py            # a working indicator that cannot break the work
 │   │   └── style.py             # the house style, enforced
 │   ├── pipeline/
+│   │   ├── contact_gate.py      # pre-Slack agent values + one cached site lookup
 │   │   ├── runner.py            # one complete listing, every exit recorded
 │   │   ├── live.py              # concrete Google, photo, research and vision seams
 │   │   ├── schedule.py          # when to poll: busy hours vs quiet
-│   │   ├── poller.py            # watch loop, backfill guard and operator queue
+│   │   ├── poller.py            # watch loop and historical backfill guard
 │   │   ├── template_triage.py   # proactive source audit and recheck
 │   │   ├── template_vision.py   # spend-gated source render inspection
 │   │   ├── vision.py            # strict source-versus-render visual verdict
@@ -426,14 +429,17 @@ the droplet provisioned and serving photos.
 
 ### Phase 1 — the pipeline, end to end
 
-Sheet watcher → normalize → identify the agent → research what is public → ask
-what is not → render a Slides copy → check it twice → post the link.
+Sheet watcher → normalize → identify the agent → select the source → research
+only public fields that source displays → ask what is not → render a Slides
+copy → check it twice → post the link.
 
 **Built, joined, and tested:** the runner drives the orchestrator, property
 research, current-template preflight, supplied-photo handoff, copy/fill/readback,
 photo and headshot placement, text fitting, strict rendered inspection, Slack
-delivery, and same-thread edits. The poller invokes that runner for new rows and
-queues operator retries and paused-run rechecks onto its owning thread.
+delivery, and same-thread edits. The poller invokes that runner for new rows.
+Natural-language replies in a Gable-owned thread refresh the current Sheet,
+roster, and source template before continuing the same paused run; there is no
+operator command queue or Slack service-control surface.
 
 **Before the poller runs against the live Sheet**, `tools/adopt_backfill.py`
 must be run once. There are 99 historical rows and `Poller.ready()` refuses

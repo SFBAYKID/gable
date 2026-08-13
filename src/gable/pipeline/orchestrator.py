@@ -5,7 +5,7 @@ The flow Chase specified, in order:
 1. read the row and identify the agent
 2. work out the request type, and from it the template category
 3. gather columns L through T
-4. research anything public that is missing — beds, baths, square footage, price
+4. after the source is known, research only public facts that source displays
 5. ask about anything contradictory, and about the hero photo
 6. build the flyer
 7. check it twice
@@ -62,12 +62,20 @@ class Step:
     detail: str = ""
 
 
-def plan(intake: Intake, known_facts: dict[str, str] | None = None) -> Step:
+def plan(
+    intake: Intake,
+    known_facts: dict[str, str] | None = None,
+    required_public_facts: set[str] | frozenset[str] | None = None,
+) -> Step:
     """Decide what to do with a submission before any work is done.
 
     Args:
         intake: The parsed row.
         known_facts: Facts already cached for this address.
+        required_public_facts: Public fact names the selected source actually
+            displays.  ``None`` preserves the pure planner's conservative
+            all-facts behavior; the runner passes the exact resolved fields
+            after selecting and reading the source.
 
     Returns:
         The next `Step`. `ASK` takes precedence over `RESEARCH`, because a
@@ -96,6 +104,8 @@ def plan(intake: Intake, known_facts: dict[str, str] | None = None) -> Step:
     # has heard of.
 
     outstanding = missing_public_facts(intake, known_facts)
+    if required_public_facts is not None:
+        outstanding = [name for name in outstanding if name in required_public_facts]
     if outstanding and address_looks_usable(intake.address):
         return Step(
             outcome=Outcome.RESEARCH,
@@ -111,13 +121,20 @@ def plan(intake: Intake, known_facts: dict[str, str] | None = None) -> Step:
     )
 
 
-def after_research(intake: Intake, found: Facts, known: dict[str, str]) -> Step:
+def after_research(
+    intake: Intake,
+    found: Facts,
+    known: dict[str, str],
+    required_public_facts: set[str] | frozenset[str] | None = None,
+) -> Step:
     """Decide what to do once a lookup has come back.
 
     Args:
         intake: The parsed row.
         found: What research turned up.
         known: What was already known.
+        required_public_facts: Public fact names the selected source displays.
+            ``None`` retains the conservative legacy rule for isolated callers.
 
     Returns:
         `BUILD` when enough is in hand, or `ASK` when research could not settle
@@ -127,9 +144,18 @@ def after_research(intake: Intake, found: Facts, known: dict[str, str]) -> Step:
         Nothing.
     """
     merged, looked_up = fill_gaps(known, found)
-    still_missing = [name for name in ("beds", "baths", "square_feet") if not merged.get(name)]
+    required = (
+        frozenset(("beds", "baths", "square_feet", "list_price"))
+        if required_public_facts is None
+        else frozenset(required_public_facts)
+    )
+    still_missing = [
+        name
+        for name in ("beds", "baths", "square_feet")
+        if name in required and not merged.get(name)
+    ]
 
-    if found.caveats:
+    if found.caveats and required:
         # A number that looks wrong is worse than a blank, so it gets a question
         # rather than being quietly used.
         return Step(
@@ -151,13 +177,14 @@ def after_research(intake: Intake, found: Facts, known: dict[str, str]) -> Step:
         )
 
     said = ""
-    if looked_up:
-        said = f"I looked up the {', '.join(looked_up)} from the address."
+    used_lookups = [name for name in looked_up if name.replace(" ", "_") in required]
+    if used_lookups:
+        said = f"I looked up the {', '.join(used_lookups)} from the address."
     return Step(
         outcome=Outcome.BUILD,
         say=said,
         category=intake.category,
-        detail=f"researched {', '.join(looked_up)}" if looked_up else "nothing new needed",
+        detail=(f"researched {', '.join(used_lookups)}" if used_lookups else "nothing new needed"),
     )
 
 

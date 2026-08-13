@@ -145,6 +145,8 @@ class SlideEditor:
             return self._status(run)
         if not run.output_file_id:
             return "This listing does not have a built flyer yet, so there is nothing to edit."
+        if decision.tool == "replace_photo":
+            return self._begin_photo_replacement(run, decision.arguments)
 
         try:
             presentation = (
@@ -173,6 +175,78 @@ class SlideEditor:
         except Exception:
             logger.exception("a conversational Slides edit failed")
             return "Google Slides did not accept that change, so I left the flyer unchanged."
+
+    def _begin_photo_replacement(
+        self,
+        run: store.RunRow,
+        arguments: dict[str, Any],
+    ) -> str:
+        """Pause a built run for one explicitly targeted replacement image.
+
+        Args:
+            run: Existing thread-owned flyer run.
+            arguments: Model arguments containing the confirmed image target.
+
+        Returns:
+            The exact source Carmen or Chase must update next.
+
+        Raises:
+            Nothing. Unsupported targets and states leave the current flyer
+            and run untouched.
+        """
+        which = _normal(str(arguments.get("which") or ""))
+        if which not in {"hero", "headshot"}:
+            return "Tell me whether you mean the hero photo or the headshot before I replace it."
+        if run.status not in {"delivered", "needs_review"}:
+            return (
+                "This listing is already waiting on something else, so I left its current "
+                "flyer and status unchanged."
+            )
+
+        try:
+            if which == "hero":
+                # Keep output_file_id, output_url and the prior photo URL in
+                # place. The linked flyer remains untouched while a new Slack
+                # upload is rebuilt through the normal geometry/readback/vision
+                # gates; PhotoHandoff atomically replaces photo provenance only
+                # when it claims this pause.
+                approved = store.decode_warning_codes(run.approved_warning_codes) - {
+                    "large_photo_crop"
+                }
+                store.set_status(
+                    self.connection,
+                    run.run_id,
+                    "needs_photo",
+                    "waiting for a replacement property photo",
+                    failure_reason="Send me the new property photo.",
+                    approved_warning_codes=store.encode_warning_codes(approved),
+                    pending_warning_code="",
+                )
+                return "Send me the new property photo."
+
+            stored = store.load_submission(self.connection, run.response_row_id)
+            agent = stored.intake.agent_name if stored is not None else "the agent"
+            instruction = (
+                f"Replace {agent}'s image in Head Shots, then tell me to rebuild the flyer."
+            )
+            # Agent portraits remain human-owned Drive data. A Slack upload in
+            # this state is not accepted as an ad-hoc headshot: the ordinary
+            # file handoff accepts only needs_photo, while this needs_info pause
+            # resumes after the authoritative folder has been updated.
+            store.set_status(
+                self.connection,
+                run.run_id,
+                "needs_info",
+                "waiting for an updated filed agent headshot",
+                failure_reason=instruction,
+            )
+            return instruction
+        except Exception:
+            logger.exception("could not record a conversational photo replacement")
+            return (
+                "I could not start the photo replacement, so I left the current flyer "
+                "and its status unchanged."
+            )
 
     def _font_size(
         self,
@@ -347,7 +421,13 @@ class SlideEditor:
         if run.status == "needs_photo":
             return "This listing is waiting for its hero photo."
         if run.status == "needs_review":
-            return "This flyer is built and waiting for a visual review."
+            return "This flyer is paused because its checks did not prove it is ready."
         if run.status in {"needs_info", "needs_template"}:
             return "This listing is paused while it waits for the missing detail."
-        return "This listing is still being worked on."
+        if run.status in {"pending", "building"}:
+            return "This listing is still being worked on."
+        if run.status == "failed":
+            return "This listing stopped because processing failed. I did not send it as finished."
+        if run.status == "skipped":
+            return "This request was skipped, so I did not build a flyer for it."
+        return "I could not determine this listing's current state, so I will not guess."

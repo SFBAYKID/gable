@@ -43,6 +43,7 @@ def test_inspection_uses_original_detail_and_strict_structured_output(
     assert seen["reasoning"] == {"effort": "high"}
     assert seen["text"]["format"]["type"] == "json_schema"
     assert seen["text"]["format"]["strict"] is True
+    assert "too small to read" in seen["input"][0]["content"][0]["text"]
 
 
 def test_an_incomplete_response_never_degrades_to_approval(

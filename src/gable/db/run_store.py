@@ -9,6 +9,7 @@ entry in the same autocommit connection.
 
 from __future__ import annotations
 
+import json
 import sqlite3
 import uuid
 from collections.abc import Iterator, Mapping
@@ -31,8 +32,21 @@ PAUSED: Final[frozenset[str]] = frozenset(
     {"needs_photo", "needs_info", "needs_template", "needs_review"}
 )
 
+#: Every state the runtime may persist. Rejecting typos at the write boundary is
+#: important because polling suppresses any submission with a run row; an
+#: unknown state would otherwise become permanent, invisible work.
+VALID_STATUSES: Final[frozenset[str]] = TERMINAL | ACTIVE | PAUSED
+
 #: An unattended failure may be retried, but never indefinitely.
 MAX_RUN_ATTEMPTS: Final[int] = 3
+
+#: A process can die after doing real Drive work but before recording a Slack
+#: outcome. The pending marker deliberately lives in an existing column: it is
+#: an outbox flag that survives another restart without a schema migration.
+INTERRUPTED_REASON: Final[str] = "processing was interrupted before completion"
+INTERRUPTED_NOTIFICATION_PENDING: Final[str] = (
+    "processing was interrupted before completion; Slack notification pending"
+)
 
 _RUN_UPDATE_FIELDS: Final[frozenset[str]] = frozenset(
     {
@@ -46,6 +60,8 @@ _RUN_UPDATE_FIELDS: Final[frozenset[str]] = frozenset(
         "ai_enhanced",
         "slack_thread_ts",
         "failure_reason",
+        "approved_warning_codes",
+        "pending_warning_code",
     }
 )
 
@@ -55,7 +71,26 @@ class RunLimitReachedError(RuntimeError):
 
 
 class RunAlreadyActiveError(RuntimeError):
-    """Raised when another worker already owns this submission."""
+    """Raised when another worker owns or a person is resolving this submission."""
+
+
+def encode_warning_codes(codes: frozenset[str] | set[str]) -> str:
+    """Serialize exact approved preflight codes deterministically."""
+    cleaned = sorted(code for code in codes if code and code.replace("_", "").isalnum())
+    return json.dumps(cleaned, separators=(",", ":"))
+
+
+def decode_warning_codes(encoded: str) -> frozenset[str]:
+    """Read approved codes, failing closed on malformed persisted state."""
+    try:
+        values = json.loads(encoded or "[]")
+    except (TypeError, ValueError):
+        return frozenset()
+    if not isinstance(values, list) or not all(
+        isinstance(value, str) and value and value.replace("_", "").isalnum() for value in values
+    ):
+        return frozenset()
+    return frozenset(values)
 
 
 def _now() -> str:
@@ -98,6 +133,8 @@ class RunRow:
     photo_url: str = ""
     photo_source: str = ""
     ai_enhanced: bool = False
+    approved_warning_codes: str = ""
+    pending_warning_code: str = ""
 
     @property
     def is_terminal(self) -> bool:
@@ -142,7 +179,8 @@ def start_run(connection: sqlite3.Connection, response_row_id: str) -> RunRow:
 
     Raises:
         RunLimitReachedError: When three attempts already exist.
-        RunAlreadyActiveError: When another worker owns an active attempt.
+        RunAlreadyActiveError: When another worker owns an active attempt or an
+            existing attempt is paused for a person.
         sqlite3.Error: On a write or foreign-key failure.
     """
     run_id = f"run-{uuid.uuid4().hex[:12]}"
@@ -152,14 +190,16 @@ def start_run(connection: sqlite3.Connection, response_row_id: str) -> RunRow:
         # count-then-insert sequence let two connections both observe attempt
         # two and create attempts three and four. SQLite serializes this write,
         # and the later writer reevaluates the count against the committed row.
+        blocking_statuses = tuple(sorted(ACTIVE | PAUSED))
+        placeholders = ",".join("?" * len(blocking_statuses))
         inserted = connection.execute(
-            """
+            f"""
             INSERT INTO runs (run_id, response_row_id, status, created_at, updated_at)
             SELECT ?, ?, 'pending', ?, ?
              WHERE (SELECT COUNT(*) FROM runs WHERE response_row_id = ?) < ?
                AND NOT EXISTS (
                     SELECT 1 FROM runs
-                     WHERE response_row_id = ? AND status IN ('pending', 'building')
+                     WHERE response_row_id = ? AND status IN ({placeholders})
                )
             """,
             (
@@ -170,12 +210,22 @@ def start_run(connection: sqlite3.Connection, response_row_id: str) -> RunRow:
                 response_row_id,
                 MAX_RUN_ATTEMPTS,
                 response_row_id,
+                *blocking_statuses,
             ),
         )
         if inserted.rowcount != 1:
+            blocked = connection.execute(
+                f"SELECT 1 FROM runs WHERE response_row_id = ? "
+                f"AND status IN ({placeholders}) LIMIT 1",
+                (response_row_id, *blocking_statuses),
+            ).fetchone()
+            if blocked:
+                raise RunAlreadyActiveError(
+                    f"a run is already active or paused for {response_row_id}"
+                )
             if run_attempt_count(connection, response_row_id) >= MAX_RUN_ATTEMPTS:
                 raise RunLimitReachedError(f"run attempt limit reached for {response_row_id}")
-            raise RunAlreadyActiveError(f"a run is already active for {response_row_id}")
+            raise RunAlreadyActiveError(f"a run could not be opened for {response_row_id}")
         connection.execute(
             "INSERT INTO run_events (run_id, at, status, detail) VALUES (?,?,?,?)",
             (run_id, now, "pending", "run opened"),
@@ -183,28 +233,107 @@ def start_run(connection: sqlite3.Connection, response_row_id: str) -> RunRow:
     return RunRow(run_id=run_id, response_row_id=response_row_id, status="pending")
 
 
-def recover_interrupted_runs(connection: sqlite3.Connection) -> int:
-    """Mark work left active by the previous process as explicitly failed.
+def recover_interrupted_runs(connection: sqlite3.Connection) -> tuple[RunRow, ...]:
+    """Pause or fail work left active and return every notice still owed.
 
     This runs once during production construction, before the new poller or
-    Slack listener can own work. Ordinary polling never treats a pending row as
-    permission to retry; the explained failure remains visible for diagnosis
-    without risking two live workers on one listing.
+    Slack listener can own work. A run with an owned thread is paused for review
+    so Carmen or Chase can resume the same attempt. A run with no thread is
+    failed because nobody has a safe conversation in which to resume it.
+
+    The failure-reason marker is also a tiny durable notification outbox. Runs
+    transitioned by an earlier startup remain in the return value until Slack
+    confirms their recovery notice and ``acknowledge_interrupted_run`` clears
+    the marker. This avoids silently losing the only human-visible outcome when
+    Slack is unavailable during startup.
+
+    Returns:
+        Recovered rows whose Slack notification is still pending, including
+        notices carried over from an earlier startup.
     """
     placeholders = ",".join("?" * len(ACTIVE))
     rows = connection.execute(
-        f"SELECT run_id FROM runs WHERE status IN ({placeholders}) ORDER BY created_at",
+        f"SELECT run_id, slack_thread_ts FROM runs "
+        f"WHERE status IN ({placeholders}) ORDER BY created_at",
         tuple(sorted(ACTIVE)),
     ).fetchall()
     for row in rows:
+        has_thread = bool(str(row["slack_thread_ts"] or "").strip())
         set_status(
             connection,
             str(row["run_id"]),
-            "failed",
+            "needs_review" if has_thread else "failed",
             "the prior process ended before this run recorded an outcome",
-            failure_reason="processing was interrupted before completion",
+            failure_reason=INTERRUPTED_NOTIFICATION_PENDING,
         )
-    return len(rows)
+
+    pending = connection.execute(
+        "SELECT run_id FROM runs WHERE failure_reason = ? ORDER BY created_at, rowid",
+        (INTERRUPTED_NOTIFICATION_PENDING,),
+    ).fetchall()
+    recovered: list[RunRow] = []
+    for row in pending:
+        run = run_by_id(connection, str(row["run_id"]))
+        if run is not None:
+            recovered.append(run)
+    return tuple(recovered)
+
+
+def acknowledge_interrupted_run(
+    connection: sqlite3.Connection,
+    run_id: str,
+    notification_ts: str,
+) -> bool:
+    """Record that Slack confirmed an interrupted-run notice.
+
+    The existing owned root is retained for a threaded recovery. For an
+    unthreaded failed run, the new channel notice becomes its root so later
+    status questions can still resolve to the exact listing. A stale or double
+    acknowledgement is harmless and returns ``False``.
+
+    Args:
+        connection: Open Gable database connection.
+        run_id: Recovered run whose durable notice was posted.
+        notification_ts: Exact timestamp returned by Slack for that message.
+
+    Returns:
+        True only when a still-pending notice was acknowledged.
+
+    Raises:
+        ValueError: If Slack did not return a message timestamp.
+        sqlite3.Error: On a query or write failure.
+    """
+    confirmed_ts = notification_ts.strip()
+    if not confirmed_ts:
+        raise ValueError("Slack did not confirm the recovery message")
+
+    now = _now()
+    with _transition(connection):
+        row = connection.execute(
+            "SELECT status, slack_thread_ts FROM runs WHERE run_id = ? AND failure_reason = ?",
+            (run_id, INTERRUPTED_NOTIFICATION_PENDING),
+        ).fetchone()
+        if row is None:
+            return False
+        thread_root = str(row["slack_thread_ts"] or "").strip() or confirmed_ts
+        changed = connection.execute(
+            "UPDATE runs SET updated_at = ?, slack_thread_ts = ?, failure_reason = ? "
+            "WHERE run_id = ? AND failure_reason = ?",
+            (
+                now,
+                thread_root,
+                INTERRUPTED_REASON,
+                run_id,
+                INTERRUPTED_NOTIFICATION_PENDING,
+            ),
+        )
+        if changed.rowcount != 1:
+            return False
+        connection.execute(
+            "INSERT INTO run_events (run_id, at, status, detail) VALUES (?,?,?,?)",
+            (run_id, now, str(row["status"]), "startup interruption reported in Slack"),
+        )
+    return True
 
 
 def set_status(
@@ -224,9 +353,11 @@ def set_status(
         **fields: Whitelisted run columns updated with the transition.
 
     Raises:
-        ValueError: If a caller supplies a non-run column.
+        ValueError: If the status is unknown or a caller supplies a non-run column.
         sqlite3.Error: On a write failure.
     """
+    if status not in VALID_STATUSES:
+        raise ValueError(f"unknown run status: {status!r}")
     unknown = set(fields) - _RUN_UPDATE_FIELDS
     if unknown:
         raise ValueError(f"not run columns: {sorted(unknown)}")
@@ -297,7 +428,7 @@ def claim_paused_run(
 _RUN_COLUMNS: Final[str] = (
     "run_id, response_row_id, status, template_file_id, template_label, "
     "output_file_id, output_url, slack_thread_ts, failure_reason, photo_url, "
-    "photo_source, ai_enhanced"
+    "photo_source, ai_enhanced, approved_warning_codes, pending_warning_code"
 )
 
 
@@ -356,4 +487,6 @@ def _to_run(row: sqlite3.Row) -> RunRow:
         photo_url=str(row["photo_url"] or ""),
         photo_source=str(row["photo_source"] or ""),
         ai_enhanced=bool(row["ai_enhanced"]),
+        approved_warning_codes=str(row["approved_warning_codes"] or ""),
+        pending_warning_code=str(row["pending_warning_code"] or ""),
     )

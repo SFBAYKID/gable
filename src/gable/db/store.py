@@ -16,13 +16,19 @@ from datetime import UTC, datetime
 
 from gable.db.run_store import (
     ACTIVE,
+    INTERRUPTED_NOTIFICATION_PENDING,
+    INTERRUPTED_REASON,
     MAX_RUN_ATTEMPTS,
     PAUSED,
     TERMINAL,
+    VALID_STATUSES,
     RunAlreadyActiveError,
     RunLimitReachedError,
     RunRow,
+    acknowledge_interrupted_run,
     claim_paused_run,
+    decode_warning_codes,
+    encode_warning_codes,
     latest_run,
     recover_interrupted_runs,
     run_attempt_count,
@@ -43,15 +49,21 @@ from gable.listings.intake import Intake
 
 __all__ = [
     "ACTIVE",
+    "INTERRUPTED_NOTIFICATION_PENDING",
+    "INTERRUPTED_REASON",
     "MAX_RUN_ATTEMPTS",
     "PAUSED",
     "TERMINAL",
+    "VALID_STATUSES",
     "RunAlreadyActiveError",
     "RunLimitReachedError",
     "RunRow",
     "TemplateAudit",
+    "acknowledge_interrupted_run",
     "adopt_template_catalog",
     "claim_paused_run",
+    "decode_warning_codes",
+    "encode_warning_codes",
     "latest_run",
     "record_template_audit",
     "recover_interrupted_runs",
@@ -80,6 +92,7 @@ class StoredSubmission:
     submitted_at: str
     intake: Intake
     content_hash: str
+    source_tab: str = ""
 
 
 def record_submission(
@@ -89,6 +102,7 @@ def record_submission(
     submitted_at: str,
     intake: Intake,
     content_hash: str = "",
+    source_tab: str = "",
 ) -> bool:
     """Store a submission if it is new.
 
@@ -100,6 +114,7 @@ def record_submission(
         intake: The parsed columns.
         content_hash: Hash of the whole row, so a later edit is detectable even
             though the identity is stable.
+        source_tab: Exact read-only form tab the row came from.
 
     Returns:
         True if this was the first time seeing it, False if already known.
@@ -108,7 +123,7 @@ def record_submission(
         sqlite3.Error: on a write failure.
     """
     existing = connection.execute(
-        "SELECT content_hash FROM submissions WHERE response_row_id = ?",
+        "SELECT content_hash, source_tab FROM submissions WHERE response_row_id = ?",
         (response_row_id,),
     ).fetchone()
     if existing:
@@ -117,14 +132,17 @@ def record_submission(
         # resume or explicit retry does not rebuild from stale form data.
         # Ordinary polling remains suppressed by the existing run state; this
         # update alone never opens an attempt.
-        if content_hash and str(existing["content_hash"] or "") != content_hash:
+        content_changed = content_hash and str(existing["content_hash"] or "") != content_hash
+        clean_tab = source_tab.strip()
+        tab_changed = bool(clean_tab) and str(existing["source_tab"] or "") != clean_tab
+        if content_changed or tab_changed:
             connection.execute(
                 """
                 UPDATE submissions
                    SET sheet_row = ?, submitted_at = ?, agent_email = ?, agent_name = ?,
                        request_type = ?, address = ?, post_details = ?, open_house = ?,
                        new_price = ?, closing_price = ?, extra_notes = ?, side = ?,
-                       notes = ?, content_hash = ?
+                       notes = ?, content_hash = ?, source_tab = ?
                  WHERE response_row_id = ?
                 """,
                 (
@@ -141,7 +159,8 @@ def record_submission(
                     intake.extra_notes,
                     intake.side,
                     intake.notes,
-                    content_hash,
+                    content_hash or str(existing["content_hash"] or ""),
+                    clean_tab or str(existing["source_tab"] or ""),
                     response_row_id,
                 ),
             )
@@ -151,8 +170,9 @@ def record_submission(
         INSERT INTO submissions (
             response_row_id, sheet_row, submitted_at, agent_email, agent_name,
             request_type, address, post_details, open_house, new_price,
-            closing_price, extra_notes, side, notes, first_seen_at, content_hash
-        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            closing_price, extra_notes, side, notes, first_seen_at, content_hash,
+            source_tab
+        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
         """,
         (
             response_row_id,
@@ -171,6 +191,7 @@ def record_submission(
             intake.notes,
             _now(),
             content_hash,
+            source_tab.strip(),
         ),
     )
     return True
@@ -195,7 +216,7 @@ def load_submission(
         """
         SELECT response_row_id, sheet_row, submitted_at, agent_email, agent_name,
                request_type, address, post_details, open_house, new_price,
-               closing_price, extra_notes, side, notes, content_hash
+               closing_price, extra_notes, side, notes, content_hash, source_tab
           FROM submissions
          WHERE response_row_id = ?
         """,
@@ -221,6 +242,7 @@ def load_submission(
             notes=row["notes"],
         ),
         content_hash=row["content_hash"],
+        source_tab=str(row["source_tab"] or ""),
     )
 
 

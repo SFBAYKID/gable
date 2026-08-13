@@ -45,6 +45,8 @@ Report a problem if any of these is true:
 - Text is cut off, clipped at a box edge, or runs off the slide.
 - Text overlaps other text, an icon, a divider line, or the edge of a panel.
 - A line of text wraps in a way that collides with the element below it.
+- Any required listing or agent text is visibly too small to read at normal
+  flyer viewing size, even when it technically fits inside its box.
 - A visible placeholder remains, such as a word in square brackets, or wording
   like PROPERTY ADDRESS, AGENT NAME, Phone, Website or Email left as a label.
 - The main photo area is empty, or shows a generic placeholder illustration

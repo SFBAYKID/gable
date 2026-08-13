@@ -25,32 +25,29 @@ Production construction and Socket Mode lifecycle live in
 from __future__ import annotations
 
 import logging
-import re
 from collections.abc import Callable
 from typing import Any, Final
 
 from gable.slackapp.brain import Decision, think
-from gable.slackapp.routing import MessageRoute, ThreadOwnership
+from gable.slackapp.context import (
+    ContextProvider,
+    HistoryProvider,
+    clean_mention_text,
+    decide_with_context,
+    first_name_of,
+    thread_history,
+)
+from gable.slackapp.photos import process_file_share
+from gable.slackapp.routing import (
+    EventReplayGuard,
+    MessageRoute,
+    ThreadOwnership,
+    has_shared_files,
+)
 from gable.slackapp.status import Working
 from gable.slackapp.style import is_clean, strip_to_plain
 
 logger = logging.getLogger("gable.slack")
-
-#: Slack user id to first name. Names do not change mid-conversation, and the
-#: lookup is not worth repeating on every message.
-_NAME_CACHE: dict[str, str] = {}
-
-#: `<@U123ABC>` — Slack's own mention markup, stripped before the model sees it
-#: so "hello" arrives as "hello" rather than as an id.
-_MENTION: Final[re.Pattern[str]] = re.compile(r"<@[A-Z0-9]+(?:\|[^>]*)?>")
-
-#: Footers some Slack clients append to a message. They are not part of what the
-#: person typed, and feeding them to the model makes "hello" arrive as "hello
-#: Sent using Claude" — which is noise at best and a misread instruction at
-#: worst.
-_CLIENT_FOOTER: Final[re.Pattern[str]] = re.compile(
-    r"\**Sent using\**\s*\w+\s*$|\bvia\s+Slack\s+for\s+\w+\s*$", re.IGNORECASE
-)
 
 #: What Gable says when it genuinely cannot form a reply. Deliberately not an
 #: apology loop: it says what it can still do.
@@ -68,11 +65,35 @@ ACTION_STAGES: Final[dict[str, str]] = {
     "set_font_size": "is updating the flyer text...",
     "set_colour": "is recolouring the flyer...",
     "resize_photo": "is resizing the flyer photo...",
+    "replace_photo": "is preparing the photo replacement...",
     "move_element": "is moving an element on the flyer...",
     "correct_field": "is correcting the flyer...",
     "rebuild_flyer": "is rebuilding the flyer...",
     "report_status": "is checking the flyer status...",
 }
+
+
+def _scoped_history_provider(
+    provider: HistoryProvider | None,
+    allowed_user_ids: frozenset[str],
+    bot_user_id: str,
+    bot_id: str,
+) -> HistoryProvider | None:
+    """Bind the default Slack reader to Gable and its two allowed people."""
+    if provider is not thread_history:
+        return provider
+
+    def read(event: dict[str, Any], client: Any) -> list[tuple[str, str]]:  # noqa: ANN401
+        """Read prior turns without letting another app influence an action."""
+        return thread_history(
+            event,
+            client,
+            allowed_user_ids=allowed_user_ids,
+            bot_user_id=bot_user_id,
+            bot_id=bot_id,
+        )
+
+    return read
 
 
 def stage_for_decision(decision: Decision) -> str:
@@ -89,23 +110,6 @@ def stage_for_decision(decision: Decision) -> str:
         Nothing.
     """
     return ACTION_STAGES.get(decision.tool, "is preparing the answer...")
-
-
-def clean_mention_text(text: str) -> str:
-    """Strip Slack mention markup and tidy whitespace.
-
-    Args:
-        text: The raw `event["text"]`.
-
-    Returns:
-        What the person actually typed.
-
-    Raises:
-        Nothing.
-    """
-    without_mentions = _MENTION.sub(" ", text or "")
-    without_footer = _CLIENT_FOOTER.sub(" ", without_mentions)
-    return " ".join(without_footer.split())
 
 
 def speaker_allowed(user_id: str, allowed_user_ids: frozenset[str]) -> bool:
@@ -188,96 +192,49 @@ def reply_for_decision(
     return "I understood the change, but I could not apply it. I have not changed the flyer."
 
 
-def process_file_share(
+def process_mention(
     event: dict[str, Any],
     say: Any,  # noqa: ANN401 - Bolt injection, untyped upstream
     client: Any,  # noqa: ANN401 - Slack WebClient, untyped upstream
-    handler: FileShareHandler | None,
+    thinker: Thinker,
+    file_share_handler: FileShareHandler | None = None,
+    action_handler: ActionHandler | None = None,
+    history_provider: HistoryProvider | None = thread_history,
+    context_provider: ContextProvider | None = None,
 ) -> None:
-    """Fit the shared photo, showing the thinking indicator while it runs.
+    """Route a direct mention carrying a file to the photo workflow.
 
-    Fitting a photo and rendering the flyer takes about thirty seconds — the
-    longest silence Carmen ever sees — so this is the path the indicator matters
-    most on.
-
-    A failure must say so. An earlier version posted "Fitting it to the flyer
-    now" and edited that message into the outcome; when the fit raised, the
-    sentence stayed in the thread claiming work that had already died.
+    Slack's app-mention event shape permits a ``files`` array. Treating every
+    mention as prose sends the filename to the language model and leaves the
+    listing paused even though Carmen supplied exactly what Gable requested.
+    An explicit mention still bypasses root ownership, but the photo handoff
+    independently requires a database run owned by that exact thread.
 
     Args:
-        event: Slack's file-share message event.
+        event: Slack app-mention event.
         say: Bolt's thread-aware posting helper.
-        client: Slack Web API client, used for the indicator.
-        handler: The real photo workflow, or None in isolated startup checks.
+        client: Slack Web API client.
+        thinker: Conversation decision function.
+        file_share_handler: Production photo workflow, when connected.
+        action_handler: Executes model-selected flyer actions.
+        history_provider: Reads prior messages in the same thread.
+        context_provider: Resolves persisted listing facts for that thread.
 
     Raises:
-        Nothing. Every outcome, including failure, is said out loud.
+        Nothing. The delegated handlers own their plain-language failures.
     """
-    thread = event.get("thread_ts") or event.get("ts")
-    if handler is None:
-        say(
-            text=safe_reply(
-                "I received the photo, but photo processing is not available right now."
-            ),
-            thread_ts=thread,
-        )
+    if has_shared_files(event):
+        process_file_share(event, say, client, file_share_handler)
         return
-    with Working(
+    answer_mention(
+        event,
+        say,
         client,
-        str(event.get("channel") or ""),
-        str(thread or ""),
-        "is building the flyer...",
-    ) as waiting:
-        try:
-            spoken = handler(event, client, waiting.stage)
-            # An empty outcome means the run already said everything in the
-            # thread. Saying nothing is the correct message then.
-            if not spoken.strip():
-                return
-            outcome = safe_reply(spoken)
-        except Exception:
-            logger.exception("the photo workflow failed")
-            outcome = (
-                "I could not fit that photo to the flyer. The flyer is unchanged — "
-                "send it again, or tell me which listing it belongs to."
-            )
-        say(text=outcome, thread_ts=thread)
-
-
-def first_name_of(client: Any, user_id: str) -> str:  # noqa: ANN401 - Slack WebClient
-    """The speaker's first name, or empty when it cannot be looked up.
-
-    Greeting the room when one person asked the question reads as not listening,
-    so the name is worth a round trip. A failure here is not worth failing the
-    reply over — an unnamed greeting is merely worse, not wrong.
-
-    Args:
-        client: A Slack WebClient.
-        user_id: The Slack id of whoever spoke.
-
-    Returns:
-        Their first name, or an empty string.
-
-    Raises:
-        Nothing.
-    """
-    if not user_id:
-        return ""
-    cached = _NAME_CACHE.get(user_id)
-    if cached is not None:
-        return cached
-    name = ""
-    try:
-        profile = client.users_info(user=user_id).get("user", {}) or {}
-        details = profile.get("profile", {}) or {}
-        full = (
-            details.get("first_name") or details.get("real_name") or profile.get("real_name") or ""
-        )
-        name = str(full).split(" ")[0]
-    except Exception:
-        logger.debug("could not resolve the speaker's name")
-    _NAME_CACHE[user_id] = name
-    return name
+        thinker,
+        action_handler,
+        history_provider,
+        context_provider,
+    )
 
 
 def answer_mention(
@@ -286,6 +243,8 @@ def answer_mention(
     client: Any,  # noqa: ANN401 - Slack WebClient, untyped upstream
     thinker: Thinker,
     action_handler: ActionHandler | None = None,
+    history_provider: HistoryProvider | None = thread_history,
+    context_provider: ContextProvider | None = None,
 ) -> None:
     """Compose and post one reply to a mention, with the indicator over the wait.
 
@@ -298,6 +257,8 @@ def answer_mention(
         client: Slack Web API client, used for the name lookup and the indicator.
         thinker: Turns what was asked into a decision.
         action_handler: Executes a model-selected edit, when one is wired.
+        history_provider: Reads bounded prior messages for a threaded mention.
+        context_provider: Resolves the thread to persisted listing facts.
 
     Raises:
         Nothing. An exception here is a message Carmen never receives, which
@@ -321,7 +282,15 @@ def answer_mention(
                     )
                     say(text=safe_reply(greeting), thread_ts=thread)
                     return
-                decision = thinker(asked, speaker=speaker)
+                decision = decide_with_context(
+                    thinker,
+                    asked,
+                    speaker,
+                    event,
+                    client,
+                    history_provider,
+                    context_provider,
+                )
                 logger.info("replying (tool=%s)", decision.tool or "none")
                 waiting.stage(stage_for_decision(decision))
                 answer = safe_reply(
@@ -356,6 +325,8 @@ def answer_thread_reply(
     client: Any,  # noqa: ANN401 - Slack WebClient, untyped upstream
     thinker: Thinker,
     action_handler: ActionHandler | None = None,
+    history_provider: HistoryProvider | None = thread_history,
+    context_provider: ContextProvider | None = None,
 ) -> None:
     """Answer one follow-up in an existing Gable thread with waiting feedback.
 
@@ -365,6 +336,8 @@ def answer_thread_reply(
         client: Slack Web API client for user lookup and native status.
         thinker: Turns the follow-up into a decision.
         action_handler: Executes a selected flyer edit when one is wired.
+        history_provider: Reads bounded prior messages from the owned thread.
+        context_provider: Resolves the thread to persisted listing facts.
 
     Raises:
         Nothing. Failures become the same safe sentence as initial mentions.
@@ -381,7 +354,15 @@ def answer_thread_reply(
                 if not asked:
                     answer = "What would you like me to do next?"
                 else:
-                    decision = thinker(asked, speaker=speaker)
+                    decision = decide_with_context(
+                        thinker,
+                        asked,
+                        speaker,
+                        event,
+                        client,
+                        history_provider,
+                        context_provider,
+                    )
                     logger.info("replying to thread (tool=%s)", decision.tool or "none")
                     waiting.stage(stage_for_decision(decision))
                     answer = reply_for_decision(
@@ -409,6 +390,8 @@ def build_app(
     allowed_channel: str = "",
     allowed_user_ids: frozenset[str] = frozenset(),
     thinker: Thinker = think,
+    history_provider: HistoryProvider | None = thread_history,
+    context_provider: ContextProvider | None = None,
 ) -> Any:  # noqa: ANN401 - slack_bolt.App, imported lazily
     """Construct the Bolt app with its handlers registered.
 
@@ -422,6 +405,8 @@ def build_app(
         allowed_user_ids: The only two people Gable may answer in production.
         thinker: Conversation decision function. Production supplies a
             budget-guarded wrapper; isolated checks use the pure default.
+        history_provider: Reads bounded prior turns from the current thread.
+        context_provider: Resolves an owned thread to listing or template facts.
 
     Returns:
         A configured `slack_bolt.App`.
@@ -439,15 +424,46 @@ def build_app(
 
     app = App(token=bot_token, signing_secret="", logger=logger)
     thread_ownership = ThreadOwnership()
+    replay_guard = EventReplayGuard()
 
     @app.event("app_mention")
-    def handle_mention(event: dict[str, Any], say: Any, client: Any) -> None:  # noqa: ANN401
+    def handle_mention(
+        event: dict[str, Any],
+        say: Any,  # noqa: ANN401 - Bolt injection, untyped upstream
+        client: Any,  # noqa: ANN401 - Bolt injection, untyped upstream
+        context: Any = None,  # noqa: ANN401 - Bolt injection, untyped upstream
+    ) -> None:
         """Answer a direct mention, in the channel Gable is allowed to speak in."""
         if allowed_channel and event.get("channel") != allowed_channel:
             return
         if not speaker_allowed(str(event.get("user") or ""), allowed_user_ids):
             return
-        answer_mention(event, say, client, thinker, action_handler)
+        if not replay_guard.first_delivery(event, route="human_message"):
+            return
+        # Only a top-level mention creates an owned Gable conversation. A direct
+        # mention inside another app's thread remains one-shot by contract.
+        if not event.get("thread_ts"):
+            thread_ownership.remember_owned(
+                str(event.get("channel") or ""),
+                str(event.get("ts") or ""),
+            )
+        bolt_context = context or {}
+        scoped_history = _scoped_history_provider(
+            history_provider,
+            allowed_user_ids,
+            str(bolt_context.get("bot_user_id") or ""),
+            str(bolt_context.get("bot_id") or ""),
+        )
+        process_mention(
+            event,
+            say,
+            client,
+            thinker,
+            file_share_handler,
+            action_handler,
+            scoped_history,
+            context_provider,
+        )
 
     @app.event("message")
     def handle_message(
@@ -473,10 +489,28 @@ def build_app(
                 bot_id=str(context.get("bot_id") or ""),
             )
             if route is MessageRoute.FILE_SHARE:
+                if not replay_guard.first_delivery(event, route="human_message"):
+                    return
                 process_file_share(event, say, client, file_share_handler)
                 return
             if route is MessageRoute.THREAD_REPLY:
-                answer_thread_reply(event, say, client, thinker, action_handler)
+                if not replay_guard.first_delivery(event, route="human_message"):
+                    return
+                scoped_history = _scoped_history_provider(
+                    history_provider,
+                    allowed_user_ids,
+                    str(context.get("bot_user_id") or ""),
+                    str(context.get("bot_id") or ""),
+                )
+                answer_thread_reply(
+                    event,
+                    say,
+                    client,
+                    thinker,
+                    action_handler,
+                    scoped_history,
+                    context_provider,
+                )
         except Exception:
             logger.exception("message handler failed")
 

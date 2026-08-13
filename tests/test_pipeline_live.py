@@ -22,6 +22,7 @@ class FakeSlides:
         include_target: bool = True,
         include_overlay: bool = False,
         include_headshot: bool = False,
+        include_sold_headshot: bool = False,
     ) -> None:
         """Configure whether the batch succeeds and reports every request."""
         self.fail_update = fail_update
@@ -29,6 +30,7 @@ class FakeSlides:
         self.include_target = include_target
         self.include_overlay = include_overlay
         self.include_headshot = include_headshot
+        self.include_sold_headshot = include_sold_headshot
         self.operation = ""
         self.body: dict[str, Any] = {}
 
@@ -125,6 +127,46 @@ class FakeSlides:
                         },
                         "shape": {"shapeProperties": {"shapeBackgroundFill": {}}},
                     }
+                )
+            if self.include_sold_headshot:
+                # Current Sold geometry: the address panel deliberately crosses
+                # 3.16% of the portrait's upper-right corner and sits above it.
+                elements.extend(
+                    [
+                        {
+                            "objectId": "sold-headshot-frame",
+                            "size": {
+                                "width": {"magnitude": 2_428_628},
+                                "height": {"magnitude": 3_642_941},
+                            },
+                            "transform": {
+                                "scaleX": 1,
+                                "scaleY": 1,
+                                "translateX": 14_689,
+                                "translateY": 8_574_785,
+                            },
+                            "shape": {"shapeProperties": {"shapeBackgroundFill": {}}},
+                        },
+                        {
+                            "objectId": "address-panel-above-headshot",
+                            "size": {
+                                "width": {"magnitude": 6_640_500},
+                                "height": {"magnitude": 1_634_100},
+                            },
+                            "transform": {
+                                "scaleX": 1,
+                                "scaleY": 1,
+                                "translateX": 1_886_750,
+                                "translateY": 7_443_575,
+                            },
+                            "shape": {
+                                "shapeType": "TEXT_BOX",
+                                "text": {
+                                    "textElements": [{"textRun": {"content": "32 S Prospect Ave"}}]
+                                },
+                            },
+                        },
+                    ]
                 )
             return {
                 "pageSize": {
@@ -299,6 +341,26 @@ def test_headshot_is_fitted_once_to_its_measured_frame_before_placement() -> Non
     requests = slides.body["requests"]
     assert requests[0]["deleteObject"]["objectId"] == "headshot-frame"
     assert requests[1]["createImage"]["url"] == ("https://images.example/fitted-headshot.jpg")
+
+
+def test_sold_headshot_replacement_restores_every_layer_above_the_portrait() -> None:
+    """Replacing the live Sold slot keeps its overlapping address panel in front."""
+    slides = FakeSlides(include_sold_headshot=True)
+
+    assert place_headshot(
+        slides,
+        "deck-1",
+        "https://images.example/mike-headshot.jpg",
+        refit=lambda _url, _width, _height: "https://images.example/fitted-mike.jpg",
+    )
+
+    requests = slides.body["requests"]
+    assert requests[0]["deleteObject"]["objectId"] == "sold-headshot-frame"
+    assert requests[1]["createImage"]["url"] == "https://images.example/fitted-mike.jpg"
+    assert requests[2]["updatePageElementsZOrder"] == {
+        "pageElementObjectIds": ["address-panel-above-headshot"],
+        "operation": "BRING_TO_FRONT",
+    }
 
 
 def test_listing_template_clearance_uses_the_persisted_triage_verdict(tmp_path: Path) -> None:

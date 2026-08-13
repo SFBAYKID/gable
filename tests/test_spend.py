@@ -3,6 +3,10 @@
 from __future__ import annotations
 
 import sqlite3
+import threading
+import time
+from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
 
 import pytest
 
@@ -84,19 +88,72 @@ def test_guarded_call_never_invokes_vendor_at_the_ceiling(db: sqlite3.Connection
     assert spend.total_spent(db) == pytest.approx(spend.CEILING_USD - 0.005)
 
 
+def test_concurrent_paid_calls_cannot_cross_the_shared_ceiling(tmp_path: Path) -> None:
+    """Slack workers reserve before calling, so only one can spend the headroom."""
+    path = tmp_path / "gable.db"
+    setup = connect(path)
+    apply_migrations(setup)
+    spend.record(
+        setup,
+        spend.Estimate("test", "prior", spend.CEILING_USD - 0.15, "prior spend"),
+    )
+    setup.close()
+
+    start = threading.Barrier(2)
+    vendor_calls: list[int] = []
+    call_lock = threading.Lock()
+
+    def compete(index: int) -> str:
+        connection = connect(path)
+        try:
+            start.wait(timeout=5)
+
+            def vendor() -> str:
+                with call_lock:
+                    vendor_calls.append(index)
+                # The old post-call ledger left this whole interval open for a
+                # second worker to pass the same stale ceiling check.
+                time.sleep(0.05)
+                return "called"
+
+            try:
+                return spend.guarded_call(
+                    connection,
+                    spend.Estimate("openai", "vision", 0.10, f"call {index}"),
+                    vendor,
+                )
+            except spend.BudgetExceededError:
+                return "refused"
+        finally:
+            connection.close()
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        outcomes = list(pool.map(compete, (1, 2)))
+
+    checked = connect(path)
+    assert sorted(outcomes) == ["called", "refused"]
+    assert len(vendor_calls) == 1
+    assert spend.total_spent(checked) == pytest.approx(spend.CEILING_USD - 0.05)
+    checked.close()
+
+
 def test_live_research_reserves_and_records_one_firecrawl_search(
     db: sqlite3.Connection,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     calls: list[str] = []
 
-    def lookup(address: str, api_key: str) -> Facts:
+    def lookup(address: str, api_key: str, required: frozenset[str]) -> Facts:
+        assert required == frozenset({"beds", "baths", "square_feet", "list_price"})
         calls.append(f"{address}:{api_key}")
         return Facts(beds="4")
 
     monkeypatch.setattr(enrich_module, "look_up", lookup)
 
-    found = enrich_module.default_research("key", db)("123 Main St")
+    found = enrich_module.default_research("key", db)(
+        "123 Main St",
+        frozenset({"beds", "baths", "square_feet", "list_price"}),
+    )
 
     assert found.beds == "4"
     assert calls == ["123 Main St:key"]

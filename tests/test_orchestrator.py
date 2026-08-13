@@ -60,6 +60,19 @@ def test_a_clean_row_goes_to_research_first() -> None:
     assert step.category == "Just Listed"
 
 
+def test_known_source_fields_scope_public_research() -> None:
+    """An address-only source must not trigger a global listing-facts lookup."""
+    step = plan(_intake(), required_public_facts=frozenset())
+    assert step.outcome is Outcome.BUILD
+    assert step.research == []
+
+
+def test_known_source_researches_only_its_missing_public_field() -> None:
+    step = plan(_intake(), required_public_facts=frozenset({"beds"}))
+    assert step.outcome is Outcome.RESEARCH
+    assert step.research == ["beds"]
+
+
 def test_nothing_left_to_find_goes_straight_to_build() -> None:
     known = {
         "beds": "4",
@@ -133,6 +146,18 @@ def test_research_that_finds_nothing_asks() -> None:
     step = after_research(_intake(), Facts(), {})
     assert step.outcome is Outcome.ASK
     assert "could not find" in step.say
+
+
+def test_missing_unselected_public_facts_do_not_become_questions() -> None:
+    step = after_research(
+        _intake(),
+        Facts(beds="4", source_url="https://example.test", confidence=0.8),
+        {},
+        frozenset({"beds"}),
+    )
+    assert step.outcome is Outcome.BUILD
+    assert "baths" not in step.say
+    assert "square feet" not in step.say
 
 
 def test_what_the_agent_typed_is_never_overwritten() -> None:

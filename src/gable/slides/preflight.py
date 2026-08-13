@@ -7,11 +7,12 @@ three questions before the build starts:
 
 * can Gable identify the fields and the hero-photo frame safely;
 * will this listing's actual values fit at the template's designed type size;
-* will fitting the supplied photo discard an unusually large part of it.
+* how much of the supplied photo a frame-aware center crop will discard.
 
-The rendered-flyer vision pass remains the final gate.  Preflight prevents a
-known problem; vision catches effects that cannot be inferred from rectangles,
-such as a roofline hidden by a decorative mask.
+Correctable fit findings become outcome notes, never pre-build questions.  The
+rendered-flyer vision pass remains the final gate: it catches effects that
+cannot be inferred from rectangles, such as a roofline hidden by a decorative
+mask, and stops delivery when the automatic crop did not work.
 """
 
 from __future__ import annotations
@@ -102,7 +103,7 @@ class Report:
 
     @property
     def warnings(self) -> tuple[Issue, ...]:
-        """Measured tradeoffs Carmen may explicitly accept."""
+        """Correctable measured tradeoffs to report with the finished build."""
         return tuple(issue for issue in self.issues if not issue.blocking)
 
 
@@ -180,7 +181,25 @@ def _replacement_issue(
     box: fitting.TextBox,
     replacement: str,
 ) -> Issue | None:
-    """Explain a measured overflow for one actual replacement value."""
+    """Return only a fit problem Gable cannot solve at a readable size."""
+    readable = field_name.replace("_", " ")
+    prefix = f"I checked the {template_label} design before building."
+    # A value can fit its box and still be unreadable when the source was
+    # already drawn at tiny type. The old check only inspected a font size that
+    # Gable itself had to shrink, so an existing 6-point dynamic field sailed
+    # through preflight unchanged and could be delivered.
+    if box.font_size_pt <= fitting.MIN_READABLE_PT:
+        return Issue(
+            code=f"unreadable_{field_name}",
+            say=(
+                f"{prefix} The {readable} is already {box.font_size_pt:g} points, "
+                f"which is at or below the {fitting.MIN_READABLE_PT:g}-point readability "
+                "limit. Increase that text size and widen its section if needed, then "
+                "tell me to check the updated template again."
+            ),
+            blocking=True,
+        )
+
     fit = fitting.fit_for(
         box.object_id,
         replacement,
@@ -190,44 +209,37 @@ def _replacement_issue(
         box.weight,
     )
 
-    if not fit.overflows:
+    if not fit.overflows or not fit.too_small_to_read:
         return None
 
-    readable = field_name.replace("_", " ")
     current_width = max(1.0, fit.box_width_pt)
     needed_width = fitting.estimate_width_pt(replacement, fit.current_pt, fit.weight)
     extra = max(1, round(((needed_width / current_width) - 1) * 100))
-    prefix = f"I checked the {template_label} design before building."
-    if fit.too_small_to_read:
-        return Issue(
-            code=f"unreadable_{field_name}",
-            say=(
-                f"{prefix} The {readable} would need about {extra} percent more room, "
-                f"and shrinking it enough would make it {fitting.MIN_READABLE_PT:g} points "
-                "or smaller. Widen that section, then tell me to check the updated "
-                "template again."
-            ),
-            blocking=True,
-        )
     return Issue(
-        code=f"tight_{field_name}",
+        code=f"unreadable_{field_name}",
         say=(
-            f"{prefix} The {readable} is {len(replacement)} characters and needs about "
-            f"{extra} percent more room at its current size. Would you like me to run this "
-            "design anyway, or update the template and have me check it again?"
+            f"{prefix} The {readable} would need about {extra} percent more room, "
+            f"and shrinking it enough would take it below the "
+            f"{fitting.MIN_READABLE_PT:g}-point readability limit. Widen that section, "
+            "then tell me to check the updated template again."
         ),
-        advisory=f"I sized the {readable} down because it was too long for its template box.",
+        blocking=True,
     )
 
 
-def _average_character_capacity(box: fitting.TextBox, lines: int | None = None) -> int:
-    """Estimate average-character capacity at the design's current type size."""
-    if box.font_size_pt <= 0 or box.width_emu <= 0:
+def _average_character_capacity(
+    box: fitting.TextBox,
+    lines: int | None = None,
+    font_size_pt: float | None = None,
+) -> int:
+    """Estimate average-character capacity at a selected readable type size."""
+    size = box.font_size_pt if font_size_pt is None else font_size_pt
+    if size <= 0 or box.width_emu <= 0:
         return 0
     available_lines = box.lines if lines is None else lines
     available = (box.width_emu / fitting.EMU_PER_POINT) * max(1, available_lines) * fitting.SAFETY
     weight = fitting.BOLD_MULTIPLIER if box.weight >= fitting.BOLD_WEIGHT else 1.0
-    return max(0, int(available / (box.font_size_pt * 0.52 * weight)))
+    return max(0, int(available / (size * 0.52 * weight)))
 
 
 def certify(
@@ -278,7 +290,12 @@ def certify(
                     box,
                     1 if field_name in SINGLE_LINE_FIELDS else None,
                 )
-                if capacity >= expected or field_name in warned:
+                readable_capacity = _average_character_capacity(
+                    box,
+                    1 if field_name in SINGLE_LINE_FIELDS else None,
+                    fitting.MIN_READABLE_PT + 0.1,
+                )
+                if capacity >= expected or readable_capacity >= expected or field_name in warned:
                     continue
                 readable = field_name.replace("_", " ")
                 issues.append(
@@ -286,11 +303,12 @@ def certify(
                         f"capacity_{field_name}",
                         (
                             f"I checked the new {template_label} design. Its {readable} "
-                            f"section holds roughly {capacity} average characters at the "
-                            f"current size, while the safe template test allows {expected}. "
-                            "Would you mind making that section wider? Once you do, tell me "
-                            "to check the updated template again."
+                            f"section cannot hold the safe test of {expected} average "
+                            f"characters without dropping below the "
+                            f"{fitting.MIN_READABLE_PT:g}-point readability limit. Widen "
+                            "that section, then tell me to check the updated template again."
                         ),
+                        blocking=True,
                     )
                 )
                 warned.add(field_name)
@@ -540,18 +558,15 @@ def analyze(
         photo = assess(photo_width, photo_height, hero_width_px, hero_height_px)
         if photo.crop_loss > PHOTO_CROP_WARNING:
             percent = round(photo.crop_loss * 100)
+            note = (
+                f"I center-cropped and fitted the photo to the current frame; about "
+                f"{percent} percent fell outside that frame."
+            )
             issues.append(
                 Issue(
                     "large_photo_crop",
-                    f"I checked the photo against the {template_label} design before "
-                    f"building. Their shapes differ enough that about {percent} percent of "
-                    "the photo would sit outside the frame. Send a photo closer to the "
-                    "frame's shape, update the frame, or tell me to run this design anyway.",
-                    status="needs_photo",
-                    advisory=(
-                        f"I fitted the photo to the current frame at your request; about "
-                        f"{percent} percent was outside the frame."
-                    ),
+                    note,
+                    advisory=note,
                 )
             )
 

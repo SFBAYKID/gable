@@ -19,6 +19,12 @@ from typing import Any, Final
 logger = logging.getLogger("gable.slack.routing")
 
 DEFAULT_CACHE_SIZE: Final[int] = 512
+DEFAULT_REPLAY_CACHE_SIZE: Final[int] = 2048
+
+# Human-authored thread broadcasts are still ordinary replies. All other
+# subtypes describe edits, deletions, joins, or app-authored messages and must
+# stay outside the conversational path.
+_ROUTABLE_SUBTYPES: Final[frozenset[str]] = frozenset(("", "file_share", "thread_broadcast"))
 
 
 class MessageRoute(Enum):
@@ -27,6 +33,64 @@ class MessageRoute(Enum):
     IGNORE = "ignore"
     FILE_SHARE = "file_share"
     THREAD_REPLY = "thread_reply"
+
+
+def has_shared_files(event: dict[str, Any]) -> bool:
+    """Return whether Slack says this message carries one or more files.
+
+    Current Events API file messages can arrive as ordinary ``message`` events
+    with a ``files`` array and no ``file_share`` subtype. App-mention events may
+    carry the same array. Routing only on the legacy subtype silently turns a
+    property-photo upload into a conversation prompt.
+    """
+    files = event.get("files")
+    return isinstance(files, list) and bool(files)
+
+
+class EventReplayGuard:
+    """Suppress repeated delivery of one already-accepted Slack event.
+
+    Slack retries an event when its acknowledgement is lost. Bolt acknowledges
+    before these handlers run, but a dropped acknowledgement can still deliver
+    the same file or edit again. The event timestamp or client message id is a
+    stable message identity; a bounded in-process cache prevents duplicate work
+    without treating an unverifiable event as a replay.
+    """
+
+    def __init__(self, max_entries: int = DEFAULT_REPLAY_CACHE_SIZE) -> None:
+        """Create a bounded, thread-safe replay cache."""
+        if max_entries < 1:
+            msg = "Slack replay cache size must be positive"
+            raise ValueError(msg)
+        self._max_entries = max_entries
+        self._seen: OrderedDict[tuple[str, str, str, str], None] = OrderedDict()
+        self._lock = threading.Lock()
+
+    def first_delivery(self, event: dict[str, Any], *, route: str) -> bool:
+        """Return true exactly once for an identifiable event and route.
+
+        ``route`` lets independent event families reuse an identifier safely.
+        Gable passes the same route for accepted app mentions and ordinary
+        messages because Slack can describe one source message through both
+        subscriptions; ignored ordinary messages never reach this guard.
+        """
+        identity = str(event.get("client_msg_id") or event.get("event_ts") or event.get("ts") or "")
+        if not identity:
+            return True
+        key = (
+            route,
+            str(event.get("channel") or ""),
+            str(event.get("user") or ""),
+            identity,
+        )
+        with self._lock:
+            if key in self._seen:
+                self._seen.move_to_end(key)
+                return False
+            self._seen[key] = None
+            while len(self._seen) > self._max_entries:
+                self._seen.popitem(last=False)
+        return True
 
 
 class ThreadOwnership:
@@ -75,15 +139,25 @@ class ThreadOwnership:
         if event.get("bot_id"):
             return MessageRoute.IGNORE
         subtype = str(event.get("subtype") or "")
-        if subtype and subtype != "file_share":
+        if subtype not in _ROUTABLE_SUBTYPES:
             return MessageRoute.IGNORE
         if not event.get("thread_ts"):
             return MessageRoute.IGNORE
         if not self._belongs_to_gable(event, client, bot_user_id=bot_user_id, bot_id=bot_id):
             return MessageRoute.IGNORE
-        if subtype == "file_share":
+        if subtype == "file_share" or has_shared_files(event):
             return MessageRoute.FILE_SHARE
         return MessageRoute.THREAD_REPLY
+
+    def remember_owned(self, channel: str, thread_ts: str) -> None:
+        """Record a root mention that this process just received from Slack.
+
+        A top-level ``app_mention`` is authoritative ownership evidence. Remembering
+        it immediately avoids an eventual-consistency race where the first reply
+        arrives before ``conversations.replies`` can return the new root.
+        """
+        if channel and thread_ts:
+            self._remember((channel, thread_ts), True)
 
     def _belongs_to_gable(
         self,
@@ -113,11 +187,12 @@ class ThreadOwnership:
             response = client.conversations_replies(channel=channel, ts=thread_ts, limit=1)
             messages = response.get("messages", [])
             if not isinstance(messages, list) or not messages:
-                self._remember(key, False)
+                # An empty reply is not proof of foreign ownership. A brand-new
+                # mention root can be briefly absent from the read API; failing
+                # closed for this event is correct, caching the uncertainty is not.
                 return False
             root = messages[0]
             if not isinstance(root, dict):
-                self._remember(key, False)
                 return False
             owned = self._root_belongs_to_gable(root, bot_user_id=bot_user_id, bot_id=bot_id)
             self._remember(key, owned)

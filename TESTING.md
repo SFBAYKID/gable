@@ -72,11 +72,12 @@ Run this on the droplet so it uses the production Google configuration:
 ```bash
 ssh -i ~/.ssh/gable_droplet root@143.110.146.87 \
   'cd /opt/gable && sudo -u gable .venv/bin/python -m tools.run_row \
-  "Form Responses 1" 47 --dry-run'
+  "Testing_1" 48 --dry-run'
 ```
 
-This proves header discovery and form parsing without opening a run or posting
-to Slack. As verified on 2026-08-12, line 47 currently reads:
+This proves header discovery — including Testing_1's blank first row and split
+first/second agent name — and form parsing without opening a run or posting to
+Slack. As verified on 2026-08-13, line 48 currently reads:
 
 - Mike Kulnich;
 - Sold;
@@ -138,23 +139,30 @@ shares the same database as the listener:
 ```bash
 ssh -i ~/.ssh/gable_droplet root@143.110.146.87 \
   'cd /opt/gable && sudo -u gable .venv/bin/python -m tools.run_row \
-  "Form Responses 1" 47'
+  "Testing_1" 48'
 ```
 
-Expected first half for a source with no current preflight warning:
+Expected first half for a source with no current structural blocker:
 
-1. Gable posts one channel announcement naming `Sold`, Mike Kulnich, and
+1. Before posting, Gable checks Mike's submitted name and email against Agents
+   Contact Information and confirms that a direct phone is present. Only a
+   missing workbook value may be resolved from Mike's one exact profile on the
+   official Corner House Realty domain; any source discrepancy stops as
+   `needs_info` without changing either source. Because Sold carries a REALTOR
+   credential field that the workbook does not collect, the same exact profile
+   must also prove that title before Gable asks for the image.
+2. Gable posts one channel announcement naming `Sold`, Mike Kulnich, and
    703 Perception Way, Aberdeen, MD 21001.
-2. Gable replies to that announcement with “Can you send me the image?”
-3. The database run is `needs_photo`, and the Slack root timestamp belongs to
+3. Gable replies to that announcement with “Can you send me the image?”
+4. The database run is `needs_photo`, and the Slack root timestamp belongs to
    that run.
 
-As of 2026-08-13, line 47 and the current Sold source have one measured warning:
-the 38-character address needs about 5 percent more width at the current type
-size. Gable correctly reports that before asking for a photo. For this controlled
-test, reply “Run anyway” in the owned thread; Gable should resume the same run
-and ask for the image. Widening the address section in the source and asking
-Gable to check it again is the production-quality alternative.
+If the current Sold source makes the address, agent name, title, phone, or email
+tight, Gable computes and applies the largest readable fitted size itself. It
+does not ask Chase to resize the template or approve a harmless text fit. It
+pauses only if the result would reach the readability floor or the source
+geometry cannot be measured safely. The same run then asks for the image and
+resumes in place.
 
 Upload exactly one property image as a reply to Gable's question. Do not start
 a new channel message. The owned-thread upload should automatically:
@@ -168,6 +176,11 @@ a new channel message. The owned-thread upload should automatically:
 7. read the inserted values back from Slides;
 8. render Google's result and compare it with the supplied property image;
 9. post one final outcome in the same thread.
+
+A crop loss above 30 percent follows the same rule as readable text: Gable
+center-crops and builds without asking for approval, reports the adjustment in
+that one outcome, and lets the rendered vision inspection decide whether the
+result is safe to deliver.
 
 The current `Sold` source has no price field, so the submitted closing price is
 correctly absent rather than forced into an unrelated object.

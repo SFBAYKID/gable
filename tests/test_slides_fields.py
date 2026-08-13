@@ -23,3 +23,11 @@ def test_a_known_long_sample_testimonial_is_resolved_before_the_short_field_filt
     assert fields.replacements(resolution, {"review_quote": "The real client review."}) == {
         literal: "The real client review."
     }
+
+
+def test_a_bare_realtor_credential_is_data_not_brand_copy() -> None:
+    """A source must not grant a membership credential to an arbitrary agent."""
+    resolution = fields.resolve(["Realtor"])
+
+    assert resolution.fields == {"agent_title": "Realtor"}
+    assert fields.replacements(resolution, {"agent_title": ""}) == {}

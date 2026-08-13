@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
 import pytest
 
-from gable.slackapp.app import answer_mention
+from gable.slackapp.app import answer_mention, build_app, process_mention
 from gable.slackapp.brain import Decision
-from gable.slackapp.routing import MessageRoute, ThreadOwnership
+from gable.slackapp.routing import EventReplayGuard, MessageRoute, ThreadOwnership
 
 CHANNEL = "C0B02721MNK"
 GABLE_USER = "UGABLE"
@@ -99,6 +100,30 @@ def test_photo_in_a_gable_authored_thread_routes_to_the_handoff() -> None:
     )
 
     assert route is MessageRoute.FILE_SHARE
+
+
+def test_current_file_event_without_legacy_subtype_routes_to_the_handoff() -> None:
+    """Slack's current file payload is identified by its files array."""
+    route = ThreadOwnership().route(
+        _event(parent_user_id=GABLE_USER, files=[{"id": "F1"}]),
+        RootClient(),
+        bot_user_id=GABLE_USER,
+        bot_id=GABLE_BOT,
+    )
+
+    assert route is MessageRoute.FILE_SHARE
+
+
+def test_a_thread_broadcast_is_still_an_owned_human_reply() -> None:
+    """Checking “also send to channel” must not make Gable ignore the reply."""
+    route = ThreadOwnership().route(
+        _event(parent_user_id=GABLE_USER, subtype="thread_broadcast"),
+        RootClient(),
+        bot_user_id=GABLE_USER,
+        bot_id=GABLE_BOT,
+    )
+
+    assert route is MessageRoute.THREAD_REPLY
 
 
 def test_follow_up_to_a_human_root_that_called_gable_remains_owned() -> None:
@@ -194,6 +219,71 @@ def test_a_root_lookup_failure_stays_silent_and_can_retry() -> None:
     assert client.calls == 2
 
 
+def test_an_empty_root_lookup_stays_silent_but_is_not_cached() -> None:
+    """Read-after-write lag is uncertainty, not permanent foreign ownership."""
+    client = RootClient()
+    ownership = ThreadOwnership()
+
+    assert (
+        ownership.route(
+            _event(parent_user_id="UCHASE"),
+            client,
+            bot_user_id=GABLE_USER,
+            bot_id=GABLE_BOT,
+        )
+        is MessageRoute.IGNORE
+    )
+    client.roots["1786.1"] = {"user": "UCHASE", "text": "<@UGABLE> help"}
+    assert (
+        ownership.route(
+            _event(parent_user_id="UCHASE", ts="1786.3"),
+            client,
+            bot_user_id=GABLE_USER,
+            bot_id=GABLE_BOT,
+        )
+        is MessageRoute.THREAD_REPLY
+    )
+    assert client.calls == [(CHANNEL, "1786.1", 1), (CHANNEL, "1786.1", 1)]
+
+
+def test_a_received_root_mention_is_owned_before_read_api_catches_up() -> None:
+    """The authoritative app mention prevents a first-reply ownership race."""
+    ownership = ThreadOwnership()
+    ownership.remember_owned(CHANNEL, "1786.1")
+
+    route = ownership.route(
+        _event(parent_user_id="UCHASE"),
+        RootClient(),
+        bot_user_id=GABLE_USER,
+        bot_id=GABLE_BOT,
+    )
+
+    assert route is MessageRoute.THREAD_REPLY
+
+
+def test_a_retried_slack_event_is_accepted_exactly_once_under_concurrency() -> None:
+    """A lost acknowledgement cannot run the same edit or photo twice."""
+    guard = EventReplayGuard()
+    event = _event(event_ts="1786.2")
+
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        accepted = list(
+            pool.map(lambda _index: guard.first_delivery(event, route="message"), range(8))
+        )
+
+    assert accepted.count(True) == 1
+    assert accepted.count(False) == 7
+
+
+def test_unidentifiable_events_are_not_silently_dropped_as_replays() -> None:
+    """Failing open on replay identity preserves a real human request."""
+    guard = EventReplayGuard()
+    event = {"channel": CHANNEL, "user": "UCHASE"}
+
+    assert guard.first_delivery(event, route="message")
+    assert guard.first_delivery(event, route="message")
+
+
 def test_cache_size_must_be_positive() -> None:
     """A configuration error cannot silently create an unbounded cache."""
     with pytest.raises(ValueError, match="must be positive"):
@@ -239,3 +329,124 @@ def test_explicit_gable_mention_still_answers_inside_a_foreign_thread() -> None:
 
     assert asked == ["Number 13 and 22"]
     assert said == [{"text": "Tell me which flyer you mean.", "thread_ts": "1786.1"}]
+
+
+def test_a_photo_attached_to_an_app_mention_uses_the_photo_workflow() -> None:
+    """Mentioning Gable with the requested photo cannot turn it into prose."""
+    handled: list[str] = []
+    thought: list[str] = []
+    said: list[dict[str, Any]] = []
+
+    class MentionClient:
+        """Accept the native status calls used by the file workflow."""
+
+        def assistant_threads_setStatus(self, **_kwargs: Any) -> None:  # noqa: ANN401, N802
+            """Stand in for Slack's native status method."""
+
+    def photo_handler(
+        event: dict[str, Any],
+        _client: Any,  # noqa: ANN401
+        _progress: Any,  # noqa: ANN401
+    ) -> str:
+        handled.append(str(event["files"][0]["id"]))
+        return "I fitted the photo and finished the flyer."
+
+    def thinker(message: str, speaker: str = "") -> Decision:
+        del speaker
+        thought.append(message)
+        return Decision(reply="This should not be called.")
+
+    def say(**kwargs: Any) -> dict[str, str]:  # noqa: ANN401
+        said.append(kwargs)
+        return {"ts": "said"}
+
+    process_mention(
+        _event(
+            type="app_mention",
+            text="<@UGABLE> here it is",
+            files=[{"id": "F1"}],
+        ),
+        say,
+        MentionClient(),
+        thinker,
+        photo_handler,
+    )
+
+    assert handled == ["F1"]
+    assert thought == []
+    assert said == [{"text": "I fitted the photo and finished the flyer.", "thread_ts": "1786.1"}]
+
+
+def test_app_mention_and_message_delivery_of_one_photo_run_only_once(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Overlapping Slack subscriptions cannot duplicate one file handoff."""
+    import slack_bolt
+
+    class FakeBoltApp:
+        """Capture event decorators without constructing a real Slack client."""
+
+        def __init__(self, **_kwargs: Any) -> None:  # noqa: ANN401
+            self.handlers: dict[str, Any] = {}
+
+        def event(self, name: str) -> Any:  # noqa: ANN401
+            def register(handler: Any) -> Any:  # noqa: ANN401
+                self.handlers[name] = handler
+                return handler
+
+            return register
+
+    class EventClient:
+        """Support native status; ownership uses the event's parent user id."""
+
+        def assistant_threads_setStatus(self, **_kwargs: Any) -> None:  # noqa: ANN401, N802
+            """Stand in for native status."""
+
+    monkeypatch.setattr(slack_bolt, "App", FakeBoltApp)
+    handled: list[str] = []
+    thought: list[str] = []
+
+    def photo_handler(
+        event: dict[str, Any],
+        _client: Any,  # noqa: ANN401
+        _progress: Any,  # noqa: ANN401
+    ) -> str:
+        handled.append(str(event["files"][0]["id"]))
+        return "I fitted the photo and finished the flyer."
+
+    def thinker(message: str, speaker: str = "") -> Decision:
+        del speaker
+        thought.append(message)
+        return Decision(reply="This should not be called.")
+
+    said: list[dict[str, Any]] = []
+
+    def say(**kwargs: Any) -> dict[str, str]:  # noqa: ANN401
+        said.append(kwargs)
+        return {"ts": "said"}
+
+    app = build_app(
+        "xoxb-test-token",
+        file_share_handler=photo_handler,
+        allowed_channel=CHANNEL,
+        allowed_user_ids=frozenset(("UCHASE",)),
+        thinker=thinker,
+    )
+    event = _event(
+        type="app_mention",
+        event_ts="1786.2",
+        parent_user_id=GABLE_USER,
+        text="<@UGABLE> here it is",
+        files=[{"id": "F1"}],
+    )
+    app.handlers["app_mention"](event, say, EventClient())
+    app.handlers["message"](
+        {**event, "type": "message"},
+        say,
+        EventClient(),
+        {"bot_user_id": GABLE_USER, "bot_id": GABLE_BOT},
+    )
+
+    assert handled == ["F1"]
+    assert thought == []
+    assert len(said) == 1

@@ -12,6 +12,8 @@ from __future__ import annotations
 
 import io
 import logging
+import sqlite3
+import threading
 import urllib.parse
 import urllib.request
 from collections.abc import Callable
@@ -27,13 +29,21 @@ from gable.photos.fit import MAX_SOURCE_PIXELS, normalise_for_fitting
 from gable.photos.store import PublishError, publish_local, verify_public
 from gable.pipeline.runner import RunResult
 from gable.sheets import repository as repo
+from gable.slackapp.status import Working
+from gable.voice import safe
 
 logger = logging.getLogger("gable.slack.photos")
 
 MAX_UPLOAD_BYTES: Final[int] = 25 * 1024 * 1024
 _SLACK_HOST_SUFFIXES: Final[tuple[str, ...]] = (".slack.com", ".slack-edge.com")
+_PHOTO_LOCK_STRIPES: Final[int] = 32
+_PHOTO_LOCKS: Final[tuple[threading.Lock, ...]] = tuple(
+    threading.Lock() for _ in range(_PHOTO_LOCK_STRIPES)
+)
 
 ProgressReporter = Callable[[str], None]
+SubmissionLoader = Callable[[sqlite3.Connection, store.RunRow], store.StoredSubmission | None]
+FileShareHandler = Callable[[dict[str, Any], Any, ProgressReporter], str]
 
 
 def _ignore_progress(_stage: str) -> None:
@@ -42,6 +52,18 @@ def _ignore_progress(_stage: str) -> None:
 
 class PhotoHandoffError(Exception):
     """A private upload could not safely become a public fitted image."""
+
+
+def _photo_lock(thread_ts: str) -> threading.Lock:
+    """Return a bounded process-local lock for one listing thread.
+
+    Bolt runs message listeners concurrently. Two uploads in the same thread can
+    otherwise both observe ``needs_photo`` and both download, decode, publish,
+    and potentially reserve paid work before the runner's atomic resume claim
+    rejects one. Striped locks bound memory while serializing that expensive
+    boundary; the database claim remains the cross-process authority.
+    """
+    return _PHOTO_LOCKS[hash(thread_ts) % _PHOTO_LOCK_STRIPES]
 
 
 def _is_slack_url(url: str) -> bool:
@@ -164,7 +186,58 @@ def _submission(stored: store.StoredSubmission) -> repo.Submission:
         submitted_at=stored.submitted_at,
         intake=stored.intake,
         content_hash=stored.content_hash,
+        source_tab=stored.source_tab,
     )
+
+
+def process_file_share(
+    event: dict[str, Any],
+    say: Any,  # noqa: ANN401 - Bolt injection, untyped upstream
+    client: Any,  # noqa: ANN401 - Slack WebClient, untyped upstream
+    handler: FileShareHandler | None,
+) -> None:
+    """Fit a shared photo under the native waiting state and report its outcome.
+
+    Fitting and rendering is the longest user-triggered path. The native status
+    covers the wait without leaving a placeholder message behind, and every
+    failure becomes a plain sentence rather than a silent dead job.
+
+    Args:
+        event: Slack's file-bearing message or app-mention event.
+        say: Bolt's thread-aware posting helper.
+        client: Slack Web API client used for native status.
+        handler: The real photo workflow, or ``None`` in isolated checks.
+
+    Raises:
+        Nothing. Every outcome, including failure, is said out loud.
+    """
+    thread = event.get("thread_ts") or event.get("ts")
+    if handler is None:
+        say(
+            text=safe("I received the photo, but photo processing is not available right now."),
+            thread_ts=thread,
+        )
+        return
+    with Working(
+        client,
+        str(event.get("channel") or ""),
+        str(thread or ""),
+        "is building the flyer...",
+    ) as waiting:
+        try:
+            spoken = handler(event, client, waiting.stage)
+            # An empty outcome means the run already posted its link or precise
+            # failure in this thread. Another line would only duplicate it.
+            if not spoken.strip():
+                return
+            outcome = safe(spoken)
+        except Exception:
+            logger.exception("the photo workflow failed")
+            outcome = (
+                "I could not fit that photo to the flyer. The flyer is unchanged — "
+                "send it again, or tell me which listing it belongs to."
+            )
+        say(text=outcome, thread_ts=thread)
 
 
 @dataclass(frozen=True, slots=True)
@@ -179,6 +252,9 @@ class PhotoHandoff:
     public_root: Path
     public_base: str
     runner_for: Callable[..., ResumesRun]
+    load_current: SubmissionLoader = lambda connection, run: store.load_submission(
+        connection, run.response_row_id
+    )
     download: Callable[[str, str, int], bytes] = download_private_image
     publish: Callable[[Path, str, bytes], str] = publish_local
     verify: Callable[[str], tuple[bool, str]] = verify_public
@@ -221,6 +297,8 @@ class PhotoHandoff:
             return "Slack did not identify that upload, so I left the flyer unchanged."
 
         connection = connect(self.db_path)
+        photo_lock = _photo_lock(thread_ts)
+        photo_lock.acquire()
         try:
             run = store.run_for_thread(connection, thread_ts)
             if run is None:
@@ -230,7 +308,14 @@ class PhotoHandoff:
                     "This listing is not waiting for a photo, so I left the current "
                     "flyer unchanged."
                 )
-            stored = store.load_submission(connection, run.response_row_id)
+            try:
+                stored = self.load_current(connection, run)
+            except Exception:
+                logger.exception("the current form row or contact record could not be refreshed")
+                return (
+                    "I could not refresh this listing from its form and contact record, "
+                    "so I left the upload and run unchanged."
+                )
             if stored is None:
                 return "I found the listing thread but not its request details, so I stopped there."
 
@@ -289,4 +374,7 @@ class PhotoHandoff:
                 return ""
             return "I prepared the photo, but I could not finish the flyer. I stopped there."
         finally:
-            connection.close()
+            try:
+                connection.close()
+            finally:
+                photo_lock.release()

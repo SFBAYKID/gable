@@ -169,6 +169,7 @@ def test_a_row_read_by_hand_has_the_same_identity_as_a_polled_one() -> None:
     polled = repo.read_submissions(_Sheet(), "Testing_1")
     assert [s.response_row_id for s in polled] == [by_hand.response_row_id]
     assert polled[0].sheet_row == by_hand.sheet_row == 78
+    assert polled[0].source_tab == "Testing_1"
 
 
 def test_correcting_identity_fields_changes_the_legacy_tuple_hash() -> None:

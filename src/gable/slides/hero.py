@@ -427,10 +427,13 @@ _MAX_OVERLAP_FRACTION: Final[float] = 0.25
 
 #: A replacement image is appended to the page, which puts it at the top of the
 #: z-order — above artwork that was originally drawn over its frame. So a face
-#: covering *any* of that artwork is wrong, and the headshot tolerance is much
-#: tighter than the hero's. Measured: at 25% the deck produced 11 overlap
-#: complaints once headshot replacement reached most designs.
-_MAX_HEADSHOT_OVERLAP_FRACTION: Final[float] = 0.02
+#: covering meaningful artwork is wrong, and the headshot tolerance remains much
+#: tighter than the hero's. The live Sold source intentionally lets the address
+#: panel cross 3.16% of its portrait placeholder at the upper-right corner; a 2%
+#: ceiling discarded that real slot and left the sample agent's face in place.
+#: Four percent admits that measured edge overlap while still rejecting a small
+#: decorative tail that is substantially covered by the portrait.
+_MAX_HEADSHOT_OVERLAP_FRACTION: Final[float] = 0.04
 
 
 def _is_overlaid(

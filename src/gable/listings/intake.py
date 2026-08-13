@@ -10,10 +10,12 @@ Generic Templates must carry that exact human-visible name. That is the whole
 routing decision; no ranked catalogue or agent override participates.
 
 The second idea here is **completeness**. A template must never ship with a
-publicly knowable fact left blank. Square footage, beds and baths are matters of
-public record for a given address, so `missing_public_facts()` names what has to
-be looked up rather than asked about. Only genuinely unknowable things — the
-hero photo, an open-house time nobody has published — are worth a question.
+publicly knowable fact it displays left blank. Square footage, beds and baths
+are matters of public record for a given address, so `missing_public_facts()`
+names the possible gaps; the runner intersects them with the selected source's
+resolved fields before paying to look anything up. Only genuinely unknowable
+things — the hero photo, an open-house time nobody has published — are worth a
+question.
 
 The third is **coherence**. A sold listing with no closing price is not missing
 data, it is contradictory data, and `incoherences()` says so in the words Gable
@@ -291,16 +293,17 @@ class Question:
 
 
 def missing_public_facts(intake: Intake, known: dict[str, str] | None = None) -> list[str]:
-    """Facts the flyer needs that are public record, so must be researched.
+    """Possible public-record gaps for the selected source to filter.
 
     Args:
         intake: The submission.
         known: Anything already resolved, e.g. from a previous lookup.
 
     Returns:
-        Field names to go and find. Never asked of Carmen — an address is enough
-        to establish beds, baths and square footage, and making her type them is
-        the work this product exists to remove.
+        Public field names not already known. The runner researches only the
+        returned names that the selected source actually displays. Those are
+        never asked of Carmen — an address is enough to establish them, and
+        making her type them is the work this product exists to remove.
 
     Raises:
         Nothing.

@@ -154,13 +154,17 @@ because the droplet's distro Python sets the real ceiling.
 sudo -u gable git clone <REPO_URL> /opt/gable
 sudo -u gable python3 -m venv /opt/gable/.venv
 sudo -u gable /opt/gable/.venv/bin/pip install -e /opt/gable
-sudo -u gable mkdir -p /opt/gable/var
+sudo install -d -o gable -g gable -m 0700 /opt/gable/var
 sudo install -d -o gable -g gable -m 0755 /var/www/gable-photos
 ```
 
 The unit grants writes only to `/opt/gable/var` and
 `/var/www/gable-photos`. The first holds SQLite and its WAL files; the second is
-nginx's public document root for fitted hero photos.
+nginx's public document root for fitted hero photos. The database directory is
+private because it contains listing addresses, contact data and Slack thread
+identifiers. The unit's `UMask=0077` keeps newly created database sidecars
+private too; published photos are explicitly changed to mode 0644 only after
+their complete atomic write.
 
 The checkout pulls from `git@github.com:SFBAYKID/gable.git` through the
 read-only deploy key already installed on the droplet.
@@ -200,23 +204,19 @@ the historical-row adoption in `/opt/gable/var/gable.db`, install the Slack
 `files:read` scope, and create the nginx photo directory described above. Then
 start the unit and confirm both Socket Mode and one guarded poll cycle.
 
-Let `make deploy` handle restarts from then on. It also reasserts the photo
-directory's owner and mode before every restart. Nothing gets hand-edited on
-the server.
+Let `make deploy` handle updates from then on. It installs the current package,
+reasserts both runtime directories' owner and mode, installs the repository's
+unit, runs `systemctl daemon-reload`, and only then restarts Gable. Nothing gets
+hand-edited on the server.
 
-## 9. Passwordless restart for deploys
+## 9. Deploy authorization
 
-`make deploy` runs `sudo systemctl restart gable` over a non-interactive SSH
-session, which cannot answer a password prompt.
-
-```bash
-echo '<YOUR_SSH_USER> ALL=(ALL) NOPASSWD: /bin/systemctl restart gable' \
-  | sudo tee /etc/sudoers.d/gable-deploy
-sudo chmod 440 /etc/sudoers.d/gable-deploy
-sudo visudo -c
-```
-
-Scoped to exactly that one command — not a blanket NOPASSWD.
+The checked-in target defaults to the droplet's key-only root account because
+installing a unit, reloading systemd, and repairing ownership all require root.
+Do not point `GABLE_HOST` at an unprivileged account and assume only restart
+permission is enough; the deploy must fail rather than skip any of those
+steps. The service process itself still runs only as the unprivileged `gable`
+user.
 
 ---
 
@@ -254,11 +254,14 @@ pins that key to `github.com`.
 `GOOGLE_SERVICE_ACCOUNT_FILE` rewritten to `/opt/gable/secrets/...`. Everything
 else is identical, so a variable that works locally works here.
 
-**Deploying an update:**
+**Deploying an update from the repository checkout:**
 
-    ssh root@143.110.146.87 'cd /opt/gable && git pull --ff-only \
-      && install -m 644 deploy/gable.service /etc/systemd/system/gable.service \
-      && systemctl daemon-reload && systemctl restart gable'
+    make deploy
+
+The target pulls with fast-forward-only semantics, installs the package,
+forces `/opt/gable/var` to private mode 0700, repairs the public photo
+directory, installs `deploy/gable.service`, reloads systemd, and restarts. The
+unit's `UMask=0077` applies to the SQLite database, WAL, and shared-memory files.
 
 `git` needs `safe.directory` set for `/opt/gable`, because root pulls into a
 tree owned by `gable`. It is configured; a fresh box will need it again.
@@ -271,8 +274,9 @@ tree owned by `gable`. It is configured; a fresh box will need it again.
   `journalctl -u gable --since "1 minute ago"` when checking a restart, and
   `systemd-analyze verify` for the file itself.
 - Bolt auto-enables an OAuth installation store when `SLACK_CLIENT_ID` and
-  `SLACK_CLIENT_SECRET` are present, and then ignores the bot token. `app.py`
-  hides those two before constructing the app. Do not "helpfully" remove that.
+  `SLACK_CLIENT_SECRET` are present, and then ignores the bot token. Startup
+  rejects either stale variable before Bolt is constructed; remove them from
+  the service environment instead of trying to mask them in application code.
 
 **Verified after deploy:** `systemctl is-active` active, `is-enabled` enabled,
 a clean start with no unknown keys, 33 MB resident on a 1 GB box, and the local

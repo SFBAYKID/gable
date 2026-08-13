@@ -28,6 +28,10 @@ Type=simple
 User=gable
 Group=gable
 WorkingDirectory=/opt/gable
+# SQLite and its WAL contain listing addresses, contact details, and Slack thread
+# identifiers. New runtime files are private by default; published photos are
+# explicitly chmodded 0644 only after their complete atomic write.
+UMask=0077
 
 # The runtime opens Socket Mode without blocking, then keeps the poller on the
 # main thread so its signal handlers are valid. A configuration problem returns

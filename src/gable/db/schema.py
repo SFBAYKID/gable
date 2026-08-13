@@ -27,7 +27,7 @@ from typing import Final
 
 #: Bumped whenever a migration is added. `apply_migrations` uses it to decide
 #: what still needs running.
-SCHEMA_VERSION: Final[int] = 4
+SCHEMA_VERSION: Final[int] = 6
 
 #: Each migration is (version, sql). They run in order and only once. Never edit
 #: one that has shipped — add another, the same rule as the decision log.
@@ -193,6 +193,29 @@ MIGRATIONS: Final[tuple[tuple[int, str], ...]] = (
             ADD COLUMN notification_pending INTEGER NOT NULL DEFAULT 0;
         """,
     ),
+    (
+        5,
+        """
+        -- A human may approve one measured, non-structural warning before a
+        -- later photo upload resumes the run. Persist exact warning codes on
+        -- the run so an address-width approval cannot silently approve a new
+        -- crop warning discovered in a later stage.
+        ALTER TABLE runs
+            ADD COLUMN approved_warning_codes TEXT NOT NULL DEFAULT '';
+        ALTER TABLE runs
+            ADD COLUMN pending_warning_code TEXT NOT NULL DEFAULT '';
+        """,
+    ),
+    (
+        6,
+        """
+        -- A paused Slack run must refresh the exact form tab it came from.
+        -- Row numbers alone are ambiguous because production and Testing_1
+        -- both have a row 48, and the form itself remains read-only.
+        ALTER TABLE submissions
+            ADD COLUMN source_tab TEXT NOT NULL DEFAULT '';
+        """,
+    ),
 )
 
 
@@ -297,6 +320,12 @@ def apply_migrations(connection: sqlite3.Connection) -> int:
         raise RuntimeError(msg)
     applied = 0
     at = current_version(connection)
+    if at > SCHEMA_VERSION:
+        msg = (
+            f"database schema version {at} is newer than this code supports "
+            f"({SCHEMA_VERSION}); refusing to run an older binary"
+        )
+        raise RuntimeError(msg)
     for version, sql in MIGRATIONS:
         if version <= at:
             continue

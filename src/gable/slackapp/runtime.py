@@ -28,13 +28,15 @@ from gable.pipeline.template_triage import TemplateTriage
 from gable.pipeline.template_vision import inspect_source_template
 from gable.runtime import RuntimeComponents, serve
 from gable.sheets import repository as repo
-from gable.sheets.client import SheetClient
+from gable.sheets.client import ReadsRanges, SheetClient
 from gable.slackapp.app import build_app
 from gable.slackapp.batches import summarize as summarize_batch
 from gable.slackapp.brain import Decision, think
+from gable.slackapp.context import listing_context
 from gable.slackapp.editing import SlideEditor
 from gable.slackapp.photos import PhotoHandoff
 from gable.slides.library import list_files as list_template_files
+from gable.voice import safe
 
 logger = logging.getLogger("gable.slack.runtime")
 
@@ -45,6 +47,63 @@ GOOGLE_SCOPES: tuple[str, ...] = (
 )
 
 UpscaleProvider = Callable[[bytes, str, str, int, int], bytes]
+
+
+class SourceRefreshError(RuntimeError):
+    """The authoritative roster or original read-only form row could not be refreshed."""
+
+
+def refresh_submission_sources(
+    connection: Connection,
+    run: store.RunRow,
+    sheet_client: ReadsRanges,
+    drive: Any,  # noqa: ANN401 - googleapiclient resource
+    drive_id: str,
+    templates_folder_id: str,
+) -> store.StoredSubmission:
+    """Reload the contact workbook and exact form tab behind a paused run.
+
+    The form remains read-only. Remembering its tab is what distinguishes, for
+    example, Testing_1 row 48 from production row 48; a row number alone is not
+    an identity.
+    """
+    try:
+        sync_contacts(drive, connection, drive_id, templates_folder_id)
+        stored = store.load_submission(connection, run.response_row_id)
+        if stored is None:
+            raise SourceRefreshError("the saved request no longer exists")
+        if not stored.source_tab:
+            # Rows created before source-tab provenance was deployed still get
+            # the current roster. Their form payload remains the last exact
+            # value read, rather than guessing which tab a row number belongs to.
+            return stored
+        matches = [
+            submission
+            for submission in repo.read_submissions(sheet_client, stored.source_tab)
+            if submission.submitted_at == stored.submitted_at
+        ]
+        if len(matches) != 1:
+            raise SourceRefreshError("the original form response could not be identified once")
+        current = repo.reconcile_identity(connection, matches[0])
+        if current.response_row_id != run.response_row_id:
+            raise SourceRefreshError("the refreshed form response did not match this run")
+        store.record_submission(
+            connection,
+            current.response_row_id,
+            current.sheet_row,
+            current.submitted_at,
+            current.intake,
+            current.content_hash,
+            current.source_tab,
+        )
+        refreshed = store.load_submission(connection, run.response_row_id)
+        if refreshed is None:
+            raise SourceRefreshError("the refreshed request could not be saved")
+        return refreshed
+    except SourceRefreshError:
+        raise
+    except Exception as exc:
+        raise SourceRefreshError("the request sources could not be refreshed") from exc
 
 
 def guarded_upscale_photo(
@@ -84,21 +143,72 @@ def guarded_upscale_photo(
     """
     if not enabled:
         raise EnhancementError("automatic enlargement is disabled by the photo policy")
-    prior_calls = spend.operation_count(connection, run_id, spend.IMAGE_UPSCALE_DETAIL)
-    if prior_calls >= max_calls:
-        raise EnhancementError("this listing has already used its image-edit allowance")
     estimate = spend.Estimate(
         service="openai",
         model=model,
         usd=spend.IMAGE_EDIT_RESERVE_USD,
         detail=spend.IMAGE_UPSCALE_DETAIL,
     )
-    return spend.guarded_call(
-        connection,
-        estimate,
-        lambda: provider(image_bytes, api_key, model, target_width, target_height),
-        run_id=run_id,
-    )
+    try:
+        return spend.guarded_call(
+            connection,
+            estimate,
+            lambda: provider(image_bytes, api_key, model, target_width, target_height),
+            run_id=run_id,
+            max_operations=max_calls,
+        )
+    except spend.OperationLimitReachedError as exc:
+        raise EnhancementError("this listing has already used its image-edit allowance") from exc
+
+
+def notify_interrupted_runs(
+    connection: Connection,
+    interrupted: tuple[store.RunRow, ...],
+    say: Callable[[str, str | None], str],
+) -> int:
+    """Post durable startup-recovery outcomes and acknowledge confirmations.
+
+    Runs with an owned thread were paused for review and receive the notice in
+    that thread. Runs interrupted before a root existed are failed and receive
+    one channel notice. A failed or unconfirmed Slack call leaves the database
+    marker untouched, so the next startup retries the notice without retrying
+    the flyer or consuming another attempt.
+
+    Returns:
+        Number of notices Slack confirmed and the database acknowledged.
+
+    Raises:
+        Nothing. Startup must continue even while Slack is temporarily down.
+    """
+    confirmed = 0
+    for run in interrupted:
+        try:
+            stored = store.load_submission(connection, run.response_row_id)
+            address = stored.intake.address.strip() if stored is not None else ""
+            listing = address or "This listing"
+            if run.slack_thread_ts:
+                message = safe(
+                    f"{listing} — I was interrupted while building this flyer, so I "
+                    "paused it for review instead of saying it was finished. Tell me to "
+                    "run it again."
+                )
+                thread_ts: str | None = run.slack_thread_ts
+            else:
+                message = safe(
+                    f"{listing} — I was interrupted while building this flyer, and there "
+                    "was no listing thread I could safely resume. I marked that attempt "
+                    "failed so Chase can check it before retrying."
+                )
+                thread_ts = None
+            posted_ts = say(message, thread_ts)
+            if not posted_ts.strip():
+                logger.error("Slack did not confirm an interrupted-run notice")
+                continue
+            if store.acknowledge_interrupted_run(connection, run.run_id, posted_ts):
+                confirmed += 1
+        except Exception:
+            logger.exception("could not report an interrupted run in Slack")
+    return confirmed
 
 
 def build_components(settings: Settings) -> RuntimeComponents:
@@ -122,7 +232,7 @@ def build_components(settings: Settings) -> RuntimeComponents:
     apply_migrations(connection)
     interrupted = store.recover_interrupted_runs(connection)
     if interrupted:
-        logger.warning("marked %d interrupted run(s) failed during startup", interrupted)
+        logger.warning("recovered %d interrupted run(s) during startup", len(interrupted))
 
     # Vendor contract: service-account credentials accept an explicit scope
     # list. https://google-auth.readthedocs.io/en/latest/reference/google.oauth2.service_account.html
@@ -145,7 +255,10 @@ def build_components(settings: Settings) -> RuntimeComponents:
             text=text,
             thread_ts=thread_ts,
         )
-        return str(response.get("ts") or thread_ts or "")
+        # A requested root proves where we tried to post, not that Slack
+        # accepted the new message. Callers advance delivery state only from
+        # the timestamp of the response itself.
+        return str(response.get("ts") or "")
 
     def template_triage_for(
         triage_connection: Connection,
@@ -193,6 +306,12 @@ def build_components(settings: Settings) -> RuntimeComponents:
             """Keep every resumed-run message in its originating thread."""
             return slack_post(text, requested_thread or thread_ts)
 
+        run = store.run_for_thread(connection_for_event, thread_ts)
+        approved = (
+            store.decode_warning_codes(run.approved_warning_codes)
+            if run is not None
+            else frozenset()
+        )
         return build_runner(
             settings,
             connection_for_event,
@@ -209,6 +328,26 @@ def build_components(settings: Settings) -> RuntimeComponents:
                 width,
                 height,
             ),
+            approved_template_warning_codes=approved,
+        )
+
+    def refresh_for_photo(
+        event_connection: Connection,
+        run: store.RunRow,
+    ) -> store.StoredSubmission:
+        """Read current form/contact sources on the upload worker's clients."""
+        event_credentials = service_account.Credentials.from_service_account_file(  # type: ignore[no-untyped-call]
+            str(settings.google_service_account_file), scopes=list(GOOGLE_SCOPES)
+        )
+        event_sheets = build("sheets", "v4", credentials=event_credentials, cache_discovery=False)
+        event_drive = build("drive", "v3", credentials=event_credentials, cache_discovery=False)
+        return refresh_submission_sources(
+            event_connection,
+            run,
+            SheetClient(spreadsheet_id=settings.sheet_id, service=event_sheets),
+            event_drive,
+            settings.drive_id,
+            settings.drive_templates_folder_id,
         )
 
     def upscale_photo(
@@ -240,6 +379,7 @@ def build_components(settings: Settings) -> RuntimeComponents:
         public_root=settings.photo_public_root,
         public_base=settings.photo_public_base,
         runner_for=runner_for_photo,
+        load_current=refresh_for_photo,
     )
 
     def execute_action(
@@ -279,11 +419,26 @@ def build_components(settings: Settings) -> RuntimeComponents:
                         action_drive,
                         action_slides,
                     ).recheck(thread_ts, progress)
-                stored = store.load_submission(action_connection, run.response_row_id)
-                if stored is None:
+                action_drive = build(
+                    "drive", "v3", credentials=action_credentials, cache_discovery=False
+                )
+                action_sheets = build(
+                    "sheets", "v4", credentials=action_credentials, cache_discovery=False
+                )
+                try:
+                    stored = refresh_submission_sources(
+                        action_connection,
+                        run,
+                        SheetClient(spreadsheet_id=settings.sheet_id, service=action_sheets),
+                        action_drive,
+                        settings.drive_id,
+                        settings.drive_templates_folder_id,
+                    )
+                except SourceRefreshError:
+                    logger.exception("a listing's current form or contact source could not be read")
                     return (
-                        "I found the listing thread but not its request details, so I "
-                        "have not rebuilt anything."
+                        "I could not refresh this listing from its form and contact record, "
+                        "so I left the run paused without rebuilding it."
                     )
                 mode = str(decision.arguments.get("mode") or "")
                 if mode not in {"check_updated", "run_anyway"}:
@@ -291,9 +446,6 @@ def build_components(settings: Settings) -> RuntimeComponents:
                         "Tell me whether you updated the template or want me to use the "
                         "current design as it is."
                     )
-                action_drive = build(
-                    "drive", "v3", credentials=action_credentials, cache_discovery=False
-                )
                 if mode == "check_updated" and run.template_file_id:
                     # The person has said the source changed. Always reload its
                     # current Drive revision; a stored ready verdict may belong
@@ -314,6 +466,21 @@ def build_components(settings: Settings) -> RuntimeComponents:
                     captured.append(text)
                     return thread_ts
 
+                approved = store.decode_warning_codes(run.approved_warning_codes)
+                resume_fields: dict[str, str | int] = {"pending_warning_code": ""}
+                if mode == "run_anyway":
+                    if not run.pending_warning_code:
+                        return (
+                            "There is no current template warning waiting for approval, so I "
+                            "left the listing unchanged."
+                        )
+                    approved = approved | {run.pending_warning_code}
+                else:
+                    # An edited source is new evidence. Old geometry approvals
+                    # do not transfer to it.
+                    approved = frozenset()
+                resume_fields["approved_warning_codes"] = store.encode_warning_codes(approved)
+
                 runner = build_runner(
                     settings,
                     action_connection,
@@ -330,7 +497,7 @@ def build_components(settings: Settings) -> RuntimeComponents:
                         width,
                         height,
                     ),
-                    allow_template_warnings=mode == "run_anyway",
+                    approved_template_warning_codes=approved,
                 )
                 submission = repo.Submission(
                     response_row_id=stored.response_row_id,
@@ -338,8 +505,9 @@ def build_components(settings: Settings) -> RuntimeComponents:
                     submitted_at=stored.submitted_at,
                     intake=stored.intake,
                     content_hash=stored.content_hash,
+                    source_tab=stored.source_tab,
                 )
-                result = runner.resume(submission, run.run_id)
+                result = runner.resume(submission, run.run_id, resume_fields=resume_fields)
                 if captured:
                     return captured[-1]
                 return (
@@ -355,12 +523,19 @@ def build_components(settings: Settings) -> RuntimeComponents:
         finally:
             action_connection.close()
 
-    def guarded_think(message: str, speaker: str = "") -> Decision:
+    def guarded_think(
+        message: str,
+        speaker: str = "",
+        history: list[tuple[str, str]] | None = None,
+        context: str = "",
+    ) -> Decision:
         """Run a conversation call only while the shared budget permits it.
 
         Args:
             message: What was said, with the mention already stripped.
             speaker: The first name of whoever asked, when it could be resolved.
+            history: Bounded prior turns from the same Slack thread.
+            context: Persisted facts for the listing owned by that thread.
 
         Returns:
             A `Decision`.
@@ -374,6 +549,8 @@ def build_components(settings: Settings) -> RuntimeComponents:
                 api_key=settings.openai_image_api_key,
                 model=settings.conversation_model,
                 speaker=speaker,
+                history=history,
+                context=context,
             )
         thought_connection = connect(settings.db_path)
         estimate = spend.Estimate(
@@ -391,6 +568,8 @@ def build_components(settings: Settings) -> RuntimeComponents:
                     api_key=settings.openai_image_api_key,
                     model=settings.conversation_model,
                     speaker=speaker,
+                    history=history,
+                    context=context,
                 ),
             )
         except spend.BudgetExceededError:
@@ -402,6 +581,17 @@ def build_components(settings: Settings) -> RuntimeComponents:
             )
         finally:
             thought_connection.close()
+
+    def conversation_context(thread_ts: str) -> str:
+        """Return persisted listing facts without keeping a shared DB cursor."""
+        context_connection = connect(settings.db_path)
+        try:
+            return listing_context(context_connection, thread_ts)
+        except Exception:
+            logger.exception("could not load listing context for a Slack reply")
+            return ""
+        finally:
+            context_connection.close()
 
     def on_submission(submission: repo.Submission) -> str:
         """Give one new submission a fresh runner bound to the live clients."""
@@ -435,7 +625,15 @@ def build_components(settings: Settings) -> RuntimeComponents:
         allowed_channel=settings.slack_channel_id,
         allowed_user_ids=settings.slack_allowed_user_ids,
         thinker=guarded_think,
+        context_provider=conversation_context,
     )
+    if interrupted:
+        notified = notify_interrupted_runs(connection, interrupted, slack_post)
+        if notified != len(interrupted):
+            logger.warning(
+                "%d interrupted-run notice(s) remain pending",
+                len(interrupted) - notified,
+            )
     socket = SocketModeHandler(app, settings.slack_app_token)
     return RuntimeComponents(
         poller=poller,

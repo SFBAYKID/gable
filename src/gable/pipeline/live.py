@@ -16,6 +16,7 @@ from sqlite3 import Connection
 from typing import Any
 
 from gable import spend
+from gable.agents.website import lookup_official_profile
 from gable.config import Settings
 from gable.db import store
 from gable.listings.enrich import default_research
@@ -365,7 +366,7 @@ def build_runner(
     origin_thread_ts: str = "",
     progress: Callable[[str], None] = lambda _stage: None,
     upscale_photo: Callable[[str, bytes, int, int], bytes] | None = None,
-    allow_template_warnings: bool = False,
+    approved_template_warning_codes: frozenset[str] = frozenset(),
 ) -> Runner:
     """Assemble a `Runner` that talks to the real services.
 
@@ -380,8 +381,8 @@ def build_runner(
         origin_thread_ts: Root Slack thread that a resumed run must preserve.
         progress: Names the current stage for Slack's waiting indicator.
         upscale_photo: One policy and spend-guarded real-photo enlargement.
-        allow_template_warnings: Continue past measured, non-blocking layout
-            warnings only after Carmen explicitly says to use the design as-is.
+        approved_template_warning_codes: Exact measured advisory codes Carmen
+            or Chase explicitly accepted for this run.
 
     Returns:
         A ready `Runner`.
@@ -705,6 +706,7 @@ def build_runner(
         copy_template=copy_template,
         fill=fill,
         research=default_research(settings.firecrawl_api_key, connection),
+        official_contact_lookup=lookup_official_profile,
         place_photo=place_photo,
         place_headshot=lambda fid, url: place_headshot(
             slides,
@@ -730,5 +732,5 @@ def build_runner(
             settings.photo_public_base,
         ),
         progress=progress,
-        allow_template_warnings=allow_template_warnings,
+        approved_template_warning_codes=approved_template_warning_codes,
     )

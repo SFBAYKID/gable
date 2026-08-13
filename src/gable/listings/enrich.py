@@ -1,10 +1,11 @@
-"""Finding the facts a flyer needs that nobody typed in.
+"""Finding the source-displayed facts a flyer needs that nobody typed in.
 
-Chase's rule: **a template must never ship with a blank that is public
-information.** An address is enough to establish beds, baths, square footage and
-often a price, so Gable looks them up rather than asking. Only genuinely
-unknowable things — the hero photo, an open-house time nobody published — are
-worth a question.
+Chase's rule: **a template must never ship with a displayed blank that is public
+information.** After reading the selected source, an address is enough to
+establish any beds, baths, square-footage, or price fields it displays, so Gable
+looks those up rather than asking. A source with none of those fields does not
+trigger this paid path. Only genuinely unknowable things — the hero photo, an
+open-house time nobody published — are worth a question.
 
 Two safeguards, because a confident wrong number on a client-facing flyer is
 worse than a blank:
@@ -51,6 +52,12 @@ _SQFT: Final[re.Pattern[str]] = re.compile(
     r"([\d,]{3,7})\s*(?:sq\.?\s*ft|square\s*feet|sqft)", re.IGNORECASE
 )
 _PRICE: Final[re.Pattern[str]] = re.compile(r"\$\s?([\d,]{5,12})")
+_SEARCH_TERMS: Final[dict[str, str]] = {
+    "beds": "bedrooms",
+    "baths": "bathrooms",
+    "square_feet": "square feet",
+    "list_price": "price",
+}
 
 
 @dataclass(frozen=True, slots=True)
@@ -187,7 +194,33 @@ def _search(query: str, api_key: str, limit: int = 4) -> list[dict[str, Any]]:
     return results if isinstance(results, list) else []
 
 
-def look_up(address: str, api_key: str) -> Facts:
+def only_required(facts: Facts, required: frozenset[str]) -> Facts:
+    """Discard facts and caveats the selected source does not display."""
+    beds = facts.beds if "beds" in required else ""
+    baths = facts.baths if "baths" in required else ""
+    square_feet = facts.square_feet if "square_feet" in required else ""
+    list_price = facts.list_price if "list_price" in required else ""
+    caveats = _plausible(beds, baths, square_feet)
+    count = sum(1 for value in (beds, baths, square_feet, list_price) if value)
+    confidence = min(0.95, 0.25 * count) if count else 0.0
+    if caveats:
+        confidence *= 0.5
+    return Facts(
+        beds=beds,
+        baths=baths,
+        square_feet=square_feet,
+        list_price=list_price,
+        source_url=facts.source_url,
+        confidence=round(confidence, 2),
+        caveats=caveats,
+    )
+
+
+def look_up(
+    address: str,
+    api_key: str,
+    required: frozenset[str] = frozenset(_SEARCH_TERMS),
+) -> Facts:
     """Research a property from its address.
 
     Args:
@@ -195,6 +228,8 @@ def look_up(address: str, api_key: str) -> Facts:
             first — a bad address wastes a paid call and returns confident
             nonsense.
         api_key: The Firecrawl key.
+        required: Public fields present on the selected source. The search
+            query and returned facts are both limited to these names.
 
     Returns:
         The best `Facts` found, or an empty one. Never raises: a failed lookup
@@ -204,10 +239,13 @@ def look_up(address: str, api_key: str) -> Facts:
     Raises:
         Nothing.
     """
+    if not required:
+        return Facts()
     if not api_key:
         return Facts(caveats=["I have no way to search right now"])
     try:
-        results = _search(f"{address} bedrooms bathrooms square feet", api_key)
+        terms = " ".join(term for name, term in _SEARCH_TERMS.items() if name in required)
+        results = _search(f"{address} {terms}", api_key)
     except Exception:
         return Facts(caveats=["I could not reach the search service"])
 
@@ -218,7 +256,7 @@ def look_up(address: str, api_key: str) -> Facts:
             # Their terms forbid it, and a flyer built on a violation is not
             # worth the numbers.
             continue
-        found = extract(str(result.get("markdown", "")), url)
+        found = only_required(extract(str(result.get("markdown", "")), url), required)
         if found.confidence > best.confidence:
             best = found
     return best
@@ -254,7 +292,7 @@ def fill_gaps(known: dict[str, str], found: Facts) -> tuple[dict[str, str], list
 def default_research(
     api_key: str,
     connection: Connection | None = None,
-) -> Callable[[str], Facts]:
+) -> Callable[[str, frozenset[str]], Facts]:
     """A research function bound to a Firecrawl key.
 
     Args:
@@ -264,15 +302,18 @@ def default_research(
             callers may omit it.
 
     Returns:
-        A callable taking an address.
+        A callable taking an address and the selected source's public fields.
 
     Raises:
         Nothing.
     """
 
-    def research(address: str) -> Facts:
+    def research(
+        address: str,
+        required: frozenset[str] = frozenset(_SEARCH_TERMS),
+    ) -> Facts:
         if connection is None or not api_key:
-            return look_up(address, api_key)
+            return look_up(address, api_key, required)
         estimate = spend.Estimate(
             service="firecrawl",
             model="search",
@@ -280,7 +321,11 @@ def default_research(
             detail="one property search reservation",
         )
         try:
-            return spend.guarded_call(connection, estimate, lambda: look_up(address, api_key))
+            return spend.guarded_call(
+                connection,
+                estimate,
+                lambda: look_up(address, api_key, required),
+            )
         except spend.BudgetExceededError:
             return Facts(caveats=["Testing has reached its spending limit"])
 

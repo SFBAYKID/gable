@@ -9,7 +9,7 @@ from pathlib import Path
 import pytest
 
 from gable.db import store
-from gable.db.schema import apply_migrations, connect
+from gable.db.schema import SCHEMA_VERSION, apply_migrations, connect, current_version
 from gable.listings.intake import Intake
 
 
@@ -114,6 +114,102 @@ def test_only_one_worker_can_claim_a_paused_run(tmp_path: Path) -> None:
     assert current.photo_url.endswith("first.jpg")
 
 
+@pytest.mark.parametrize("paused_status", sorted(store.PAUSED))
+def test_a_paused_run_blocks_a_new_attempt(tmp_path: Path, paused_status: str) -> None:
+    """Human-owned pauses resume in place and never consume another attempt."""
+    connection = _db(tmp_path)
+    response_id = _submission(connection)
+    run = store.start_run(connection, response_id)
+    store.set_status(connection, run.run_id, paused_status, "waiting on a person")
+
+    with pytest.raises(store.RunAlreadyActiveError, match="active or paused"):
+        store.start_run(connection, response_id)
+
+    assert store.run_attempt_count(connection, response_id) == 1
+    assert store.latest_run(connection, response_id) == store.run_by_id(connection, run.run_id)
+
+
+def test_unknown_status_is_rejected_without_mutating_the_run_or_event_log(
+    tmp_path: Path,
+) -> None:
+    """A spelling mistake cannot create a state the poller will never revisit."""
+    connection = _db(tmp_path)
+    run = store.start_run(connection, _submission(connection))
+
+    with pytest.raises(ValueError, match="unknown run status"):
+        store.set_status(connection, run.run_id, "needz_photo", "misspelled")
+
+    current = store.run_by_id(connection, run.run_id)
+    assert current is not None and current.status == "pending"
+    events = connection.execute(
+        "SELECT status FROM run_events WHERE run_id = ? ORDER BY id", (run.run_id,)
+    ).fetchall()
+    assert [event["status"] for event in events] == ["pending"]
+
+
+def test_warning_approval_fields_survive_a_run_reload(tmp_path: Path) -> None:
+    """A later photo handoff can recover the exact warning a person approved."""
+    connection = _db(tmp_path)
+    run = store.start_run(connection, _submission(connection))
+    store.set_status(
+        connection,
+        run.run_id,
+        "needs_template",
+        "waiting for a measured warning decision",
+        approved_warning_codes="address_tight",
+        pending_warning_code="hero_crop",
+    )
+
+    current = store.run_by_id(connection, run.run_id)
+    assert current is not None
+    assert current.approved_warning_codes == "address_tight"
+    assert current.pending_warning_code == "hero_crop"
+
+
+def test_warning_code_serialization_is_deterministic_and_fails_closed() -> None:
+    encoded = store.encode_warning_codes({"large_photo_crop", "tight_address"})
+
+    assert encoded == '["large_photo_crop","tight_address"]'
+    assert store.decode_warning_codes(encoded) == frozenset({"large_photo_crop", "tight_address"})
+    assert store.decode_warning_codes("not json") == frozenset()
+    assert store.decode_warning_codes('["tight-address"]') == frozenset()
+
+
+def test_submission_source_tab_is_added_without_erasing_the_saved_payload(
+    tmp_path: Path,
+) -> None:
+    connection = _db(tmp_path)
+    response_id = _submission(connection)
+    before = store.load_submission(connection, response_id)
+    assert before is not None and before.source_tab == ""
+
+    store.record_submission(
+        connection,
+        response_id,
+        before.sheet_row,
+        before.submitted_at,
+        before.intake,
+        source_tab="Testing_1",
+    )
+
+    after = store.load_submission(connection, response_id)
+    assert after is not None
+    assert after.source_tab == "Testing_1"
+    assert after.content_hash == before.content_hash
+    assert after.intake == before.intake
+
+
+def test_startup_refuses_a_database_created_by_newer_code(tmp_path: Path) -> None:
+    """An old binary must not run against columns or invariants it cannot know."""
+    connection = _db(tmp_path)
+    connection.execute("INSERT INTO schema_version (version) VALUES (?)", (SCHEMA_VERSION + 1,))
+
+    with pytest.raises(RuntimeError, match="newer than this code supports"):
+        apply_migrations(connection)
+
+    assert current_version(connection) == SCHEMA_VERSION + 1
+
+
 def test_concurrent_workers_cannot_exceed_the_three_attempt_ceiling(tmp_path: Path) -> None:
     """The count and insertion are one database decision, not a race."""
     path = tmp_path / "gable.db"
@@ -153,13 +249,76 @@ def test_startup_recovery_explains_runs_interrupted_in_active_states(tmp_path: P
     pending = store.start_run(connection, response_id)
     store.set_status(connection, pending.run_id, "building", "copy created")
 
-    assert store.recover_interrupted_runs(connection) == 1
+    notices = store.recover_interrupted_runs(connection)
 
     recovered = store.run_by_id(connection, pending.run_id)
+    assert [notice.run_id for notice in notices] == [pending.run_id]
     assert recovered is not None and recovered.status == "failed"
+    assert recovered.failure_reason == store.INTERRUPTED_NOTIFICATION_PENDING
     events = connection.execute(
         "SELECT status, detail FROM run_events WHERE run_id = ? ORDER BY id",
         (pending.run_id,),
     ).fetchall()
     assert [event["status"] for event in events] == ["pending", "building", "failed"]
     assert "prior process ended" in events[-1]["detail"]
+
+
+def test_threaded_interruption_pauses_the_same_attempt_until_a_person_resumes(
+    tmp_path: Path,
+) -> None:
+    """An owned listing thread makes interrupted work safely resumable."""
+    connection = _db(tmp_path)
+    response_id = _submission(connection)
+    run = store.start_run(connection, response_id)
+    store.set_status(
+        connection,
+        run.run_id,
+        "building",
+        "photo placed",
+        slack_thread_ts="1786468156.700001",
+        output_file_id="output-one",
+        output_url="https://example.test/output-one",
+    )
+
+    notices = store.recover_interrupted_runs(connection)
+
+    recovered = store.run_by_id(connection, run.run_id)
+    assert [notice.run_id for notice in notices] == [run.run_id]
+    assert recovered is not None
+    assert recovered.status == "needs_review"
+    assert recovered.output_file_id == "output-one"
+    assert recovered.failure_reason == store.INTERRUPTED_NOTIFICATION_PENDING
+    assert store.run_attempt_count(connection, response_id) == 1
+
+    # Until Slack confirms the recovery message, another startup owes the same
+    # notice rather than silently treating it as delivered.
+    assert [notice.run_id for notice in store.recover_interrupted_runs(connection)] == [run.run_id]
+    assert store.acknowledge_interrupted_run(connection, run.run_id, "1786468156.700099")
+    acknowledged = store.run_by_id(connection, run.run_id)
+    assert acknowledged is not None
+    assert acknowledged.status == "needs_review"
+    assert acknowledged.slack_thread_ts == "1786468156.700001"
+    assert acknowledged.failure_reason == store.INTERRUPTED_REASON
+    assert store.recover_interrupted_runs(connection) == ()
+
+    assert store.claim_paused_run(connection, run.run_id)
+    assert store.run_attempt_count(connection, response_id) == 1
+
+
+def test_unthreaded_recovery_notice_becomes_the_failed_run_thread(tmp_path: Path) -> None:
+    """The channel notice gives an otherwise silent failure a durable place to discuss."""
+    connection = _db(tmp_path)
+    run = store.start_run(connection, _submission(connection))
+
+    notices = store.recover_interrupted_runs(connection)
+    assert [notice.run_id for notice in notices] == [run.run_id]
+    assert notices[0].status == "failed"
+
+    assert store.acknowledge_interrupted_run(connection, run.run_id, "1786468156.800001")
+    acknowledged = store.run_by_id(connection, run.run_id)
+    assert acknowledged is not None
+    assert acknowledged.status == "failed"
+    assert acknowledged.slack_thread_ts == "1786468156.800001"
+    assert acknowledged.failure_reason == store.INTERRUPTED_REASON
+    assert not store.acknowledge_interrupted_run(connection, run.run_id, "1786468156.800002")
+    assert store.recover_interrupted_runs(connection) == ()

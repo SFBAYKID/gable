@@ -47,6 +47,13 @@ def test_runs_as_unprivileged_gable_user(unit: configparser.ConfigParser) -> Non
     assert unit.get("Service", "NoNewPrivileges") == "true"
 
 
+def test_runtime_files_default_to_owner_only_permissions(
+    unit: configparser.ConfigParser,
+) -> None:
+    """SQLite, WAL and SHM files may contain private listing information."""
+    assert unit.get("Service", "UMask") == "0077"
+
+
 def test_execstart_launches_the_installed_package(unit: configparser.ConfigParser) -> None:
     """ExecStart must point at the venv interpreter and a `gable.` module.
 
@@ -99,6 +106,25 @@ def test_every_deploy_repairs_the_photo_directory_ownership() -> None:
     """
     makefile = MAKEFILE_PATH.read_text(encoding="utf-8")
     assert "install -d -o gable -g gable -m 0755 /var/www/gable-photos" in makefile
+
+
+def test_every_deploy_installs_private_runtime_storage() -> None:
+    """The directory and pre-existing SQLite files become private on deploy."""
+    makefile = MAKEFILE_PATH.read_text(encoding="utf-8")
+    assert "install -d -o gable -g gable -m 0700 $(GABLE_DIR)/var" in makefile
+    assert "-name 'gable.db*' -exec chmod 0600" in makefile
+
+
+def test_every_deploy_installs_and_reloads_the_service_unit_before_restart() -> None:
+    """Repository unit changes must reach systemd on the same deploy."""
+    makefile = MAKEFILE_PATH.read_text(encoding="utf-8")
+    install = "install -m 0644 deploy/gable.service /etc/systemd/system/gable.service"
+    reload = "systemctl daemon-reload"
+    restart = "systemctl restart gable"
+    assert install in makefile
+    assert reload in makefile
+    assert restart in makefile
+    assert makefile.index(install) < makefile.index(reload) < makefile.index(restart)
 
 
 def test_no_inbound_listener_is_configured() -> None:

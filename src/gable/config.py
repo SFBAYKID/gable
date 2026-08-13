@@ -80,10 +80,17 @@ class ConfigError(Exception):
         super().__init__(f"{len(problems)} configuration problem(s):\n{joined}")
 
 
-#: The one channel Gable may post to (CLAUDE.md section 11). Overridable by
-#: environment so tests and a future second workspace are not blocked, but the
-#: default is pinned so a missing variable cannot silently retarget Gable.
+#: The production channel Gable uses by default (AGENTS.md section 2). A missing
+#: variable cannot silently retarget Gable; cross-field validation permits only
+#: this channel or the isolated playground named below.
 DEFAULT_SLACK_CHANNEL_ID: Final[str] = "C0BP597644B"
+
+#: The only two channels named by the runtime contract. Configuration may switch
+#: between production and the isolated playground, but a typo or unrelated
+#: channel id must fail before the Socket Mode listener starts.
+ALLOWED_SLACK_CHANNEL_IDS: Final[frozenset[str]] = frozenset(
+    {DEFAULT_SLACK_CHANNEL_ID, "C0B02721MNK"}
+)
 
 #: Ceilings that exist to stop an agent spending money or memory in a loop
 #: (AGENTS.md section 7). Enforced in code, not in a comment.
@@ -262,7 +269,7 @@ class Settings:
             ),
             photo_reprocess=reader.bool_value("GABLE_PHOTO_REPROCESS", True),
             max_image_calls_per_listing=reader.int_value(
-                "GABLE_MAX_IMAGE_CALLS_PER_LISTING", 1, minimum=0, maximum=5
+                "GABLE_MAX_IMAGE_CALLS_PER_LISTING", 1, minimum=0, maximum=1
             ),
             photo_public_root=reader.path_value(
                 "GABLE_PHOTO_PUBLIC_ROOT", Path("/var/www/gable-photos")
@@ -308,6 +315,10 @@ def _validate_cross_field(settings: Settings, problems: list[str]) -> None:
     degrade safely because no generator is connected, so both generation policy
     values are refused even when a general OpenAI credential exists.
     """
+    if settings.slack_channel_id not in ALLOWED_SLACK_CHANNEL_IDS:
+        problems.append(
+            "GABLE_SLACK_CHANNEL_ID must be the production Gable channel or monarch-bot-playground"
+        )
     if not settings.photo_public_base.startswith(("http://", "https://")):
         problems.append("GABLE_PHOTO_PUBLIC_BASE must start with http:// or https://")
     if not settings.photo_public_root.is_absolute() or len(settings.photo_public_root.parts) < 3:

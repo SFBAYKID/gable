@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import sqlite3
 
+from gable.agents.website import OfficialProfile, ProfileLookup
 from gable.db import store
 from gable.listings.enrich import Facts
 from gable.listings.intake import from_row
@@ -45,13 +46,18 @@ def submission(**over: str) -> repo.Submission:
 class Recorder:
     """Capture the external work a runner attempted."""
 
-    def __init__(self, slide_text: list[str] | None = None) -> None:
+    def __init__(
+        self,
+        slide_text: list[str] | None = None,
+        template_label: str = "Just Listed — Bracket Placeholders (cleanest)",
+    ) -> None:
         """Start with a template whose text the runner can resolve."""
         self.said: list[str] = []
         self.threads: list[str | None] = []
         self.filled: dict[str, str] = {}
         self.copied = False
         self.photo_placed = False
+        self.template_label = template_label
         self.slide_text = slide_text or [
             "[PROPERTY ADDRESS]",
             "[PRICE]",
@@ -71,7 +77,7 @@ class Recorder:
 
     def pick(self, category: str, intake: object = None) -> tuple[str, str]:  # noqa: ARG002
         """Always find a representative template."""
-        return ("tmpl-1", f"{category} — Bracket Placeholders (cleanest)")
+        return ("tmpl-1", self.template_label)
 
     def read(self, file_id: str) -> list[str]:
         """Return template text before fill and simulated output text after."""
@@ -118,7 +124,7 @@ def runner(db: sqlite3.Connection, rec: Recorder, facts: Facts | None = None) ->
         copy_template=rec.copy,
         fill=rec.fill,
         look_at=lambda _run_id, _image: Inspection(looks_right=True, confident=True),
-        research=lambda _address: (
+        research=lambda _address, _fields: (
             facts
             or Facts(
                 beds="4",
@@ -127,6 +133,15 @@ def runner(db: sqlite3.Connection, rec: Recorder, facts: Facts | None = None) ->
                 list_price="$515,000",
                 source_url="https://redfin.test",
                 confidence=0.95,
+            )
+        ),
+        official_contact_lookup=lambda name, email: ProfileLookup(
+            profile=OfficialProfile(
+                name=name,
+                email=email,
+                phone="(443) 854-8554",
+                title="REALTOR®",
+                source_url="https://cornerhouserealty.com/lolo-simmons/",
             )
         ),
     )
@@ -141,4 +156,5 @@ def record(db: sqlite3.Connection, item: repo.Submission) -> None:
         item.submitted_at,
         item.intake,
         item.content_hash,
+        item.source_tab,
     )

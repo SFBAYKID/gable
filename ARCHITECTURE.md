@@ -29,13 +29,18 @@ An agent — say **Lolo Simmons** — submits the form.
 
 1. **Poll.** Gable reads `Form Responses 1` on the §2.6 schedule and sees a new
    row: name, email, address, listing details.
-2. **Identify.** It joins to the Drive-hosted contact workbook and headshot
-   folder on submitted agent identity.
+2. **Identify and validate.** It joins to the Drive-hosted contact workbook and
+   headshot folder on submitted agent identity. Before speaking in Slack it
+   proves the submitted name, email and direct phone. A workbook blank, or a
+   credential field such as REALTOR that the workbook does not collect, may
+   fall back to one exact profile on the official Corner House Realty domain;
+   conflicts pause and neither source is changed.
 3. **Select and preflight.** The request type names one file in `Generic
    Templates`. Gable reloads that source and measures its fields, text capacity,
    photo frame and this listing's actual values before copying anything.
-4. **Pause if needed.** Structural defects stop. A usable text or crop warning
-   asks whether to run as-is or recheck an updated source.
+4. **Pause if needed.** Structural defects and unreadable minimum type stop.
+   Ordinary text overflow and photo cropping are fitted automatically and
+   reported with the one outcome after render inspection.
 5. **Receive the hero image.** The user drops one image into the owned thread;
    its full composition is preserved until the exact frame is known.
 6. **Fit once.** Pillow crops and resizes to the measured frame. Only enlargement
@@ -50,38 +55,9 @@ If anything is missing or malformed at any point — no phone number, no address
 a price that will not parse — Gable **asks instead of guessing** (§4.3b).
 
 ```
-Real-estate agent
-      │ fills out
-      ▼
-Google Form ─────────► Google Sheet
-                            │  2 min business hours CST · 10 min otherwise
-                            ▼
-                 ┌──────────────────────────┐
-                 │   Gable (droplet)        │
-                 │  poller                  │
-                 │    ↓                     │
-                 │  normalize ──────────────┼─► ASK if a field is missing ─┐
-                 │    ↓                     │                              │
-                 │  identify agent ─────────┼─► Drive roster + headshot     │
-                 │    ↓                     │                              │
-                 │  preflight source ───────┼─► exact Slides geometry       │
-                 │    ↓                     │                              │
-                 │  ASK for hero image ─────┼──────────────────────────────┤
-                 │    ↓                     │                              │
-                 │  fit image to frame ─────┼─► Pillow, free; a model only  │
-                 │    ↓                     │                              │
-                 │  store photo ────────────┼─► public fetchable URL       │
-                 │    ↓                     │                              ▼
-                 │  render ─────────────────┼─► Drive: copy + batchUpdate  Slack
-                 │    ↓                     │                            thread
-                 │  inspect the render ─────┼─► GPT-5.6 Sol vision          ▲
-                 │    ↓                     │                              │
-                 │  deliver the link ───────┼──────────────────────────────┘
-                 └──────────────────────────┘
-                            │
-                            ▼
-              Carmen clicks and edits in Slides,
-              or replies "use the other photo"
+Form → Sheet → poll → validate person and source → ask in Slack
+     → supplied photo → frame-aware fit → Slides copy and fill
+     → readback plus rendered vision check → editable Slides link
 ```
 
 There is no download step and no file to upload anywhere: Gable copies the
@@ -242,7 +218,15 @@ the templates, and **each is found by name, never by position**:
 `agents/contacts.py` reads the workbook — one sheet, `Email | First Name |
 Last Name | Phone` — and mirrors it into the local `salespeople` table on every
 pass. It is a **human-owned working document**: Gable mirrors its exact contents
-atomically, never web-corrects contacts, and refuses duplicates.
+atomically and refuses duplicates. A complete exact row ends validation with no
+web request. When that row or one of its name, email, or direct-phone values is
+missing, `agents/website.py` may fill only the blank for that run from one
+exact-name profile whose submitted email appears on `cornerhouserealty.com`.
+When source text requires an agent title or credential the same exact profile
+must supply it; Gable never infers REALTOR merely from the person's profession.
+It does not write the website result into the workbook or SQLite roster, and a
+conflict between submitted, workbook, and official-site values pauses rather
+than selecting the value that looks most plausible.
 
 The header row is located rather than assumed, in the workbook and on every
 tab. This is not defensive habit — it is the two failures of 2026-08-12. The
@@ -329,16 +313,20 @@ It never invents a value and never silently drops a field. Status is
 and re-enters when Carmen or Chase replies in its owned thread after correcting
 the form or roster source.
 
-Agent details live only in the Drive sources; Gable never substitutes the office
-number or writes web findings into them.
+Agent details start with the Drive sources. A missing roster field may be used
+from one exact official-site profile for the current run only; Gable never
+substitutes the office number or writes web findings into the human-owned source.
 
 ### 4.3 Research public facts (`listings/enrich.py`)
 
-Firecrawl searches by address for beds, baths, square footage and a list price.
-Only sourced, plausible values are retained, and submitted values are never
-overwritten. Results are cached by normalised address in SQLite and every paid
-call crosses the shared spend guard. Contacts are not researched: an unknown or
-incomplete agent pauses and names the human-owned source to fix.
+After the selected source is read, Firecrawl searches by address only when that
+source displays a missing bed, bath, square-footage, or price field. A design
+with none of those fields makes no property-research call. Only sourced,
+plausible values are retained, and submitted values are never overwritten.
+Results are cached by normalised address in SQLite and every paid call crosses
+the shared spend guard. Contact validation is a separate free, official-domain
+prerequisite: it runs only for a missing workbook value, and an unavailable,
+ambiguous, or conflicting profile pauses without mutation.
 
 There is no fixed description-length setting. The current source text box and
 the actual replacement are measured before build; a visible rendered result is
@@ -426,10 +414,11 @@ bottom third. Scaling it naively produces a stretched house, or a roofline
 guillotined at the top — errors that are glaring to a client and invisible to a
 script checking that the file is a valid JPEG.
 
-The common path is deterministic. Pillow centre-crops once to the **measured
+The common path is deterministic. Pillow center-crops once to the **measured
 hero frame** and resamples to that frame's pixel dimensions. Up to a 2x
-enlargement stays local. Crop loss above 30 percent is reported before build
-and requires an explicit instruction to continue.
+enlargement stays local. Crop loss above 30 percent becomes a note in the one
+post-build outcome; it never creates an approval question. The rendered vision
+gate still blocks delivery if the automatic crop removes important content.
 
 Only a source that would need more than 2x enlargement takes the image-edit
 path in `photos/enhance.py`. Gable first makes the exact deterministic frame
@@ -470,8 +459,8 @@ Before a listing copy is created, `slides/preflight.py` reads the current source
 object graph. It requires one slide, resolves fillable text, refuses unsafe
 substring replacements, identifies one hero frame, converts its geometry to
 pixels, and measures the listing's actual values against the source boxes. A
-result below 8 points is structural; a smaller but readable result is an
-explicit run-or-update choice.
+result at or below 8 points stops as unreadable; every larger fitted size is
+applied automatically and described only with the finished result.
 
 `pipeline/template_triage.py` applies the same structural checks plus standard
 capacity targets when a new file appears. The initial folder is adopted
@@ -563,18 +552,20 @@ Every interaction is restricted to two stable Slack IDs; names are not authoriza
 
 ### 4A.1 Confirm before acting
 
-Gable restates what it understood and waits for a yes. Ambiguity is resolved by
+Gable resolves each owned-thread turn with up to twelve recent prior messages
+and persisted facts for that thread's listing. Ambiguity is still resolved by
 asking, never by taking the likely reading.
 
 > **Carmen:** update the image
-> **Gable:** Just to confirm — replace the **hero image** on 123 Main St?
-> *(the large photo at the top)*
-> **Carmen:** yes
+> **Gable:** Did you mean the large property photo or the agent headshot?
+> **Carmen:** the big one
 > **Gable:** On it. Drop the new one here.
 
 "Update the image" could mean the hero, the headshot, or one of three secondary
-photos. Asking costs three seconds. Guessing costs a wrong post that looks right,
-which is the exact failure `AGENTS.md` §5 is written against.
+photos. A confirmed property-photo replacement keeps the current flyer intact
+while the new upload re-enters every geometry and visual gate. A headshot change
+waits on the human-owned `Head Shots` folder. Asking costs seconds; guessing can
+produce a wrong post that looks right, the failure `AGENTS.md` §5 forbids.
 
 The rule generalises: **when Gable does not know, it asks.** It never picks the
 convenient reading of an ambiguous instruction.
@@ -644,7 +635,7 @@ enlargement of the supplied real photo.
 | Google client failure | Record or report the affected operation; do not claim success |
 | Firecrawl down | Leave public facts unresolved and pause rather than invent them |
 | No photo found | Status `needs_photo`, ask Carmen, do not block the batch |
-| Unknown or incomplete agent | Pause and name the contact workbook or headshot source to fix; never web-correct it |
+| Unknown or incomplete agent | Check one exact official-domain profile for workbook blanks; pause on unavailable, ambiguous, or conflicting evidence and never overwrite a source |
 | Local photo publish fails | Keep that listing paused and report the failed stage |
 | Slack disconnect | Bolt reconnects; log it, never exit |
 | Slides mutation is rejected or incomplete | Stop that listing and translate the failure into plain language |
@@ -798,3 +789,7 @@ Append to this table. Do not rewrite history — if a decision reverses, add a n
 | 2026-08-12 | Backfill, state transitions, and startup recovery are transactional | Catalogue adoption and its ready marker commit together; an old orphan marker is repaired rather than trusted. Runs interrupted by process death are marked failed on boot, row corrections reconcile by form timestamp, and duplicate active starts are refused before paid work begins. |
 | 2026-08-12 | GPT-5.6 conversation tools use the **Responses API with explicit reasoning** | A live check found Chat Completions rejects Sol function tools at its default reasoning level. The Responses API is OpenAI's recommended reasoning/tool path; Gable now requests medium reasoning, parses direct function calls, fails plainly on incomplete/refused output, reserves ten conservative cents instead of the obsolete mini-model penny, and was verified live to ask whether “update the image” means the hero or headshot. |
 | 2026-08-13 | **Reverses the `/gable` operator-command surface:** Slack is natural-language only | Chase rejected status, run, retry, templates, pause, and resume as user work the product should not require. The manifest no longer declares a slash command or `commands` scope; Bolt no longer registers one; the command service and poller's operator queue and pause controls are deleted. Mentions and owned-thread replies remain, including a plain-language request to reload a corrected source and continue a paused listing. |
+| 2026-08-13 | **Narrows the no-web-contact rule:** validate every name, email, and direct phone before Slack; official-site fallback may fill only a workbook blank or a source-required credential for the current run | Chase's ordered workflow makes contact readiness a prerequisite rather than something discovered only if the chosen template has that field. A complete exact workbook row causes no web request unless the source requires a title the workbook does not collect. For an absent or incomplete row, or a title field such as REALTOR, Gable searches the one official Corner House Realty domain for one exact-name profile and requires the submitted email plus one direct phone in that profile's contact block. It does not overwrite the workbook or roster, never infers a credential, never substitutes an office/footer phone, and any submitted/workbook/site conflict pauses instead of being "corrected." Field-level provenance is written into the run-event detail without storing contact values there. |
+| 2026-08-13 | Owned-thread clarification receives bounded Slack history and persisted listing facts | A terse answer such as “the big one” is meaningful only after Gable's prior hero-or-headshot question. The listener supplies up to twelve earlier turns plus the run's status, address, template, agent, output and photo facts. A confirmed hero replacement retains the current flyer until the new upload passes the ordinary build gates; a headshot replacement waits on `Head Shots`. |
+| 2026-08-13 | Readable text overflow is corrected automatically, not presented as template work for Carmen | Exact Slides geometry determines the largest fitting size. Gable applies that font size only to fields it filled, keeps names, phones, emails and similar values on one line, reports the reduction in the final outcome, and still stops at the 8-point readability limit or when the source structure cannot be measured safely. The rendered vision inspection remains the final clipping and overlap gate. |
+| 2026-08-13 | **Reverses the pre-build crop approval:** a supplied photo is fitted before Gable asks about layout | Chase's live test reached eighteen messages because every correctable fit became user work. A large center crop now becomes a truthful note in the one outcome after the build; it never asks “run anyway.” Structural defects, missing facts and unreadable text still stop, and the rendered vision inspection remains the fail-closed gate for a crop that removed important property content. |

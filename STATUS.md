@@ -18,17 +18,20 @@ verdict with no explanatory items could otherwise leave the problem list empty
 and deliver.
 
 Ruff, strict Mypy, 892 Pytest tests, Vulture, dependency integrity, diff
-integrity, and the 800-line source ceiling pass. The live release row is Form
-Responses 1 line 47: Mike Kulnich, Sold, 703 Perception Way, Aberdeen, MD 21001.
+integrity, and the 800-line source ceiling pass. The controlled release target
+is Testing_1 line 48: Mike Kulnich, Sold, 703 Perception Way, Aberdeen, MD 21001.
 
-Commit `84cc543` is deployed and active in monarch-bot-playground. All configured
-service connections pass. The line-47 run is paused as `needs_photo` in its
-owned Slack thread after two truthful preflight findings: Mike's exact portrait
-was missing from Head Shots and was recovered from his existing Gable example,
-and the Sold source needs about five percent more address width. The latter was
-accepted for this test only; final readback and visual inspection still apply.
+Commit `84cc543` is the last deployed baseline in monarch-bot-playground, but
+the listener is deliberately stopped while this correction release is held.
+All configured service connections pass. The Testing_1 row-48 run is paused in
+its owned Slack thread with Mike's exact contact record, filed headshot, Sold
+source, and supplied property image retained.
 
-The run is waiting for Chase to upload the promised property image. The prior
+Chase uploaded Test_2.jpg in the owned thread. That upload exposed a poor UX
+loop: the deployed build paused on a second readable text-fit warning and then
+asked Chase to diagnose source fields. The release is held while readable text
+fits and photo crops become automatic one-outcome adjustments; the same image
+and run are retained for the resumed end-to-end proof. The prior
 OpenAI exposure remains recorded below, and Slack's settings page also surfaced
 the installed bot token during this audit. Neither secret is repeated or stored
 in the repository. The explicit playground test is using the already-installed

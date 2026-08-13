@@ -16,6 +16,7 @@ from pathlib import Path
 import pytest
 
 from gable.config import (
+    ALLOWED_SLACK_CHANNEL_IDS,
     DEFAULT_SLACK_CHANNEL_ID,
     ConfigError,
     PhotoPolicy,
@@ -55,9 +56,22 @@ def test_defaults_match_dotenv_example() -> None:
     assert settings.db_path == Path("/opt/gable/var/gable.db")
 
 
-def test_slack_channel_defaults_to_the_only_permitted_channel() -> None:
+def test_slack_channel_defaults_to_the_production_channel() -> None:
     """A missing variable must not silently retarget Gable (CLAUDE.md 11)."""
     assert _load().slack_channel_id == DEFAULT_SLACK_CHANNEL_ID == "C0BP597644B"
+
+
+@pytest.mark.parametrize("channel_id", ["C0BP597644B", "C0B02721MNK"])
+def test_only_contract_slack_channels_are_accepted(channel_id: str) -> None:
+    assert frozenset({"C0BP597644B", "C0B02721MNK"}) == ALLOWED_SLACK_CHANNEL_IDS
+    settings = _load(GABLE_SLACK_CHANNEL_ID=channel_id)
+    assert settings.slack_channel_id == channel_id
+
+
+@pytest.mark.parametrize("channel_id", ["C1234567890", "general", "C0BP597644C"])
+def test_unrelated_or_mistyped_slack_channel_is_rejected(channel_id: str) -> None:
+    with pytest.raises(ConfigError, match="GABLE_SLACK_CHANNEL_ID"):
+        _load(GABLE_SLACK_CHANNEL_ID=channel_id)
 
 
 def test_settings_are_frozen() -> None:
@@ -237,6 +251,11 @@ def test_poll_schedule_maps_the_quiet_variable_to_the_quiet_rate() -> None:
 def test_batch_ceiling_is_enforced() -> None:
     with pytest.raises(ConfigError):
         _load(GABLE_MAX_BATCH="5000")
+
+
+def test_image_call_allowance_cannot_exceed_one_per_listing() -> None:
+    with pytest.raises(ConfigError, match="GABLE_MAX_IMAGE_CALLS_PER_LISTING"):
+        _load(GABLE_MAX_IMAGE_CALLS_PER_LISTING="2")
 
 
 def test_unknown_enum_lists_the_valid_options() -> None:

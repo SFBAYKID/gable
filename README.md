@@ -19,9 +19,9 @@ engineering constraints and the decision history live in `CLAUDE.md` and
 3. Before copying anything, it reads the current source file, resolves the
    fields, measures the text boxes and hero frame, and checks the listing's real
    values and supplied photo against those measurements.
-4. A structural problem or unreadable result pauses the listing. A measured
-   but usable text or crop warning asks Carmen whether to run as-is or update
-   the source template.
+4. A structural problem or text that cannot remain readable pauses the listing.
+   Readable overflow and photo cropping are corrected automatically, then
+   reported in the single outcome after render inspection.
 5. A Slack photo keeps its original composition until the exact frame is known.
    Gable then crops and resizes once. Enlargement up to 2x is local; beyond 2x,
    one policy- and spend-gated GPT Image 2 edit may restore resolution while a
@@ -55,15 +55,15 @@ alignment, padding, and off-canvas artwork before they are certified.
 - Keep one separate, unfilled main-photo shape near the top of the slide. Gable
   refuses to infer a frame when more than one candidate is plausible.
 - Give normal addresses up to 52 average characters, emails up to 42, and agent
-  names up to 28 enough room at the intended type size. These are certification
-  targets; each listing is measured again with its actual content.
+  names up to 28 enough room above the 8-point readability limit. These are
+  certification targets; each listing is measured again and resized from the
+  intended type size only when its actual content needs it.
 
 The first template-folder scan adopts existing files silently. Every later new
 file is measured once and gets its own Gable-owned Slack thread. After changing
 the source, reply in that thread that it is updated; Gable reloads the same Drive
-file and checks it again. A listing-specific warning also accepts an explicit
-instruction to run the current design anyway, but structural and unreadable
-problems are never overridable.
+file and checks it again. Listing-specific text and crop adjustments never need
+approval; structural and unreadable problems remain non-overridable.
 
 Two-agent roles can be read from the form notes, but role-specific text and
 portrait objects are not certified yet. Those requests pause before copying a

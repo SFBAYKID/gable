@@ -247,27 +247,42 @@ def test_no_source_file_outside_the_style_module_contains_an_emoji() -> None:
 
 
 def test_a_mention_is_stripped_to_what_the_person_typed() -> None:
-    from gable.slackapp.app import clean_mention_text
+    from gable.slackapp.context import clean_mention_text
 
     assert clean_mention_text("<@U0BP624RK5H> hello") == "hello"
 
 
 def test_a_mention_with_a_display_name_is_stripped_too() -> None:
     """Slack writes `<@U123|Gable>` when a message is read back."""
-    from gable.slackapp.app import clean_mention_text
+    from gable.slackapp.context import clean_mention_text
 
     assert clean_mention_text("<@U0BP624RK5H|Gable> hello") == "hello"
 
 
 def test_a_client_footer_is_not_part_of_the_question() -> None:
     """Some clients append a footer. Feeding it to the model is noise."""
-    from gable.slackapp.app import clean_mention_text
+    from gable.slackapp.context import clean_mention_text
 
     assert clean_mention_text("<@U123ABC> hello\n*Sent using* Claude") == "hello"
 
 
+def test_a_client_footer_stays_removable_after_its_app_mention_is_stripped() -> None:
+    """Slack connectors name themselves with mention markup in the footer."""
+    from gable.slackapp.context import clean_mention_text
+
+    assert clean_mention_text("Run anyway.\n*Sent using* <@U0BHHJU2ULT|ChatGPT>") == ("Run anyway.")
+
+
+def test_ordinary_words_about_how_a_message_was_sent_are_preserved() -> None:
+    from gable.slackapp.context import clean_mention_text
+
+    assert clean_mention_text("What tool was this sent using?") == (
+        "What tool was this sent using?"
+    )
+
+
 def test_an_empty_mention_yields_an_empty_string() -> None:
-    from gable.slackapp.app import clean_mention_text
+    from gable.slackapp.context import clean_mention_text
 
     assert clean_mention_text("<@U123ABC>") == ""
     assert clean_mention_text("") == ""
@@ -357,7 +372,7 @@ def test_the_photo_path_says_the_outcome_and_nothing_before_it() -> None:
     """
     from typing import Any
 
-    from gable.slackapp.app import process_file_share
+    from gable.slackapp.photos import process_file_share
 
     posted: list[dict[str, object]] = []
 
@@ -386,7 +401,7 @@ def test_a_failed_photo_fit_says_so_instead_of_going_quiet() -> None:
     """A dead job must not leave the thread looking like it is still working."""
     from typing import Any
 
-    from gable.slackapp.app import process_file_share
+    from gable.slackapp.photos import process_file_share
 
     posted: list[dict[str, object]] = []
 

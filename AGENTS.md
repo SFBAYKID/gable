@@ -106,6 +106,10 @@ resumes the same run automatically.
   falls back to a local resize of the original. The normal render inspection is
   still the delivery gate.
 - Gable never asks for a larger version merely because the upload is small.
+- A shape mismatch, even one requiring a large center crop, is fitted
+  automatically. Gable reports a material crop in the single final outcome; it
+  never asks whether to run anyway. The rendered vision inspection still stops
+  delivery when the automatic crop removes an important part of the property.
 
 On a successful enhanced path, the edited progress message is precise:
 
@@ -144,13 +148,16 @@ behavior.
 ```
 321 Elm St — submitted by newagent@brokerage.com
 
-     The selected design has a phone spot, but this agent is not complete in
-     the contact workbook. Add the direct number there, then tell me to run
-     again.
+     I could not validate this agent's direct phone from the contact workbook
+     or one exact profile on the official Corner House Realty website. Add the
+     direct number to the workbook, then tell me to run again.
 ```
 
 The request type selects the template. An agent never receives a guessed
-template, phone number, email address, or web-corrected contact record.
+template, phone number, email address, or web-corrected contact record. The one
+allowed fallback fills a workbook blank or a source-required credential for the
+current run only after an exact official Corner House Realty profile confirms
+the submitted name and email. A credential such as REALTOR is never inferred.
 
 ### 2.5 Batch delivered
 
@@ -193,6 +200,11 @@ photo resize, and element movement execute against the Slides output belonging
 to that Slack thread. Gable says "Done" only after Slides confirms every request
 in the batch; a missing or multiply matched target is a question, not a guess.
 
+Text fit is not a user decision. When a supplied value overflows its measured
+box, Gable selects the largest size that fits, applies it itself, and proves the
+render before delivery. It asks for a source-layout change only when fitting
+would cross the readability floor or the structure cannot be measured safely.
+
 **When Gable does not know, it asks.** This applies to which field, which
 listing, which photo, and what a value should be — never resolved by picking the
 convenient interpretation.
@@ -221,16 +233,18 @@ Name the listing, name the field, say why it matters — as a sentence.
 ```
 123 Main St — Lolo Simmons
 
-     I do not have a phone number for this listing and the template has a
-     spot for one. What should it say?
+     I could not validate a direct phone for this agent from the contact
+     workbook or one exact official profile.
 
      Add it to the agent contact workbook, then tell me to run again.
 ```
 
 Status is `needs_info`. The listing is **paused, not failed** — it waits
-indefinitely. Carmen or Chase fixes the form row, contact workbook, or Head
-Shots folder, then replies in the listing thread that it is updated. Gable
-refreshes those sources before re-entering the same run.
+indefinitely. Before pausing for a missing contact field, Gable checks one exact
+profile on the official Corner House Realty site. An absent, ambiguous, or
+conflicting profile still pauses; Carmen or Chase fixes the form row, contact
+workbook, or Head Shots folder, then replies in the listing thread that it is
+updated. Gable refreshes those sources before re-entering the same run.
 
 ### 2.8 Working — the thinking indicator
 
@@ -330,8 +344,11 @@ Gable must never:
 6. **Emit a synthetic image without the `ai_disclosure: app_generated` tag, the
    Slack warning, and the `ai_generated` flag on the SQLite run.** All three,
    always.
-7. **"Correct" a name, email, or phone number from web data.** Flag the
-   discrepancy; use what the agent submitted.
+7. **"Correct" a submitted or workbook name, email, or phone number from web
+   data.** The official Corner House Realty site may fill only a missing
+   workbook value or source-required credential for the current run after one
+   exact-name profile confirms the submitted email. Never infer a credential;
+   flag every discrepancy and change neither source.
 8. **Report a flyer ready with any required field empty.**
 9. **Retry a failing listing more than 3 times.** After that, fail it loudly and
    move on. Retry storms can take the 1 GB process down and spend in a loop.
@@ -383,8 +400,8 @@ indefinitely and are re-checked from their owned Slack thread:
 | State | What is missing | How it clears |
 |---|---|---|
 | `needs_photo` | No supplied hero image, or the upload could not be used | Carmen or Chase uploads one in the owned thread |
-| `needs_template` | No exact request-type design, unsafe structure, unresolved new-template audit, or measured capacity warning | The source is fixed or added, then Carmen or Chase asks in its thread to check again |
-| `needs_info` | A required form, contact-workbook, or headshot value is missing | The source record or Head Shots folder is fixed, then the run is rechecked |
+| `needs_template` | No exact request-type design, unsafe structure, unresolved new-template audit, or text that cannot fit legibly | The source is fixed or added, then Carmen or Chase asks in its thread to check again |
+| `needs_info` | A required form or headshot value is missing, or official contact fallback was unavailable, ambiguous, or conflicting | The source record or Head Shots folder is fixed, then the run is rechecked |
 | `needs_review` | Build/readback/photo placement/render inspection could not prove the output is right | Carmen or Chase resolves the named problem and requests a recheck or retry |
 
 `rendered → checked` is the vision pass of ARCHITECTURE.md §4.7b. A post that

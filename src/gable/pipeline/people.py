@@ -16,12 +16,15 @@ from gable.listings.names import tidy_name
 from gable.sheets import repository as repo
 
 
-def announce(connection: Connection, intake: Intake) -> str:
+def announce(connection: Connection, intake: Intake, validated_name: str = "") -> str:
     """How a new submission introduces itself in Slack.
 
     Args:
         connection: An open database connection, for the roster lookup.
         intake: The submission being started.
+        validated_name: Name already proven by the prerequisite contact check.
+            This matters when an official profile safely supplied a workbook
+            blank for the current run without writing into the human-owned file.
 
     Returns:
         A sentence fragment naming the request type, the agent and the
@@ -38,7 +41,7 @@ def announce(connection: Connection, intake: Intake) -> str:
     roster_name = " ".join(
         part for part in (person.get("first_name", ""), person.get("last_name", "")) if part
     )
-    who = tidy_name(roster_name or intake.agent_name)
+    who = tidy_name(validated_name or roster_name or intake.agent_name)
     kind = intake.request_type.strip()
     headline = f"New {kind} request" if kind else "New request"
     if who:

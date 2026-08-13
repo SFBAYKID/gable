@@ -20,6 +20,7 @@ estimate to stop the clipping, and it costs nothing.
 
 from __future__ import annotations
 
+import math
 from collections.abc import Collection
 from dataclasses import dataclass
 from typing import Final
@@ -134,6 +135,10 @@ class Fit:
 
     #: Font weight, carried through so preflight can measure needed width.
     weight: int = 400
+    #: Exact proportional size needed before the readable floor is applied.
+    #: Keeping it separate prevents an impossible 7-point fit from looking
+    #: successful merely because the applied size is clamped to 8 points.
+    required_pt: float | None = None
 
     @property
     def too_small_to_read(self) -> bool:
@@ -143,7 +148,8 @@ class Fit:
         answer is that the value does not belong in that box, which is a
         question for Carmen.
         """
-        return self.fitted_pt <= MIN_READABLE_PT
+        required = self.fitted_pt if self.required_pt is None else self.required_pt
+        return required <= MIN_READABLE_PT or self.fitted_pt <= MIN_READABLE_PT
 
 
 def fit_for(
@@ -179,7 +185,15 @@ def fit_for(
     box_width_pt = (box_width_emu / EMU_PER_POINT) * max(1, lines) * SAFETY
     needed = estimate_width_pt(text, current_pt, weight)
     if needed <= box_width_pt:
-        return Fit(object_id, text, current_pt, box_width_pt, current_pt, weight)
+        return Fit(
+            object_id,
+            text,
+            current_pt,
+            box_width_pt,
+            current_pt,
+            weight,
+            current_pt,
+        )
 
     # Width scales linearly with font size, so the ratio gives the answer
     # directly rather than by searching.
@@ -194,8 +208,13 @@ def fit_for(
     # box means destroying the type. Keeping the type readable and reporting the
     # box as too narrow is the honest trade; preflight reports the extra room
     # from the same width estimator.
-    fitted = max(MIN_READABLE_PT, min(MAX_FONT_PT, round(scaled, 1)))
-    return Fit(object_id, text, current_pt, box_width_pt, fitted, weight)
+    required = min(MAX_FONT_PT, scaled)
+    # Round down: an upward rounding can make the supposedly fitted text wider
+    # than the box again. Hundredth-point precision preserves a safe 8.04-point
+    # fit instead of needlessly turning it into a human correction at 8 points.
+    # If this actually reaches the boundary, the fit remains blocked.
+    fitted = max(MIN_READABLE_PT, math.floor(required * 100) / 100)
+    return Fit(object_id, text, current_pt, box_width_pt, fitted, weight, required)
 
 
 def requests_for(fits: list[Fit]) -> list[Request]:
@@ -213,13 +232,17 @@ def requests_for(fits: list[Fit]) -> list[Request]:
     """
     out: list[Request] = []
     for fit in fits:
-        if not fit.overflows:
+        if not fit.overflows or fit.too_small_to_read:
             continue
         out.extend(set_font_size(fit.object_id, fit.fitted_pt))
     return out
 
 
-def plan_fits(elements: list[TextBox], dynamic: Collection[str] | None = None) -> list[Fit]:
+def plan_fits(
+    elements: list[TextBox],
+    dynamic: Collection[str] | None = None,
+    single_line: Collection[str] | None = None,
+) -> list[Fit]:
     """Work out what the text boxes carrying *this run's data* need.
 
     Args:
@@ -229,6 +252,9 @@ def plan_fits(elements: list[TextBox], dynamic: Collection[str] | None = None) -
             copy and is left exactly as Carmen drew it. When None, every box is
             considered — the old behaviour, kept only for callers that have no
             way to say what they filled.
+        single_line: Dynamic values that must remain on one line even when the
+            source box is tall enough for two. Names, email addresses and phone
+            numbers become misleading or broken when allowed to wrap.
 
     Returns:
         A `Fit` per considered element, in the order given. Elements missing a
@@ -246,6 +272,7 @@ def plan_fits(elements: list[TextBox], dynamic: Collection[str] | None = None) -
         the specification; only the values change.
     """
     wanted = {value.strip() for value in dynamic if value.strip()} if dynamic is not None else None
+    one_line = {value.strip() for value in single_line if value.strip()} if single_line else set()
     fits: list[Fit] = []
     for box in elements:
         if not box.text or box.font_size_pt <= 0 or box.width_emu <= 0:
@@ -258,7 +285,7 @@ def plan_fits(elements: list[TextBox], dynamic: Collection[str] | None = None) -
                 box.text,
                 box.font_size_pt,
                 box.width_emu,
-                box.lines,
+                1 if box.text.strip() in one_line else box.lines,
                 box.weight,
             )
         )

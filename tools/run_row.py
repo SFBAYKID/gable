@@ -31,6 +31,7 @@ from gable.logging_setup import configure_logging
 from gable.pipeline.live import build_runner
 from gable.sheets import repository as repo
 from gable.sheets.client import SheetClient
+from gable.slackapp.runtime import guarded_upscale_photo
 
 logger = logging.getLogger("gable.run_row")
 
@@ -68,7 +69,7 @@ def read_one(client: SheetClient, tab: str, row_number: int) -> repo.Submission:
     if not any(cell.strip() for cell in row):
         msg = f"row {row_number} of {tab} is empty"
         raise ValueError(msg)
-    return repo.submission_from_row(row, columns, row_number)
+    return repo.submission_from_row(row, columns, row_number, source_tab=tab)
 
 
 def _google_clients(settings: Settings) -> tuple[Any, Any, Any]:
@@ -189,6 +190,7 @@ def main(argv: list[str] | None = None) -> int:
             submission.submitted_at,
             submission.intake,
             submission.content_hash,
+            submission.source_tab,
         )
 
         from slack_sdk import WebClient
@@ -202,7 +204,24 @@ def main(argv: list[str] | None = None) -> int:
                 text=text,
                 thread_ts=thread_ts,
             )
-            return str(response.get("ts") or thread_ts or "")
+            # The requested root says where the message was aimed, not whether
+            # Slack accepted a new reply. Delivery advances only from Slack's
+            # own returned timestamp, matching the long-running runtime path.
+            return str(response.get("ts") or "")
+
+        def upscale_photo(run_id: str, image: bytes, width: int, height: int) -> bytes:
+            """Use the same paid-image guards as a photo resumed from Slack."""
+            return guarded_upscale_photo(
+                connection,
+                run_id,
+                image,
+                width,
+                height,
+                enabled=settings.reprocessing_enabled,
+                max_calls=settings.max_image_calls_per_listing,
+                api_key=settings.openai_image_api_key,
+                model=settings.image_model_hq,
+            )
 
         if args.resume:
             existing = store.latest_run(connection, submission.response_row_id)
@@ -227,15 +246,31 @@ def main(argv: list[str] | None = None) -> int:
                 say,
                 hero_photo_url=existing.photo_url,
                 origin_thread_ts=existing.slack_thread_ts,
+                upscale_photo=upscale_photo,
             )
             result = runner.resume(submission, existing.run_id)
         else:
-            runner = build_runner(settings, connection, drive, slides, say)
+            existing = store.latest_run(connection, submission.response_row_id)
+            if existing is not None and (existing.status in store.ACTIVE or existing.is_paused):
+                logger.error(
+                    "row %d already has a %s run; continue that run instead of opening another",
+                    args.row,
+                    existing.status,
+                )
+                return 2
+            runner = build_runner(
+                settings,
+                connection,
+                drive,
+                slides,
+                say,
+                upscale_photo=upscale_photo,
+            )
             result = runner.run(submission)
         logger.info("run %s finished as %s", result.run_id, result.status)
         for spoken in result.said:
             print(spoken)
-        return 0
+        return 2 if result.status == "failed" else 0
     except Exception:
         logger.exception("the run failed")
         return 2

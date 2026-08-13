@@ -9,6 +9,7 @@ import pytest
 
 from gable.slackapp import brain
 from gable.slackapp.brain import think
+from gable.voice import MAX_REPLY_CHARS
 
 
 @pytest.mark.parametrize(
@@ -42,6 +43,138 @@ def test_only_an_explicit_override_uses_the_current_warned_design(message: str) 
 
     assert decision.tool == "rebuild_flyer"
     assert decision.arguments == {"mode": "run_anyway"}
+
+
+NEEDS_PHOTO_CONTEXT = """\
+Run status: needs_photo.
+Request type: Sold.
+Property address: 703 Perception Way, Aberdeen, MD 21001.
+Submitting agent: Mike Kulnich.
+Selected template: Sold.
+No flyer has been built in this thread yet.
+This run has no hero photo yet.
+The run is waiting because: Can you send me the image?
+"""
+
+
+NEEDS_TEMPLATE_CONTEXT = """\
+Run status: needs_template.
+Request type: Sold.
+Selected template: Sold.
+No flyer has been built in this thread yet.
+This run has no hero photo yet.
+The run is waiting because: The agent name needs about 5 percent more room.
+"""
+
+
+def test_a_named_source_correction_rechecks_instead_of_becoming_a_flyer_edit() -> None:
+    decision = think(
+        "I adjusted the size of the address can you do again?",
+        context=NEEDS_PHOTO_CONTEXT,
+        api_key="",
+    )
+
+    assert decision.tool == "rebuild_flyer"
+    assert decision.arguments == {"mode": "check_updated"}
+    assert "reload and recheck" in decision.reply
+
+
+def test_the_same_words_do_not_overwrite_a_finished_flyer_without_source_context() -> None:
+    decision = think(
+        "I adjusted the size of the address can you do again?",
+        context=(
+            "Run status: delivered.\nSelected template: Sold.\nA flyer exists in this thread."
+        ),
+        api_key="",
+    )
+
+    assert decision.tool == ""
+
+
+@pytest.mark.parametrize("message", ["Done", "fixed it", "updated it"])
+def test_a_completed_paused_template_correction_rechecks_without_an_interview(
+    message: str,
+) -> None:
+    decision = think(message, context=NEEDS_TEMPLATE_CONTEXT, api_key="")
+
+    assert decision.tool == "rebuild_flyer"
+    assert decision.arguments == {"mode": "check_updated"}
+
+
+@pytest.mark.parametrize("message", ["agents name", "agent's name"])
+def test_the_named_field_completes_gables_prior_source_correction_question(
+    message: str,
+) -> None:
+    decision = think(
+        message,
+        history=[
+            ("Chase", "Done"),
+            ("Gable", "What did you finish — the template, listing data, or images?"),
+        ],
+        context=NEEDS_TEMPLATE_CONTEXT,
+        api_key="",
+    )
+
+    assert decision.tool == "rebuild_flyer"
+    assert decision.arguments == {"mode": "check_updated"}
+
+
+@pytest.mark.parametrize("message", ["ye", "yes", "okay"])
+def test_a_terse_acknowledgement_in_a_photo_wait_repeats_the_only_missing_step(
+    message: str,
+) -> None:
+    decision = think(message, context=NEEDS_PHOTO_CONTEXT, api_key="")
+
+    assert decision.tool == ""
+    assert decision.reply == "Send me the property image in this thread."
+
+
+@pytest.mark.parametrize("message", ["Edit the existing one", "Edit the exiting one"])
+def test_edit_existing_does_not_invent_a_flyer_while_the_run_waits_for_its_first_photo(
+    message: str,
+) -> None:
+    decision = think(message, context=NEEDS_PHOTO_CONTEXT, api_key="")
+
+    assert decision.tool == ""
+    assert decision.reply == (
+        "There is no flyer to edit yet. Send me the property image in this thread and I will "
+        "build it."
+    )
+
+
+def test_the_big_one_resolves_only_from_the_immediately_preceding_photo_clarification() -> None:
+    decision = think(
+        "the big one",
+        history=[
+            ("Chase", "update the image"),
+            ("Gable", "Did you mean the large photo or Mike's headshot?"),
+        ],
+        api_key="",
+    )
+
+    assert decision.tool == "replace_photo"
+    assert decision.arguments == {"which": "hero"}
+    assert decision.reply == "Send me the new property photo."
+
+
+def test_the_headshot_resolves_only_from_the_immediately_preceding_photo_clarification() -> None:
+    decision = think(
+        "the headshot",
+        history=[
+            ("Chase", "replace the photo"),
+            ("Gable", "Did you mean the large property photo or the headshot?"),
+        ],
+        api_key="",
+    )
+
+    assert decision.tool == "replace_photo"
+    assert decision.arguments == {"which": "headshot"}
+
+
+def test_a_free_standing_big_one_is_never_guessed_as_a_photo_action() -> None:
+    decision = think("the big one", api_key="")
+
+    assert decision.tool == ""
 
 
 @pytest.mark.parametrize("message", ["try again", "check again", "I updated it", "use it as-is"])
@@ -152,3 +285,29 @@ def test_incomplete_conversation_response_fails_plainly(
 
     assert "language model was unavailable" in decision.reply
     assert decision.tool == ""
+
+
+def test_model_reply_uses_the_same_slack_length_and_format_gate(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Prompt compliance is not the mechanism that contains a wall of text."""
+    wordy = "## What I need\n" + "\n".join("- Send the property image." for _ in range(80))
+    monkeypatch.setattr(
+        brain,
+        "_post",
+        lambda _payload, _key: {
+            "status": "completed",
+            "output": [
+                {
+                    "type": "message",
+                    "content": [{"type": "output_text", "text": wordy}],
+                }
+            ],
+        },
+    )
+
+    decision = think("What do you need?", api_key="test-key")
+
+    assert len(decision.reply) <= MAX_REPLY_CHARS
+    assert "##" not in decision.reply
+    assert "- " not in decision.reply

@@ -28,7 +28,7 @@ help:
 	@echo "test       pytest (unit only; integration tests skip without creds)"
 	@echo "check      lint + typecheck + test  <- the definition-of-done gate"
 	@echo "run        run the pipeline locally without Slack (cli.py)"
-	@echo "deploy     git pull + systemctl restart on the droplet"
+	@echo "deploy     pull, install code + unit, reload systemd, restart"
 	@echo "logs       tail Gable's journald output on the droplet"
 
 setup:
@@ -64,7 +64,11 @@ clean:
 deploy:
 	ssh -i $(GABLE_SSH_KEY) $(GABLE_HOST) "cd $(GABLE_DIR) && git pull --ff-only && \
 		$(GABLE_DIR)/.venv/bin/pip install -e . && \
+		install -d -o gable -g gable -m 0700 $(GABLE_DIR)/var && \
+		find $(GABLE_DIR)/var -maxdepth 1 -type f -name 'gable.db*' -exec chmod 0600 {} \; && \
 		install -d -o gable -g gable -m 0755 /var/www/gable-photos && \
+		install -m 0644 deploy/gable.service /etc/systemd/system/gable.service && \
+		systemctl daemon-reload && \
 		systemctl restart gable"
 
 logs:

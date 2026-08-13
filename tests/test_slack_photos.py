@@ -4,7 +4,10 @@ from __future__ import annotations
 
 import io
 import sqlite3
+import threading
+import time
 import urllib.request
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any
 
@@ -19,6 +22,8 @@ from gable.photos.enhance import EnhancementError
 from gable.photos.store import PublishError
 from gable.pipeline.runner import RunResult
 from gable.sheets import repository as repo
+from gable.slackapp.brain import Decision
+from gable.slackapp.editing import SlideEditor
 from gable.slackapp.photos import (
     PhotoHandoff,
     PhotoHandoffError,
@@ -218,6 +223,92 @@ def test_one_thread_image_resumes_the_same_run_without_a_new_attempt(tmp_path: P
     connection.close()
 
 
+def test_a_replacement_upload_resumes_the_delivered_run_without_overwriting_first(
+    tmp_path: Path,
+) -> None:
+    """A confirmed replacement waits; the next upload claims that same run once."""
+    path = tmp_path / "gable.db"
+    run_id = _paused_database(path)
+    connection = connect(path)
+    store.set_status(
+        connection,
+        run_id,
+        "delivered",
+        "first flyer delivered",
+        output_file_id="existing-deck",
+        output_url="https://docs.example/existing-deck",
+        photo_url="http://images.example/first-house.jpg",
+    )
+    asked = SlideEditor(connection, object()).execute(
+        Decision(
+            reply="Send me the new property photo.",
+            tool="replace_photo",
+            arguments={"which": "hero"},
+        ),
+        THREAD,
+    )
+    waiting = store.run_by_id(connection, run_id)
+    assert waiting is not None
+    assert asked == "Send me the new property photo."
+    assert waiting.status == "needs_photo"
+    assert waiting.output_file_id == "existing-deck"
+    assert waiting.photo_url == "http://images.example/first-house.jpg"
+    connection.close()
+
+    seen: list[str] = []
+    said = _handoff(path, seen).handle(_event(), FakeSlackClient())
+
+    assert said == ""
+    assert seen == ["response-1", run_id]
+    connection = connect(path)
+    current = store.run_by_id(connection, run_id)
+    assert current is not None
+    assert current.status == "delivered"
+    assert current.photo_url == PUBLIC_URL
+    assert store.run_attempt_count(connection, "response-1") == 1
+    connection.close()
+
+
+def test_two_simultaneous_thread_uploads_do_not_both_prepare_the_photo(tmp_path: Path) -> None:
+    """Bolt workers serialize the expensive handoff before reading paused state."""
+    path = tmp_path / "gable.db"
+    _paused_database(path)
+    handoff = _handoff(path, [])
+    first_download_started = threading.Event()
+    release_first = threading.Event()
+    downloaded_twice = threading.Event()
+    download_calls = 0
+    calls_lock = threading.Lock()
+
+    def controlled_download(_url: str, _token: str, _limit: int) -> bytes:
+        nonlocal download_calls
+        with calls_lock:
+            download_calls += 1
+            call_number = download_calls
+        if call_number == 1:
+            first_download_started.set()
+            assert release_first.wait(timeout=5)
+        else:
+            downloaded_twice.set()
+        return _jpeg()
+
+    object.__setattr__(handoff, "download", controlled_download)
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        first = pool.submit(handoff.handle, _event(files=[{"id": "F1"}]), FakeSlackClient())
+        assert first_download_started.wait(timeout=5)
+        second = pool.submit(handoff.handle, _event(files=[{"id": "F2"}]), FakeSlackClient())
+        # Without per-thread serialization the second worker reaches download
+        # while the first still holds the run in needs_photo.
+        assert not downloaded_twice.wait(timeout=0.1)
+        release_first.set()
+        outcomes = [first.result(timeout=5), second.result(timeout=5)]
+
+    assert download_calls == 1
+    assert "" in outcomes
+    assert any("not waiting for a photo" in outcome for outcome in outcomes)
+
+
 def test_photo_handoff_reports_truthful_stages_during_a_long_wait(tmp_path: Path) -> None:
     """The native indicator can move from reading through fitting to building."""
     path = tmp_path / "gable.db"
@@ -359,6 +450,115 @@ def test_a_listing_can_never_buy_a_second_upscale(tmp_path: Path) -> None:
     assert calls == ["test-key:gpt-image-2:1080x1350"]
     assert spend.operation_count(connection, run_id, spend.IMAGE_UPSCALE_DETAIL) == 1
     connection.close()
+
+
+def test_a_fresh_attempt_does_not_reset_the_listing_upscale_allowance(tmp_path: Path) -> None:
+    """The hard image limit belongs to the submission, not each retry row."""
+    path = tmp_path / "gable.db"
+    first_run_id = _paused_database(path)
+    connection = connect(path)
+    provider_calls = 0
+
+    def provider(
+        image: bytes,
+        _api_key: str,
+        _model: str,
+        _width: int,
+        _height: int,
+    ) -> bytes:
+        nonlocal provider_calls
+        provider_calls += 1
+        return image
+
+    guarded_upscale_photo(
+        connection,
+        first_run_id,
+        _jpeg(200, 200),
+        1080,
+        1350,
+        enabled=True,
+        max_calls=1,
+        api_key="test-key",
+        model="gpt-image-2",
+        provider=provider,
+    )
+    store.set_status(connection, first_run_id, "failed", "test retry boundary")
+    second = store.start_run(connection, "response-1")
+
+    with pytest.raises(EnhancementError, match="already used"):
+        guarded_upscale_photo(
+            connection,
+            second.run_id,
+            _jpeg(200, 200),
+            1080,
+            1350,
+            enabled=True,
+            max_calls=1,
+            api_key="test-key",
+            model="gpt-image-2",
+            provider=provider,
+        )
+
+    assert provider_calls == 1
+    assert spend.operation_count(connection, first_run_id, spend.IMAGE_UPSCALE_DETAIL) == 1
+    assert spend.operation_count(connection, second.run_id, spend.IMAGE_UPSCALE_DETAIL) == 0
+    connection.close()
+
+
+def test_concurrent_workers_cannot_buy_two_upscales_for_one_listing(tmp_path: Path) -> None:
+    """The per-listing check and spend reservation are one database decision."""
+    path = tmp_path / "gable.db"
+    run_id = _paused_database(path)
+    start = threading.Barrier(2)
+    provider_calls: list[int] = []
+    call_lock = threading.Lock()
+
+    def compete(index: int) -> str:
+        connection = connect(path)
+        try:
+            start.wait(timeout=5)
+
+            def provider(
+                image: bytes,
+                _api_key: str,
+                _model: str,
+                _width: int,
+                _height: int,
+            ) -> bytes:
+                with call_lock:
+                    provider_calls.append(index)
+                # Hold the provider open long enough to expose the former
+                # count-then-call race deterministically.
+                time.sleep(0.05)
+                return image
+
+            try:
+                guarded_upscale_photo(
+                    connection,
+                    run_id,
+                    _jpeg(200, 200),
+                    1080,
+                    1350,
+                    enabled=True,
+                    max_calls=1,
+                    api_key="test-key",
+                    model="gpt-image-2",
+                    provider=provider,
+                )
+            except EnhancementError:
+                return "refused"
+            return "called"
+        finally:
+            connection.close()
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        outcomes = list(pool.map(compete, (1, 2)))
+
+    checked = connect(path)
+    assert sorted(outcomes) == ["called", "refused"]
+    assert len(provider_calls) == 1
+    assert spend.operation_count(checked, run_id, spend.IMAGE_UPSCALE_DETAIL) == 1
+    checked.close()
 
 
 def test_a_disabled_photo_policy_spends_nothing(tmp_path: Path) -> None:

@@ -13,9 +13,11 @@ from typing import Any
 
 import pytest
 
+from gable.agents.website import OfficialProfile, ProfileLookup
 from gable.db.schema import apply_migrations, connect
 from gable.listings.enrich import Facts
 from gable.pipeline.vision import Inspection
+from gable.slides.preflight import Report
 from tests.runner_support import Recorder
 from tests.runner_support import record as _record
 from tests.runner_support import runner as _runner
@@ -78,6 +80,109 @@ def test_the_agent_phone_comes_from_the_roster(db: sqlite3.Connection) -> None:
     rec = Recorder()
     _runner(db, rec).run(submission)
     assert rec.filled["Phone"] == "(443) 854-8554"
+
+
+def test_contact_prerequisites_are_validated_before_the_first_slack_announcement(
+    db: sqlite3.Connection,
+) -> None:
+    """No photo question may precede an unresolved identity or direct phone."""
+    submission = _submission(rid="rid-contact-prerequisite", email="mike@example.test")
+    _record(db, submission)
+    rec = Recorder()
+    runner = _runner(db, rec)
+    runner.hero_photo_url = ""
+    runner.official_contact_lookup = lambda _name, _email: ProfileLookup(
+        problem="the official site did not prove this contact"
+    )
+
+    result = runner.run(submission)
+
+    assert result.status == "needs_info"
+    assert len(rec.said) == 1
+    assert "Can you send me the image" not in rec.said[0]
+    assert rec.copied is False
+
+
+def test_official_contact_fallback_reaches_values_and_then_asks_for_the_photo(
+    db: sqlite3.Connection,
+) -> None:
+    submission = _submission(
+        rid="rid-contact-official",
+        email="mike@cornerhouserealty.com",
+        name="Mike Kulnich",
+    )
+    _record(db, submission)
+    rec = Recorder()
+    runner = _runner(db, rec)
+    runner.hero_photo_url = ""
+    runner.official_contact_lookup = lambda _name, _email: ProfileLookup(
+        profile=OfficialProfile(
+            name="Mike Kulnich",
+            email="mike@cornerhouserealty.com",
+            phone="410.456.3564",
+            title="REALTOR®",
+            source_url="https://cornerhouserealty.com/mike-kulnich/",
+        )
+    )
+
+    result = runner.run(submission)
+
+    assert result.status == "needs_photo"
+    assert "New New Listing request from Mike Kulnich" in rec.said[0]
+    assert rec.said[1] == "Can you send me the image?"
+    events = db.execute(
+        "SELECT detail FROM run_events WHERE run_id = ? ORDER BY id", (result.run_id,)
+    ).fetchall()
+    assert any("phone from official_website" in row["detail"] for row in events)
+
+
+def test_sold_title_is_validated_from_official_profile_before_the_photo_question(
+    db: sqlite3.Connection,
+) -> None:
+    submission = _submission(
+        rid="rid-contact-title",
+        email="mike@cornerhouserealty.com",
+        name="Mike Kulnich",
+        request_type="Sold",
+    )
+    _record(db, submission)
+    db.execute(
+        "INSERT INTO salespeople (email, first_name, last_name, phone, template, synced_at) "
+        "VALUES (?, ?, ?, ?, '', 'now')",
+        ("mike@cornerhouserealty.com", "Mike", "Kulnich", "410.456.3564"),
+    )
+    rec = Recorder(slide_text=["[PROPERTY ADDRESS]", "AGENT NAME", "Phone", "Realtor"])
+    runner = _runner(db, rec)
+    runner.hero_photo_url = ""
+    calls: list[tuple[str, str]] = []
+
+    def lookup(name: str, email: str) -> ProfileLookup:
+        calls.append((name, email))
+        return ProfileLookup(
+            profile=OfficialProfile(
+                name=name,
+                email=email,
+                phone="410.456.3564",
+                title="REALTOR®",
+                source_url="https://cornerhouserealty.com/mike-kulnich/",
+            )
+        )
+
+    runner.official_contact_lookup = lookup
+    captured: dict[str, str] = {}
+    runner.preflight_template = lambda _id, _label, _kind, _resolution, values: (
+        captured.update(values) or Report()
+    )
+
+    result = runner.run(submission)
+
+    assert result.status == "needs_photo"
+    assert captured["agent_title"] == "REALTOR®"
+    assert calls == [("Mike Kulnich", "mike@cornerhouserealty.com")]
+    events = db.execute(
+        "SELECT detail FROM run_events WHERE run_id = ? ORDER BY id", (result.run_id,)
+    ).fetchall()
+    assert any("title from official_website" in row["detail"] for row in events)
 
 
 def test_researched_facts_are_cached_for_next_time(db: sqlite3.Connection) -> None:
@@ -307,7 +412,12 @@ def test_a_template_without_a_field_does_not_fail_the_check(db: sqlite3.Connecti
     """
     submission = _submission(rid="rid-noemail")
     _record(db, submission)
-    rec = Recorder(slide_text=["[PROPERTY ADDRESS]", "AGENT NAME"])
+    rec = Recorder(
+        slide_text=["[PROPERTY ADDRESS]", "AGENT NAME"],
+        # Keep the fake file name aligned with the source text. The default
+        # label names a manifest that requires price/bed/bath/sqft.
+        template_label="Minimal Address Design",
+    )
     result = _runner(db, rec).run(submission)
     assert result.status == "delivered"
 
@@ -362,10 +472,10 @@ def test_a_found_headshot_slot_that_fails_to_change_blocks_delivery(
     assert any("sample headshot" in message for message in result.said)
 
 
-def test_a_preflight_warning_pauses_before_copy_and_run_anyway_resumes(
+def test_a_correctable_preflight_warning_builds_and_reports_one_outcome(
     db: sqlite3.Connection,
 ) -> None:
-    """A measured warning is a real choice, and an explicit answer is honored."""
+    """A measured, correctable layout tradeoff is Gable's work, not a question."""
     from gable.slides.preflight import Issue, Report
 
     submission = _submission(rid="rid-preflight-warning")
@@ -376,21 +486,20 @@ def test_a_preflight_warning_pauses_before_copy_and_run_anyway_resumes(
         issues=(
             Issue(
                 "tight_agent_email",
-                "The agent email needs more room. Run anyway or update the template?",
+                "The agent email was fitted to its box.",
                 advisory="I sized the agent email down to fit.",
             ),
         )
     )
 
-    paused = runner.run(submission)
-    assert paused.status == "needs_template"
-    assert rec.copied is False
+    result = runner.run(submission)
 
-    runner.allow_template_warnings = True
-    resumed = runner.resume(submission, paused.run_id)
-    assert resumed.status == "delivered"
-    assert resumed.output_url
-    assert any("sized the agent email down" in message for message in resumed.said)
+    assert result.status == "delivered"
+    assert result.output_url
+    assert rec.copied is True
+    assert len(rec.said) == 1
+    assert "sized the agent email down" in rec.said[0]
+    assert "?" not in rec.said[0]
 
 
 def test_a_structural_preflight_problem_cannot_be_overridden(db: sqlite3.Connection) -> None:
@@ -400,7 +509,7 @@ def test_a_structural_preflight_problem_cannot_be_overridden(db: sqlite3.Connect
     _record(db, submission)
     rec = Recorder()
     runner = _runner(db, rec)
-    runner.allow_template_warnings = True
+    runner.approved_template_warning_codes = frozenset({"no_frame"})
     runner.preflight_template = lambda *_args: Report(
         issues=(Issue("no_frame", "I could not identify the photo frame.", blocking=True),)
     )
@@ -408,6 +517,42 @@ def test_a_structural_preflight_problem_cannot_be_overridden(db: sqlite3.Connect
     result = runner.run(submission)
     assert result.status == "needs_template"
     assert rec.copied is False
+
+
+def test_every_correctable_layout_warning_is_folded_into_one_outcome(
+    db: sqlite3.Connection,
+) -> None:
+    """Text and crop adjustments never create approval loops in Slack."""
+    from gable.slides.preflight import Issue, Report
+
+    submission = _submission(rid="rid-scoped-preflight-warning")
+    _record(db, submission)
+    rec = Recorder()
+    runner = _runner(db, rec)
+    runner.hero_photo_url = "http://example.invalid/hero.jpg"
+    runner.preflight_template = lambda *_args: Report(
+        issues=(
+            Issue(
+                "tight_address",
+                "The address was fitted to its box.",
+                advisory="I sized the address down to fit.",
+            ),
+            Issue(
+                "large_photo_crop",
+                "I center-cropped the supplied photo.",
+                advisory="I center-cropped the supplied photo.",
+            ),
+        )
+    )
+
+    result = runner.run(submission)
+
+    assert result.status == "delivered"
+    assert rec.copied is True
+    assert len(rec.said) == 1
+    assert "sized the address down" in rec.said[0]
+    assert "center-cropped" in rec.said[0]
+    assert "?" not in rec.said[0]
 
 
 def test_an_unresolved_proactive_template_audit_blocks_before_preflight_or_copy(
@@ -455,7 +600,13 @@ def test_an_updated_template_can_be_rechecked_before_a_photo_exists(
     runner = _runner(db, rec)
     runner.hero_photo_url = ""
     runner.preflight_template = lambda *_args: Report(
-        issues=(Issue("tight_email", "The email section needs more room."),)
+        issues=(
+            Issue(
+                "unmeasured_email",
+                "I could not measure the email section safely.",
+                blocking=True,
+            ),
+        )
     )
 
     paused = runner.run(submission)
@@ -602,148 +753,3 @@ def test_a_vision_check_that_could_not_run_blocks_delivery(
     result = runner.run(submission)
     assert result.status == "needs_review"
     assert any("could not complete the visual inspection" in message for message in result.said)
-
-
-# --- the photo is not optional ----------------------------------------------
-
-
-def test_no_flyer_is_delivered_without_a_hero_photo(db: sqlite3.Connection) -> None:
-    """A listing flyer showing the template's own placeholder is not a draft.
-
-    One was delivered like that and announced as ready. It should have stopped
-    and asked, which is what Chase specified in the first place.
-    """
-    submission = _submission(rid="rid-nophoto")
-    _record(db, submission)
-    rec = Recorder()
-    runner = _runner(db, rec)
-    runner.hero_photo_url = ""
-    result = runner.run(submission)
-
-    assert result.status == "needs_photo"
-    assert rec.copied is False, "nothing should be built before there is a photo"
-
-    # Two messages, not one. A single flat message starts no thread, and the
-    # photo handoff only accepts an upload that arrives inside the listing's
-    # thread — so a combined message leaves Carmen nowhere to put the photo.
-    headline, question = rec.said[0], rec.said[1]
-    assert submission.intake.address in headline
-    assert rec.threads[0] is None, "the announcement is the root of the thread"
-    assert rec.threads[1] == "1786.0", "the question is a reply underneath it"
-
-    # Plain words. "Hero" is our name for the photo well, not Carmen's, and the
-    # question has to be answerable without learning our vocabulary.
-    assert "send me the image" in question.lower()
-    assert "hero" not in question.lower()
-
-
-def test_an_unusable_photo_url_stops_before_a_flyer_is_copied(
-    db: sqlite3.Connection,
-) -> None:
-    """The live URL check is injected and a rejection pauses the run safely."""
-    submission = _submission(rid="rid-bad-photo-url")
-    _record(db, submission)
-    rec = Recorder()
-    runner = _runner(db, rec)
-    runner.check_photo = lambda _url, _slot: (False, "that image link did not load")
-
-    result = runner.run(submission)
-
-    assert result.status == "needs_photo"
-    assert rec.copied is False
-    assert any("did not load" in said for said in rec.said)
-
-
-def test_a_photo_resumes_the_existing_run_without_opening_another(
-    db: sqlite3.Connection,
-) -> None:
-    """A Slack upload continues the paused audit trail instead of forking it."""
-    from gable.db import store
-
-    submission = _submission(rid="rid-resume-photo")
-    _record(db, submission)
-    rec = Recorder()
-    waiting = _runner(db, rec)
-    waiting.hero_photo_url = ""
-    paused = waiting.run(submission)
-    assert paused.status == "needs_photo"
-
-    resumed = _runner(db, rec).resume(submission, paused.run_id)
-
-    assert resumed.status == "delivered"
-    assert store.run_attempt_count(db, submission.response_row_id) == 1
-    statuses = [
-        row["status"]
-        for row in db.execute(
-            "SELECT status FROM run_events WHERE run_id = ? ORDER BY id", (paused.run_id,)
-        ).fetchall()
-    ]
-    assert "needs_photo" in statuses
-    assert statuses[-1] == "delivered"
-
-
-def test_a_second_resume_does_not_build_a_duplicate_flyer(db: sqlite3.Connection) -> None:
-    """The first paused-run claim wins even when another event has stale context."""
-    submission = _submission(rid="rid-resume-once")
-    _record(db, submission)
-    waiting = _runner(db, Recorder())
-    waiting.hero_photo_url = ""
-    paused = waiting.run(submission)
-
-    first_rec = Recorder()
-    first = _runner(db, first_rec).resume(submission, paused.run_id)
-    second_rec = Recorder()
-    second = _runner(db, second_rec).resume(submission, paused.run_id)
-
-    assert first.status == "delivered"
-    assert second.status == "delivered"
-    assert first_rec.copied is True
-    assert second_rec.copied is False
-    assert "another copy" in second_rec.said[-1]
-
-
-def test_a_photo_that_will_not_go_on_stops_delivery(db: sqlite3.Connection) -> None:
-    """Given a photo and unable to place it, stopping beats shipping without."""
-    submission = _submission(rid="rid-photofail")
-    _record(db, submission)
-
-    class NoPlace(Recorder):
-        def place_photo(
-            self,
-            _run_id: str,
-            _file_id: str,
-            _url: str,
-            _template_label: str,
-        ) -> bool:
-            """Fail the way a rejected image URL would."""
-            return False
-
-    rec = NoPlace()
-    result = _runner(db, rec).run(submission)
-    assert result.status == "needs_review"
-    assert "could not get the photo onto it" in rec.said[-1]
-
-
-def test_the_photo_is_placed_on_a_delivered_flyer(db: sqlite3.Connection) -> None:
-    submission = _submission(rid="rid-photook")
-    _record(db, submission)
-    rec = Recorder()
-    result = _runner(db, rec).run(submission)
-    assert result.status == "delivered"
-    assert rec.photo_placed is True
-
-
-def test_an_unsafe_text_match_stops_before_photo_placement(db: sqlite3.Connection) -> None:
-    class UnsafeRecorder(Recorder):
-        def fill(self, file_id: str, pairs: dict[str, str]) -> int:  # noqa: ARG002
-            self.filled = pairs
-            return -1
-
-    rec = UnsafeRecorder()
-    submission = _submission(rid="rid-unsafe-text")
-    _record(db, submission)
-    result = _runner(db, rec).run(submission)
-
-    assert result.status == "needs_review"
-    assert rec.photo_placed is False
-    assert "did not match exactly once" in result.said[-1]

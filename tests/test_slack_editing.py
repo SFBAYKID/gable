@@ -141,6 +141,102 @@ def test_font_size_edit_resolves_price_and_waits_for_google_confirmation(tmp_pat
     connection.close()
 
 
+def test_confirmed_hero_replacement_pauses_for_one_upload_without_touching_old_flyer(
+    tmp_path: Path,
+) -> None:
+    connection = _database(tmp_path / "gable.db")
+    before = store.run_for_thread(connection, THREAD)
+    assert before is not None
+    store.set_status(
+        connection,
+        before.run_id,
+        "delivered",
+        "prior warning approvals",
+        approved_warning_codes=store.encode_warning_codes({"tight_address", "large_photo_crop"}),
+        pending_warning_code="large_photo_crop",
+    )
+    slides = FakeSlides(_presentation())
+    decision = Decision(
+        reply="Send me the new property photo.",
+        tool="replace_photo",
+        arguments={"which": "hero"},
+    )
+
+    said = SlideEditor(connection, slides).execute(decision, THREAD)
+
+    current = store.run_for_thread(connection, THREAD)
+    assert current is not None
+    assert said == "Send me the new property photo."
+    assert current.status == "needs_photo"
+    assert current.output_file_id == before.output_file_id == "deck-1"
+    assert current.output_url == before.output_url
+    assert current.failure_reason == "Send me the new property photo."
+    assert store.decode_warning_codes(current.approved_warning_codes) == frozenset(
+        {"tight_address"}
+    )
+    assert current.pending_warning_code == ""
+    assert slides.operation == ""
+    assert slides.requests == []
+    # The Slack upload seam can claim this exact existing run once. A duplicate
+    # event cannot start a second rebuild or consume another paid image call.
+    assert store.claim_paused_run(
+        connection,
+        current.run_id,
+        {"photo_url": "http://images.example/new-house.jpg", "photo_source": "slack_upload"},
+    )
+    assert not store.claim_paused_run(connection, current.run_id)
+    connection.close()
+
+
+def test_confirmed_headshot_replacement_waits_on_the_authoritative_drive_folder(
+    tmp_path: Path,
+) -> None:
+    connection = _database(tmp_path / "gable.db")
+    slides = FakeSlides(_presentation())
+    decision = Decision(
+        reply="I will use the updated filed headshot.",
+        tool="replace_photo",
+        arguments={"which": "headshot"},
+    )
+
+    said = SlideEditor(connection, slides).execute(decision, THREAD)
+
+    current = store.run_for_thread(connection, THREAD)
+    assert current is not None
+    assert said == (
+        "Replace Chase Gonzales's image in Head Shots, then tell me to rebuild the flyer."
+    )
+    assert current.status == "needs_info"
+    assert current.output_file_id == "deck-1"
+    assert current.failure_reason == said
+    assert slides.operation == ""
+    connection.close()
+
+
+def test_photo_replacement_is_rejected_while_the_listing_waits_on_another_problem(
+    tmp_path: Path,
+) -> None:
+    connection = _database(tmp_path / "gable.db")
+    run = store.run_for_thread(connection, THREAD)
+    assert run is not None
+    store.set_status(connection, run.run_id, "needs_info", "waiting for a direct phone")
+
+    said = SlideEditor(connection, FakeSlides(_presentation())).execute(
+        Decision(
+            reply="Send me the new property photo.",
+            tool="replace_photo",
+            arguments={"which": "hero"},
+        ),
+        THREAD,
+    )
+
+    current = store.run_for_thread(connection, THREAD)
+    assert current is not None
+    assert "already waiting on something else" in said
+    assert current.status == "needs_info"
+    connection.close()
+
+
 def test_an_ambiguous_target_is_not_ranked_or_changed(tmp_path: Path) -> None:
     connection = _database(tmp_path / "gable.db")
     slides = FakeSlides(_presentation(_shape("second-price", "$525,000")))
@@ -235,4 +331,40 @@ def test_status_uses_the_thread_run_without_opening_slides(tmp_path: Path) -> No
 
     assert said == "This flyer is built and linked in this thread."
     assert slides.operation == ""
+    connection.close()
+
+
+def test_failed_status_never_claims_the_listing_is_still_being_worked_on(tmp_path: Path) -> None:
+    """A terminal failure is an outcome, not indefinite progress."""
+    connection = _database(tmp_path / "gable.db")
+    run = store.run_for_thread(connection, THREAD)
+    assert run is not None
+    store.set_status(connection, run.run_id, "failed", "fixed test failure")
+    slides = FakeSlides(_presentation())
+
+    said = SlideEditor(connection, slides).execute(
+        Decision(reply="Let me check.", tool="report_status"),
+        THREAD,
+    )
+
+    assert "processing failed" in said
+    assert "still being worked on" not in said
+    assert "did not send it as finished" in said
+    assert slides.operation == ""
+    connection.close()
+
+
+def test_review_status_does_not_claim_visual_review_was_the_only_problem(tmp_path: Path) -> None:
+    """needs_review also covers deterministic readback and placement failures."""
+    connection = _database(tmp_path / "gable.db")
+    run = store.run_for_thread(connection, THREAD)
+    assert run is not None
+    store.set_status(connection, run.run_id, "needs_review", "the hero photo could not be placed")
+
+    said = SlideEditor(connection, FakeSlides(_presentation())).execute(
+        Decision(reply="Let me check.", tool="report_status"),
+        THREAD,
+    )
+
+    assert said == "This flyer is paused because its checks did not prove it is ready."
     connection.close()

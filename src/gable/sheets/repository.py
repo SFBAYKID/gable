@@ -44,6 +44,7 @@ class Submission:
     submitted_at: str
     intake: Intake
     content_hash: str
+    source_tab: str = ""
 
 
 def _identity(submitted_at: str, agent_email: str, address: str) -> str:
@@ -96,13 +97,19 @@ def find_header(rows: list[list[str]]) -> tuple[int, dict[str, int]]:
     raise SheetError(msg)
 
 
-def submission_from_row(row: list[str], columns: dict[str, int], sheet_row: int) -> Submission:
+def submission_from_row(
+    row: list[str],
+    columns: dict[str, int],
+    sheet_row: int,
+    source_tab: str = "",
+) -> Submission:
     """Parse one already-read row into a submission.
 
     Args:
         row: The raw row.
         columns: Field name to column index, from `columns_from_header`.
         sheet_row: The 1-based sheet row, for pointing a human at it.
+        source_tab: Exact read-only form tab that supplied the row.
 
     Returns:
         The submission, with the same content-derived identity a poll gives it,
@@ -122,6 +129,7 @@ def submission_from_row(row: list[str], columns: dict[str, int], sheet_row: int)
         submitted_at=submitted_at,
         intake=intake,
         content_hash=_content_hash(row),
+        source_tab=source_tab.strip(),
     )
 
 
@@ -147,7 +155,7 @@ def read_submissions(client: ReadsRanges, tab: str) -> list[Submission]:
     for offset, row in enumerate(rows[header_index + 1 :], start=header_index + 2):
         if not any(cell.strip() for cell in row):
             continue
-        out.append(submission_from_row(row, columns, offset))
+        out.append(submission_from_row(row, columns, offset, source_tab=tab))
     timestamps = [submission.submitted_at for submission in out]
     if len(timestamps) != len(set(timestamps)):
         msg = (
@@ -186,6 +194,7 @@ def adopt_backfill(connection: Connection, submissions: list[Submission]) -> int
                 submission.submitted_at,
                 submission.intake,
                 submission.content_hash,
+                submission.source_tab,
             )
             # Also repairs a database left by the old non-transactional
             # implementation, where a crash could store the submission but die
@@ -269,6 +278,7 @@ def new_submissions(connection: Connection, submissions: list[Submission]) -> li
             submission.submitted_at,
             submission.intake,
             submission.content_hash,
+            submission.source_tab,
         )
         if store.has_been_handled(connection, submission.response_row_id):
             continue

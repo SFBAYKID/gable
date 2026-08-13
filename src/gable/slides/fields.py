@@ -198,6 +198,11 @@ PATTERNS: Final[dict[str, tuple[re.Pattern[str], ...]]] = {
         # not a token: "REALTOR / TITLE" survived onto two finished flyers.
         re.compile(r"^\[?\s*REALTOR\s*/\s*TITLE\s*\]?$", re.IGNORECASE),
         re.compile(r"^\[\s*TITLE\s*\]$", re.IGNORECASE),
+        # REALTOR is a membership credential, not harmless decorative copy.
+        # The live Sold design carries this bare word beside the sample agent.
+        # Treating it as brand text would let it survive for an agent whose
+        # authoritative contact record supplies no title at all.
+        re.compile(r"^REALTOR(?:®)?$", re.IGNORECASE),
     ),
     "social_handle": (
         # A stock handle from the design's own sample content. Pointing a real
@@ -272,7 +277,6 @@ BRAND_TEXT: Final[frozenset[str]] = frozenset(
         "soon",
         "under",
         "contract",
-        "realtor",
         "corner house realty",
         "local experts. personal service.",
         "exceptional results.",
