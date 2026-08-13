@@ -1,4 +1,4 @@
-"""The roster workbook: located by header, mirrored, and appended to.
+"""The roster workbook: located by header and mirrored without guessing.
 
 The shapes here are the real ones, read from
 `Sales_Agents_Contact_Information.xlsx` through the service account on
@@ -18,9 +18,7 @@ import openpyxl
 import pytest
 
 from gable.agents.contacts import (
-    Contact,
     ContactsError,
-    append_contact,
     find_header,
     parse_contacts,
     sync_contacts,
@@ -45,11 +43,10 @@ def _workbook(rows: list[list[Any]]) -> bytes:
 
 
 class FakeDrive:
-    """Just enough Drive to find, download and replace one workbook."""
+    """Just enough Drive to find and download one workbook."""
 
     def __init__(self, data: bytes) -> None:  # noqa: D107
         self.data = data
-        self.uploaded: bytes | None = None
 
     def files(self) -> FakeDrive:  # noqa: D102
         return self
@@ -62,21 +59,37 @@ class FakeDrive:
         self._query = "media"
         return self
 
-    def update(self, **kwargs: Any) -> FakeDrive:  # noqa: D102, ANN401
-        media = kwargs["media_body"]
-        # MediaIoBaseUpload keeps the buffer it was handed on `_fd`.
-        self.uploaded = media._fd.getvalue() if hasattr(media, "_fd") else b""
-        self._query = "update"
-        return self
-
     def execute(self) -> Any:  # noqa: D102, ANN401
         if self._query == "media":
             return self.data
-        if self._query == "update":
-            return {}
         if "mimeType='application/vnd.google-apps.folder'" in self._query:
             return {"files": [{"id": "folder-1", "name": "Agents Contact Information"}]}
         return {"files": [{"id": "book-1", "name": "Sales_Agents_Contact_Information.xlsx"}]}
+
+
+class AmbiguousDrive(FakeDrive):
+    """Return two exact roster folders or two workbooks on demand."""
+
+    def __init__(self, data: bytes, *, duplicate_folders: bool) -> None:
+        """Choose which Drive level is ambiguous."""
+        super().__init__(data)
+        self.duplicate_folders = duplicate_folders
+
+    def execute(self) -> Any:  # noqa: ANN401
+        """Return a duplicated source at the configured level."""
+        if self._query == "media":
+            return self.data
+        if "mimeType='application/vnd.google-apps.folder'" in self._query:
+            count = 2 if self.duplicate_folders else 1
+            return {
+                "files": [
+                    {"id": f"folder-{index}", "name": "Agents Contact Information"}
+                    for index in range(count)
+                ]
+            }
+        return {
+            "files": [{"id": f"book-{index}", "name": f"Roster {index}.xlsx"} for index in range(2)]
+        }
 
 
 def _db() -> sqlite3.Connection:
@@ -108,19 +121,26 @@ def test_every_agent_below_the_header_is_parsed() -> None:
     rows = [HEADER, [str(c) for c in ANDY], ["", "", "", ""], ["annie@x.com", "Annie", "", "410"]]
     people = parse_contacts(rows)
     assert [p.email for p in people] == ["andy@cornerhouserealty.com", "annie@x.com"]
-    assert people[0].full_name == "Andy Jang"
+    assert (people[0].first_name, people[0].last_name) == ("Andy", "Jang")
 
 
 def test_a_missing_last_name_still_gives_a_usable_person() -> None:
     """The live workbook has Annie with no surname."""
     people = parse_contacts([HEADER, ["annie@x.com", "Annie", "", "410.624.8504"]])
-    assert people[0].full_name == "Annie"
+    assert (people[0].first_name, people[0].last_name) == ("Annie", "")
     assert people[0].phone == "410.624.8504"
 
 
-def test_a_duplicated_email_keeps_the_first_row() -> None:
+def test_a_duplicated_email_is_refused_instead_of_choosing_a_row() -> None:
     rows = [HEADER, ["a@x.com", "First", "Row", "1"], ["a@x.com", "Second", "Row", "2"]]
-    assert [p.first_name for p in parse_contacts(rows)] == ["First"]
+    with pytest.raises(ContactsError, match="more than once"):
+        parse_contacts(rows)
+
+
+def test_a_header_only_workbook_is_not_treated_as_an_empty_roster() -> None:
+    """A malformed refresh must preserve the last complete local snapshot."""
+    with pytest.raises(ContactsError, match="no usable agent rows"):
+        parse_contacts([HEADER])
 
 
 def test_syncing_mirrors_the_workbook_into_the_roster_lookup() -> None:
@@ -135,48 +155,37 @@ def test_syncing_mirrors_the_workbook_into_the_roster_lookup() -> None:
     assert found["phone"] == "410.218.2786"
 
 
-def test_an_agent_reached_by_name_resolves_too() -> None:
-    """A co-agent is named in prose, with no email to look them up by."""
+def test_sync_removes_a_contact_deleted_from_the_source_workbook() -> None:
+    """The local cache must not preserve an obsolete client-facing phone number."""
+    connection = _db()
+    sync_contacts(
+        FakeDrive(_workbook([HEADER, ANDY, ANNIE])),
+        connection,
+        "drive-1",
+        "templates-1",
+    )
+
+    sync_contacts(FakeDrive(_workbook([HEADER, ANDY])), connection, "drive-1", "templates-1")
+
+    assert repo.find_salesperson(connection, "annie@cornerhouserealty.com") == {}
+    assert repo.find_salesperson(connection, "andy@cornerhouserealty.com")["phone"] == ANDY[3]
+
+
+def test_a_rejected_empty_refresh_preserves_the_prior_complete_roster() -> None:
     connection = _db()
     sync_contacts(FakeDrive(_workbook([HEADER, ANDY])), connection, "drive-1", "templates-1")
-    assert repo.find_salesperson_by_name(connection, "Andy Jang")["phone"] == "410.218.2786"
+
+    with pytest.raises(ContactsError, match="no usable agent rows"):
+        sync_contacts(FakeDrive(_workbook([HEADER])), connection, "drive-1", "templates-1")
+
+    assert repo.find_salesperson(connection, "andy@cornerhouserealty.com")["phone"] == ANDY[3]
 
 
-def test_appending_adds_a_row_and_leaves_the_others_alone() -> None:
-    drive = FakeDrive(_workbook([HEADER, ANDY]))
-    added = append_contact(
-        drive,
-        "drive-1",
-        "templates-1",
-        Contact("jane@cornerhouserealty.com", "Jane", "Doe", "410.555.0134"),
-    )
-    assert added is True
-    assert drive.uploaded is not None
+@pytest.mark.parametrize("duplicate_folders", [True, False])
+def test_sync_refuses_ambiguous_roster_sources(duplicate_folders: bool) -> None:
+    """Choosing the first of two human-maintained files would be a guess."""
+    connection = _db()
+    drive = AmbiguousDrive(_workbook([HEADER, ANDY]), duplicate_folders=duplicate_folders)
 
-    people = parse_contacts(_rows(drive.uploaded))
-    assert [p.email for p in people] == ["andy@cornerhouserealty.com", "jane@cornerhouserealty.com"]
-    assert people[0].phone == "410.218.2786", "an existing row must survive untouched"
-
-
-def test_appending_someone_already_there_changes_nothing() -> None:
-    """Never overwrite what a human wrote. A wrong number reaches a client."""
-    drive = FakeDrive(_workbook([HEADER, ANDY]))
-    added = append_contact(
-        drive,
-        "drive-1",
-        "templates-1",
-        Contact("andy@cornerhouserealty.com", "Andrew", "Jang", "000.000.0000"),
-    )
-    assert added is False
-    assert drive.uploaded is None
-
-
-def _rows(data: bytes) -> list[list[str]]:
-    book = openpyxl.load_workbook(io.BytesIO(data), read_only=True, data_only=True)
-    try:
-        return [
-            ["" if cell is None else str(cell).strip() for cell in row]
-            for row in book.worksheets[0].iter_rows(values_only=True)
-        ]
-    finally:
-        book.close()
+    with pytest.raises(ContactsError, match="more than one"):
+        sync_contacts(drive, connection, "drive-1", "templates-1")

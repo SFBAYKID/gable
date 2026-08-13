@@ -1,8 +1,8 @@
 """What Gable is allowed to say, enforced rather than remembered.
 
-`GABLE-STYLE.md` and the mockup thread define the house style. A style guide
-nobody can run is a style guide that drifts, so this module makes it executable:
-`violations()` is the rule set, and the helpers below produce text that passes it.
+`AGENTS.md` defines the house style. A style guide nobody can run is a style
+guide that drifts, so this module makes it executable: `violations()` is the
+rule set, and the helpers below produce text that passes it.
 
 The rules exist for a reason worth restating, because they look cosmetic and are
 not. Carmen is a designer, not an operator. A message reading

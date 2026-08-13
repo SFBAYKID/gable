@@ -40,12 +40,18 @@ ASPECT_EPSILON: Final[float] = 0.01
 #: and roughly half the bytes of 95.
 OUTPUT_QUALITY: Final[int] = 88
 
+# A 25 MB compressed upload can expand to hundreds of megabytes. Keep one
+# decoded RGB frame comfortably inside the 1 GB production process.
+MAX_SOURCE_PIXELS: Final[int] = 50_000_000
+
 
 class FitAction(StrEnum):
     """What has to happen to make a photo sit correctly in the frame."""
 
-    #: Already the right shape and big enough. Use as-is.
+    #: Already the exact target dimensions. Use as-is.
     USE_AS_IS = "use_as_is"
+    #: Right shape and at most 2x too small. Enlarge locally.
+    LOCAL_ENLARGE = "local_enlarge"
     #: Right shape, too big. Downscale only — always free and always safe.
     DOWNSCALE = "downscale"
     #: Wrong shape, enough pixels. Crop to the frame — free.
@@ -139,9 +145,15 @@ def assess(
             f"Past {MAX_TOLERABLE_UPSCALE:.0f}x that looks soft, so this one needs a model."
         )
     elif abs(source_aspect - target_aspect) <= ASPECT_EPSILON:
-        if upscale >= 1.0:
+        if upscale > 1.0:
+            action = FitAction.LOCAL_ENLARGE
+            reason = (
+                f"right shape and enlarged {upscale:.1f}x locally, within the "
+                f"{MAX_TOLERABLE_UPSCALE:.0f}x softness limit."
+            )
+        elif source_width == target_width and source_height == target_height:
             action = FitAction.USE_AS_IS
-            reason = "already the right shape and large enough; using it unchanged."
+            reason = "already the exact frame shape and size; using its pixels unchanged."
         else:
             action = FitAction.DOWNSCALE
             reason = (
@@ -200,6 +212,9 @@ def fit_locally(
         raise ValueError(msg)
 
     with Image.open(io.BytesIO(image_bytes)) as opened:
+        if opened.width * opened.height > MAX_SOURCE_PIXELS:
+            msg = "the source image dimensions exceed the safe processing limit"
+            raise ValueError(msg)
         # Apply EXIF orientation FIRST. A portrait photo from a phone is stored
         # landscape with an orientation tag, so without this the crop runs along
         # the wrong axis: a 4000x3000-stored portrait shot would be trimmed 40%
@@ -261,6 +276,9 @@ def normalise_for_fitting(
         msg = f"max edge must be positive, got {max_edge_px}"
         raise ValueError(msg)
     with Image.open(io.BytesIO(image_bytes)) as opened:
+        if opened.width * opened.height > MAX_SOURCE_PIXELS:
+            msg = "the source image dimensions exceed the safe processing limit"
+            raise ValueError(msg)
         upright = ImageOps.exif_transpose(opened).convert("RGB")
         if max(upright.size) > max_edge_px:
             upright.thumbnail((max_edge_px, max_edge_px), Image.Resampling.LANCZOS)

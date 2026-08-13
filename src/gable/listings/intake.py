@@ -5,9 +5,9 @@ form is deliberately ignored — the postcard branch and the video branch are
 unused (0 of 99 rows), and column K, the social-media content type, is out of
 scope because Gable makes flyers rather than reels.
 
-Column E is the hinge. Its value is the request type, and it maps onto a
-template category in `slides/catalog.py`, so "Open House" on the form finds the
-Open House designs in Drive. That is the whole routing decision.
+Column E is the hinge. Its value is the request type, and the source template in
+Generic Templates must carry that exact human-visible name. That is the whole
+routing decision; no ranked catalogue or agent override participates.
 
 The second idea here is **completeness**. A template must never ship with a
 publicly knowable fact left blank. Square footage, beds and baths are matters of
@@ -42,9 +42,9 @@ from gable.listings.headers import fold_header
 #: "Instagram Story" as the property address — confirmed against row 78 on
 #: 2026-08-12, and both are the kind of wrong that still looks like data.
 COLUMNS: Final[dict[str, int]] = {
-    "B": 1,  # Email Address — the join key to Sales_People
+    "B": 1,  # Email Address — the join key to the mirrored contact roster
     "C": 2,  # Name of Agent
-    "E": 4,  # Select your request type — picks the template category
+    "E": 4,  # Select your request type — picks the same-named source
     "L": 11,  # Property Address
     "N": 13,  # Include details for post
     "O": 14,  # Open house date/time (if applicable)
@@ -155,9 +155,9 @@ def maps_a_response_row(columns: Mapping[str, int]) -> bool:
     return "agent_name" in columns or "agent_first_name" in columns
 
 
-#: Form wording on the left, catalogue category on the right. The form's own
-#: values are inconsistent — one row says "just listed" in lower case — so the
-#: match is case-folded and the raw value is always kept for the audit trail.
+#: Form wording on the left, canonical source-template name on the right. The
+#: form's own values are inconsistent — one row says "just listed" in lower
+#: case — so the match is case-folded and the raw value stays in the audit trail.
 REQUEST_TYPE_TO_CATEGORY: Final[dict[str, str]] = {
     "new listing": "Just Listed",
     "just listed": "Just Listed",
@@ -200,9 +200,9 @@ class Intake:
         """The template category this request routes to.
 
         Returns:
-            A category name matching `slides/catalog.py`, or an empty string if
-            the request type has no design. Empty is a question for Carmen, not
-            a reason to pick something close.
+            The canonical source-template name, or an empty string if this
+            request type has no supported design. Empty is a question for
+            Carmen, not a reason to pick something close.
 
         Raises:
             Nothing.
@@ -288,8 +288,6 @@ class Question:
     field_name: str
     #: The sentence Gable says. Written to be posted verbatim.
     ask: str
-    #: True when no amount of searching could settle it.
-    only_a_human_knows: bool = False
 
 
 def missing_public_facts(intake: Intake, known: dict[str, str] | None = None) -> list[str]:
@@ -431,7 +429,6 @@ def incoherences(intake: Intake) -> list[Question]:
                 "address",
                 "This request came through without a property address, so I cannot "
                 "look anything up or build the flyer. What is the address?",
-                only_a_human_knows=True,
             )
         )
 
@@ -441,7 +438,6 @@ def incoherences(intake: Intake) -> list[Question]:
                 "address",
                 f"I cannot make sense of the address on this one — it reads "
                 f"{intake.address.strip()!r}. What is the property address?",
-                only_a_human_knows=True,
             )
         )
 
@@ -457,7 +453,6 @@ def incoherences(intake: Intake) -> list[Question]:
             Question(
                 "new price",
                 "This is a price reduction, but no new price came through. What is it now?",
-                only_a_human_knows=True,
             )
         )
 
@@ -466,7 +461,6 @@ def incoherences(intake: Intake) -> list[Question]:
             Question(
                 "open house date and time",
                 "This is an open house post and I do not have the date or time for it. When is it?",
-                only_a_human_knows=True,
             )
         )
 
@@ -480,7 +474,6 @@ def incoherences(intake: Intake) -> list[Question]:
                 "price",
                 "This request has both a new price and a closing price on it. "
                 "Which one belongs on the flyer?",
-                only_a_human_knows=True,
             )
         )
 

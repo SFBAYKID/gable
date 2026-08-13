@@ -108,6 +108,7 @@ def test_new_file_is_measured_and_owns_a_recheck_thread(tmp_path: Path) -> None:
         lambda: list(files),
         lambda file_id: presentations[file_id],
         _say_into(said),
+        look_at=lambda _file_id: Inspection(True, True),
     )
     assert triage.scan_new() == 0
 
@@ -122,11 +123,81 @@ def test_new_file_is_measured_and_owns_a_recheck_thread(tmp_path: Path) -> None:
 
     presentations["new-1"] = _presentation(email_width=700)
     files[0] = TemplateFile("new-1", "New Listing", "two")
-    outcome = triage.recheck("thread-1")
+    outcome = triage.recheck_file("new-1")
     assert "did not find a structural, text-capacity, or visible layout problem" in outcome
     refreshed = store.template_for_thread(connection, "thread-1")
     assert refreshed is not None and refreshed.modified_time == "two"
     assert refreshed.status == "ready"
+    connection.close()
+
+
+def test_a_missing_source_revokes_its_prior_ready_audit(tmp_path: Path) -> None:
+    connection = connect(tmp_path / "gable.db")
+    apply_migrations(connection)
+    files: list[TemplateFile] = []
+    triage = TemplateTriage(
+        connection,
+        lambda: list(files),
+        lambda _file_id: _presentation(),
+        lambda _text, thread: thread or "thread-one",
+        look_at=lambda _file_id: Inspection(True, True),
+    )
+    triage.scan_new()
+    files.append(TemplateFile("new-1", "New Listing", "one"))
+    assert triage.scan_new() == 1
+    ready = store.template_audit(connection, "new-1")
+    assert ready is not None and ready.status == "ready"
+
+    files.clear()
+    outcome = triage.recheck_file("new-1")
+
+    assert "could not find the New Listing design" in outcome
+    missing = store.template_audit(connection, "new-1")
+    assert missing is not None and missing.status == "needs_template"
+    assert missing.slack_thread_ts == "thread-one"
+    connection.close()
+
+
+def test_a_certified_template_is_rechecked_when_its_drive_revision_changes(
+    tmp_path: Path,
+) -> None:
+    connection = connect(tmp_path / "gable.db")
+    apply_migrations(connection)
+    files: list[TemplateFile] = []
+    presentations: dict[str, dict[str, Any]] = {}
+    said: list[str] = []
+    visual_calls = 0
+
+    def look(_file_id: str) -> Inspection:
+        nonlocal visual_calls
+        visual_calls += 1
+        return Inspection(True, True)
+
+    triage = TemplateTriage(
+        connection,
+        lambda: list(files),
+        lambda file_id: presentations[file_id],
+        _say_into(said),
+        look_at=look,
+    )
+    triage.scan_new()
+    files.append(TemplateFile("new-1", "New Listing", "revision-one"))
+    presentations["new-1"] = _presentation(email_width=700)
+    assert triage.scan_new() == 1
+    first = store.template_audit(connection, "new-1")
+    assert first is not None and first.status == "ready"
+
+    files[0] = TemplateFile("new-1", "New Listing", "revision-two")
+    presentations["new-1"] = _presentation(email_width=100)
+    assert triage.scan_new() == 1
+
+    changed = store.template_audit(connection, "new-1")
+    assert changed is not None and changed.status == "needs_template"
+    assert changed.modified_time == "revision-two"
+    assert changed.slack_thread_ts == "thread-1"
+    assert "updated New Listing design" in said[-1]
+    assert "agent email" in said[-1]
+    assert visual_calls == 1
     connection.close()
 
 
@@ -140,6 +211,7 @@ def test_duplicate_new_template_names_are_rejected_without_guessing(tmp_path: Pa
         lambda: list(files),
         lambda _file_id: _presentation(),
         _say_into(said),
+        look_at=lambda _file_id: Inspection(True, True),
     )
     triage.scan_new()
     files.extend(
@@ -214,6 +286,27 @@ def test_visual_uncertainty_blocks_template_certification(tmp_path: Path) -> Non
     connection.close()
 
 
+def test_missing_visual_provider_fails_closed_instead_of_certifying(tmp_path: Path) -> None:
+    connection = connect(tmp_path / "gable.db")
+    apply_migrations(connection)
+    files: list[TemplateFile] = []
+    said: list[str] = []
+    triage = TemplateTriage(
+        connection,
+        lambda: list(files),
+        lambda _file_id: _presentation(),
+        _say_into(said),
+    )
+    triage.scan_new()
+    files.append(TemplateFile("new-1", "New Listing", "one"))
+
+    assert triage.scan_new() == 1
+    audit = store.template_audit(connection, "new-1")
+    assert audit is not None and audit.status == "needs_template"
+    assert "could not complete its visual inspection" in said[0]
+    connection.close()
+
+
 def test_recheck_names_the_visual_stage_and_reports_a_visible_defect(tmp_path: Path) -> None:
     connection = connect(tmp_path / "gable.db")
     apply_migrations(connection)
@@ -280,4 +373,50 @@ def test_a_failed_slack_post_retries_the_stored_verdict_without_reinspection(
     assert retried is not None and retried.slack_thread_ts == "thread-retry"
     assert visual_calls == 1
     assert posts == 2
+    connection.close()
+
+
+def test_a_changed_template_retries_a_failed_thread_notice_without_reinspection(
+    tmp_path: Path,
+) -> None:
+    connection = connect(tmp_path / "gable.db")
+    apply_migrations(connection)
+    files: list[TemplateFile] = []
+    visual_calls = 0
+    posts = 0
+
+    def look(_file_id: str) -> Inspection:
+        nonlocal visual_calls
+        visual_calls += 1
+        return Inspection(True, True)
+
+    def say(_text: str, thread: str | None) -> str:
+        nonlocal posts
+        posts += 1
+        if posts == 2:
+            return ""
+        return thread or "thread-one"
+
+    triage = TemplateTriage(
+        connection,
+        lambda: list(files),
+        lambda _file_id: _presentation(),
+        say,
+        look_at=look,
+    )
+    triage.scan_new()
+    files.append(TemplateFile("new-1", "New Listing", "one"))
+    assert triage.scan_new() == 1
+
+    files[0] = TemplateFile("new-1", "New Listing", "two")
+    assert triage.scan_new() == 1
+    waiting = store.template_audit(connection, "new-1")
+    assert waiting is not None and waiting.notification_pending
+
+    assert triage.scan_new() == 0
+    delivered = store.template_audit(connection, "new-1")
+    assert delivered is not None and not delivered.notification_pending
+    assert delivered.slack_thread_ts == "thread-one"
+    assert visual_calls == 2
+    assert posts == 3
     connection.close()

@@ -16,8 +16,8 @@ it costs nothing beyond the droplet already being paid for, needs no new
 credential, and the only thing published is a listing photo that is on its way
 to public marketing anyway.
 
-Does not handle: fetching from Slack, fitting, or deletion. Files are small and
-the droplet has a disk; `prune` exists for when that stops being true.
+Does not handle: fetching from Slack, fitting, retention, or deletion. Published
+files are content-addressed and currently have no automatic pruning policy.
 """
 
 from __future__ import annotations

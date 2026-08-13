@@ -4,7 +4,9 @@ This never reads or writes the form-response sheet and never posts to Slack.
 It adopts the current Generic Templates catalogue in a temporary SQLite file,
 copies one named source into that folder, runs the same new-file triage used in
 production, prints the measured outcome, and moves only that copy to Drive's
-trash in a ``finally`` block.
+trash in a ``finally`` block. If deterministic checks pass, the real visual
+inspection uses the configured shared spend ledger rather than a fresh test
+budget.
 """
 
 from __future__ import annotations
@@ -20,6 +22,8 @@ from gable.config import ConfigError, Settings
 from gable.db import store
 from gable.db.schema import apply_migrations, connect
 from gable.pipeline.template_triage import TemplateTriage
+from gable.pipeline.template_vision import inspect_source_template
+from gable.pipeline.vision import Inspection
 from gable.slides.library import generic_folder_id, list_files
 
 GOOGLE_SCOPES: tuple[str, ...] = (
@@ -91,6 +95,21 @@ def main(argv: list[str] | None = None) -> int:
                 messages.append(text)
                 return "local-template-thread"
 
+            def look_at(file_id: str) -> Inspection:
+                """Use production's fail-closed visual path and shared spend ledger."""
+                budget_connection = connect(settings.db_path)
+                try:
+                    apply_migrations(budget_connection)
+                    return inspect_source_template(
+                        budget_connection,
+                        slides,
+                        file_id,
+                        api_key=settings.openai_image_api_key,
+                        model=settings.vision_model,
+                    )
+                finally:
+                    budget_connection.close()
+
             triage = TemplateTriage(
                 connection=connection,
                 list_templates=lambda: list_files(
@@ -102,6 +121,7 @@ def main(argv: list[str] | None = None) -> int:
                     slides.presentations().get(presentationId=file_id).execute()
                 ),
                 say=say,
+                look_at=look_at,
                 slide_px=(settings.slide_width_px, settings.slide_height_px),
             )
             adopted = len(triage.list_templates())
@@ -132,13 +152,30 @@ def main(argv: list[str] | None = None) -> int:
         return 0 if temporary_id and audit is not None and reviewed == 1 else 2
     finally:
         if temporary_id:
-            drive.files().update(
-                fileId=temporary_id,
-                body={"trashed": True},
-                supportsAllDrives=True,
-                fields="id,trashed",
-            ).execute()
-            print("Temporary template moved to Drive trash.")
+            moved = (
+                drive.files()
+                .update(
+                    fileId=temporary_id,
+                    body={"trashed": True},
+                    supportsAllDrives=True,
+                    fields="id,trashed",
+                )
+                .execute()
+            )
+            if not bool(moved.get("trashed")):
+                raise RuntimeError("Drive did not confirm cleanup of the temporary template")
+            confirmed = (
+                drive.files()
+                .get(
+                    fileId=temporary_id,
+                    supportsAllDrives=True,
+                    fields="id,trashed",
+                )
+                .execute()
+            )
+            if not bool(confirmed.get("trashed")):
+                raise RuntimeError("the temporary template is still active in Drive")
+            print("Temporary template is in Drive trash; no active copy remains.")
 
 
 if __name__ == "__main__":

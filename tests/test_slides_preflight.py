@@ -44,6 +44,24 @@ def _hero() -> dict[str, Any]:
     }
 
 
+def _headshot() -> dict[str, Any]:
+    """A separate empty square near the lower-right agent card."""
+    return {
+        "objectId": "headshot-frame",
+        "size": {
+            "width": {"magnitude": 1_500_000},
+            "height": {"magnitude": 1_500_000},
+        },
+        "transform": {
+            "scaleX": 1,
+            "scaleY": 1,
+            "translateX": 8_000_000,
+            "translateY": 10_000_000,
+        },
+        "shape": {"shapeProperties": {"shapeBackgroundFill": {}}},
+    }
+
+
 def _presentation(*elements: dict[str, Any]) -> dict[str, Any]:
     return {
         "pageSize": {
@@ -126,6 +144,28 @@ def test_a_recognised_field_without_a_value_pauses_before_a_copy() -> None:
     assert not violations(issue.say)
 
 
+def test_a_sample_headshot_can_never_survive_for_an_agent_without_a_file() -> None:
+    presentation = _presentation(
+        _text("address", "[PROPERTY ADDRESS]", 500),
+        _headshot(),
+    )
+
+    report = _analyze(
+        presentation,
+        {
+            "address": "123 Main St, Baltimore, MD 21201",
+            "agent_name": "Jane Doe",
+            "headshot": "",
+        },
+    )
+
+    issue = next(item for item in report.blockers if item.code == "missing_headshot")
+    assert issue.status == "needs_info"
+    assert "Jane Doe" in issue.say
+    assert "Head Shots" in issue.say
+    assert not violations(issue.say)
+
+
 def test_a_material_photo_crop_is_a_prebuild_photo_question() -> None:
     presentation = _presentation(_text("address", "[PROPERTY ADDRESS]", 500))
     text = ["[PROPERTY ADDRESS]"]
@@ -160,6 +200,22 @@ def test_an_unknown_placeholder_and_missing_frame_are_structural_blockers() -> N
         {"address": "123 Main St, Baltimore, MD 21201"},
     )
     assert any(issue.code == "missing_photo_frame" for issue in without_frame.blockers)
+
+
+def test_a_bare_unknown_field_label_is_not_mistaken_for_brand_copy() -> None:
+    presentation = _presentation(
+        _text("address", "[PROPERTY ADDRESS]", 500),
+        _text("unknown", "MLS NUMBER", 200),
+    )
+
+    report = _analyze(
+        presentation,
+        {"address": "123 Main St, Baltimore, MD 21201"},
+    )
+
+    issue = next(item for item in report.blockers if item.code == "unknown_placeholder")
+    assert "MLS NUMBER" in issue.say
+    assert not violations(issue.say)
 
 
 def test_a_multi_slide_template_is_refused_before_only_one_page_can_be_checked() -> None:
@@ -215,3 +271,42 @@ def test_a_grouped_fillable_field_is_refused_instead_of_mismeasured() -> None:
     issue = next(item for item in report.blockers if item.code == "grouped_agent_email")
     assert "inside grouped artwork" in issue.say
     assert "own text box" in issue.say
+
+
+def test_a_rotated_fillable_field_is_refused_instead_of_measured_as_flat() -> None:
+    address = _text("address", "[PROPERTY ADDRESS]", 900)
+    address["transform"]["shearX"] = 0.25
+    presentation = _presentation(address)
+
+    report = preflight.certify(presentation, "New Listing", "Just Listed")
+
+    issue = next(item for item in report.blockers if item.code == "unsupported_transform_address")
+    assert "rotated, skewed, or mirrored" in issue.say
+
+
+def test_two_separate_hero_candidates_are_refused_instead_of_taking_the_largest() -> None:
+    second = _hero()
+    second["objectId"] = "second-photo-frame"
+    second["size"]["width"]["magnitude"] = 7_000_000
+    second["transform"]["translateY"] = 4_000_000
+    presentation = _presentation(_text("address", "[PROPERTY ADDRESS]", 900), second)
+
+    report = preflight.certify(presentation, "New Listing", "Just Listed")
+
+    assert any(issue.code == "missing_photo_frame" for issue in report.blockers)
+
+
+def test_two_headshot_candidates_are_refused_instead_of_choosing_a_face() -> None:
+    first = _headshot()
+    second = _headshot()
+    second["objectId"] = "second-headshot-frame"
+    second["transform"]["translateX"] = 6_000_000
+    presentation = _presentation(
+        _text("address", "[PROPERTY ADDRESS]", 900),
+        first,
+        second,
+    )
+
+    report = preflight.certify(presentation, "New Listing", "Just Listed")
+
+    assert any(issue.code == "ambiguous_headshot_frame" for issue in report.blockers)

@@ -61,19 +61,19 @@ shared grid. Edges are off by a few pixels against neighbouring elements.
 Where seen: rendered flyers reviewed 2026-08-10.
 Impact: subtle, but it is the difference between "designed" and "assembled".
 
-## 5. Template filenames must match the catalog exactly — Open, and it will
+## 5. Template filenames must match the form request type — Open, and it will
 break a run
 
 Not a visual defect, but it belongs to whoever maintains the Drive folder.
 
-Gable picks a design by matching the Drive filename against
-`src/gable/slides/catalog.py`, in the form `Category — Label`, and the
-separator is an **em dash** (—), not a hyphen (-). Files must also carry the
-Drive app property `gable_role=template`.
+Templates live only in `Templates / Generic Templates`. The native Google
+Slides filename must equal the form's request type, apart from letter case and
+extra whitespace: a `Sold` request uses a file named `Sold`. No Drive app
+property or code catalogue is involved.
 
-A hyphen where an em dash should be, or a missing app property, produces "I do
-not have a design filed for that yet" and stops the run. If a template is
-renamed in Drive, `catalog.py` has to be updated in the same change.
+A missing or duplicate name produces "I do not have a design filed for that
+yet" and stops the run rather than choosing. Gable detects new and revised
+files, measures them, and asks in their owned Slack thread when they need work.
 
 ---
 

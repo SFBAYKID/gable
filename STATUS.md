@@ -4,21 +4,30 @@ Last updated 2026-08-12 by the building agent.
 
 ## 2026-08-12 current quality gate
 
-The current implementation and research findings are in
-`AUDIT_2026-08-12.md`. Source-template geometry preflight now runs before any
-copy, newly uploaded templates receive proactive structure and capacity triage,
-followed by a placeholder-aware visual layout check, and an updated source can
-be reloaded from the same Slack thread under the native waiting state. Slack
-photos retain their composition until the exact
-hero frame is measured, and the final `gpt-5.6-sol` inspection compares that
-source with the render and fails closed when unavailable or uncertain.
+The six-part quality and triage audit is complete; current findings are in
+`AUDIT_2026-08-12.md`. Source geometry preflight runs before any copy, new and
+revised templates receive deterministic and placeholder-aware visual triage,
+and an update in the same Slack thread reloads current Drive bytes under the
+native waiting state. Listing clearance is revision-specific, template notices
+survive Slack delivery failure without another paid inspection, and deleting a
+source revokes its old ready state.
 
-The recoverable live template smoke test copied `Sold`, detected its address
-capacity at roughly 34 average characters against the 52-character
-certification target, recorded `needs_template`, and moved the temporary copy
-to Drive trash. The actual `Sold` thumbnail also passed a guarded live vision
-call. Neither result is represented as Carmen's visual certification of a
-fully populated production flyer.
+Slack photos retain their composition until the exact hero frame is measured,
+hero and headshot replacements preserve the source frame's layer boundary, and
+the final `gpt-5.6-sol` inspection compares the human photo with Google's
+render. Conversation tool routing also uses Sol through the Responses API; a
+live test caught and fixed the former Chat Completions failure, then proved that
+“Update the image” produces a hero-or-headshot clarification.
+
+The recoverable Drive smoke test copied `Sold`, detected roughly 34 address
+characters of capacity against the 52-character certification target, recorded
+`needs_template`, and verified the temporary copy in trash. No response-Sheet
+write, Slack post, deployment, or finished-design publication occurred.
+
+All 907 tests, Ruff format and lint, strict Mypy, Vulture, dependency integrity,
+and diff checks pass. The Slack manifest must be reinstalled before deployment.
+The OpenAI credential exposed during diagnostics must be rotated first; it is
+not recorded in this repository or repeated here.
 
 The sections below are chronological evidence and may describe an older state;
 the dated audit and `ARCHITECTURE.md` are authoritative for current behavior.
@@ -347,7 +356,7 @@ No source file is over 800 lines. `mypy` covers `src`, `tests` and `tools`.
 | **The wiring between them** | **Built and deployed.** The production runtime constructs `Poller` and `Runner`; the Slack-free CLI performs one guarded pass. |
 | The Slack photo handoff | **Built and partly verified live.** Slack receive, authenticated download, model call, fallback fitting, and the repaired publish directory have each run or been checked. A successful resumed render and final visual result still need one watched upload. |
 | `photos/enhance.py` | Built, unit-tested, and invoked live. A Slack hero needing more than 2x enlargement gets one guarded high-fidelity image edit, a drift and seam check, an `ai_enhanced` audit flag, and an automatic original-photo fallback. The first live derivative was rejected by the seam gate and was not used; output is not visually certified. |
-| `photos/resolver.py`, `photos/sources.py`, `listings/verify.py`, `slackapp/handlers.py` | Still docstring-only placeholders. |
+| Former photo-resolver and handler placeholders | Historical only. They were unreachable and have since been removed rather than advertised as built. |
 
 `normalize.py`'s `ColumnMap` can be re-pointed at the real headers above without
 touching logic — that was built before the sheet was seen, and it happens to

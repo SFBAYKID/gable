@@ -27,7 +27,7 @@ from typing import Final
 
 #: Bumped whenever a migration is added. `apply_migrations` uses it to decide
 #: what still needs running.
-SCHEMA_VERSION: Final[int] = 3
+SCHEMA_VERSION: Final[int] = 4
 
 #: Each migration is (version, sql). They run in order and only once. Never edit
 #: one that has shipped — add another, the same rule as the decision log.
@@ -36,8 +36,9 @@ MIGRATIONS: Final[tuple[tuple[int, str], ...]] = (
         1,
         """
         -- One row per form submission Gable has seen. `response_row_id` is the
-        -- content hash from models.derive_response_row_id, so re-reading the
-        -- same submission is a no-op rather than a duplicate.
+        -- deployed hash of timestamp, agent email and address. Polling
+        -- reconciles corrected tuple fields by the immutable form timestamp;
+        -- sheet row numbers are never identities.
         CREATE TABLE IF NOT EXISTS submissions (
             response_row_id   TEXT PRIMARY KEY,
             sheet_row         INTEGER NOT NULL,
@@ -119,8 +120,8 @@ MIGRATIONS: Final[tuple[tuple[int, str], ...]] = (
             looked_up_at  TEXT NOT NULL
         );
 
-        -- The agent roster, mirrored from the Sales_People tab so a lookup does
-        -- not need a network call and so a run can record what it used.
+        -- The agent roster, mirrored from the Drive contact workbook so a
+        -- listing lookup does not need another network call.
         CREATE TABLE IF NOT EXISTS salespeople (
             email          TEXT PRIMARY KEY,
             first_name     TEXT NOT NULL DEFAULT '',
@@ -180,6 +181,16 @@ MIGRATIONS: Final[tuple[tuple[int, str], ...]] = (
             singleton   INTEGER PRIMARY KEY CHECK (singleton = 1),
             adopted_at  TEXT NOT NULL
         );
+        """,
+    ),
+    (
+        4,
+        """
+        -- A source audit and its Slack delivery are separate external writes.
+        -- Persist this bit before posting so a Slack failure retries only the
+        -- stored verdict, never the paid visual inspection.
+        ALTER TABLE template_audits
+            ADD COLUMN notification_pending INTEGER NOT NULL DEFAULT 0;
         """,
     ),
 )
@@ -281,6 +292,9 @@ def apply_migrations(connection: sqlite3.Connection) -> int:
         sqlite3.Error: if a migration fails. It fails inside a transaction, so a
             half-applied schema is not a state this can leave behind.
     """
+    if not MIGRATIONS or MIGRATIONS[-1][0] != SCHEMA_VERSION:
+        msg = "SCHEMA_VERSION must equal the newest declared migration"
+        raise RuntimeError(msg)
     applied = 0
     at = current_version(connection)
     for version, sql in MIGRATIONS:

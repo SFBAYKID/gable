@@ -14,7 +14,7 @@ way to get started.
 from __future__ import annotations
 
 import hashlib
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from sqlite3 import Connection
 from typing import Final
@@ -49,8 +49,11 @@ class Submission:
 def _identity(submitted_at: str, agent_email: str, address: str) -> str:
     """A stable id for a submission.
 
-    Derived from content rather than row position, so inserting a row above does
-    not renumber everything and cause the whole sheet to look new.
+    The deployed database already uses this tuple, so changing the formula
+    would reopen every historical row. Row position is deliberately excluded
+    because inserting a row above must not renumber later submissions. An edit
+    to email or address is reconciled to the prior id by timestamp in
+    ``new_submissions`` before anything can be opened as new work.
     """
     basis = f"{submitted_at.strip()}|{agent_email.strip().lower()}|{address.strip().lower()}"
     return hashlib.sha256(basis.encode()).hexdigest()[:16]
@@ -110,6 +113,9 @@ def submission_from_row(row: list[str], columns: dict[str, int], sheet_row: int)
     """
     intake = from_row(row, columns)
     submitted_at = row[0].strip() if row else ""
+    if not submitted_at:
+        msg = f"row {sheet_row} has no submission timestamp, so I cannot identify it safely"
+        raise SheetError(msg)
     return Submission(
         response_row_id=_identity(submitted_at, intake.agent_email, intake.address),
         sheet_row=sheet_row,
@@ -142,6 +148,13 @@ def read_submissions(client: ReadsRanges, tab: str) -> list[Submission]:
         if not any(cell.strip() for cell in row):
             continue
         out.append(submission_from_row(row, columns, offset))
+    timestamps = [submission.submitted_at for submission in out]
+    if len(timestamps) != len(set(timestamps)):
+        msg = (
+            "two response rows have the same submission timestamp, so I cannot "
+            "tell them apart safely"
+        )
+        raise SheetError(msg)
     return out
 
 
@@ -163,26 +176,35 @@ def adopt_backfill(connection: Connection, submissions: list[Submission]) -> int
         sqlite3.Error: on a write failure.
     """
     adopted = 0
-    for submission in submissions:
-        was_new = store.record_submission(
-            connection,
-            submission.response_row_id,
-            submission.sheet_row,
-            submission.submitted_at,
-            submission.intake,
-            submission.content_hash,
-        )
-        if not was_new:
-            continue
-        run = store.start_run(connection, submission.response_row_id)
-        store.set_status(
-            connection,
-            run.run_id,
-            "skipped",
-            "adopted as backfill on first run; it predates Gable and was not built",
-        )
-        adopted += 1
-    _mark_backfilled(connection)
+    connection.execute("BEGIN IMMEDIATE")
+    try:
+        for submission in submissions:
+            store.record_submission(
+                connection,
+                submission.response_row_id,
+                submission.sheet_row,
+                submission.submitted_at,
+                submission.intake,
+                submission.content_hash,
+            )
+            # Also repairs a database left by the old non-transactional
+            # implementation, where a crash could store the submission but die
+            # before its terminal history run was opened.
+            if store.has_been_handled(connection, submission.response_row_id):
+                continue
+            run = store.start_run(connection, submission.response_row_id)
+            store.set_status(
+                connection,
+                run.run_id,
+                "skipped",
+                "adopted as backfill on first run; it predates Gable and was not built",
+            )
+            adopted += 1
+        _mark_backfilled(connection)
+        connection.execute("COMMIT")
+    except Exception:
+        connection.execute("ROLLBACK")
+        raise
     return adopted
 
 
@@ -227,9 +249,10 @@ def new_submissions(connection: Connection, submissions: list[Submission]) -> li
         submissions: Everything currently on the sheet.
 
     Returns:
-        Submissions never seen before, or seen but never finished. Empty until
-        the backfill has been adopted — a poller that has not been told which
-        rows are history must not guess.
+        Submissions that have never had a run attempt. Paused and failed work
+        resumes or retries only through an explicit operator action. Empty
+        until the backfill has been adopted — a poller that has not been told
+        which rows are history must not guess.
 
     Raises:
         sqlite3.Error: on a query failure.
@@ -238,6 +261,7 @@ def new_submissions(connection: Connection, submissions: list[Submission]) -> li
         return []
     pending: list[Submission] = []
     for submission in submissions:
+        submission = reconcile_identity(connection, submission)
         store.record_submission(
             connection,
             submission.response_row_id,
@@ -252,34 +276,18 @@ def new_submissions(connection: Connection, submissions: list[Submission]) -> li
     return pending
 
 
-def find_salesperson_by_name(connection: Connection, name: str) -> dict[str, str]:
-    """Look up an agent by the name written in a submission's notes.
+def reconcile_identity(connection: Connection, submission: Submission) -> Submission:
+    """Preserve the deployed id after editable identity fields are corrected.
 
-    A two-agent post names the co-agent in prose — "Listed by Stacey Abbott,
-    hosted by Jason Vetter" — so there is no email to look them up by. Matching
-    on first and last name is how the roster is reached at all.
-
-    Args:
-        connection: An open database connection.
-        name: A full name as written in the notes.
-
-    Returns:
-        Their row as a dict, or empty when the roster does not have them. Empty
-        is a question for Carmen, never a reason to put the other agent's
-        details in the slot.
-
-    Raises:
-        sqlite3.Error: on a query failure.
+    Google Forms keeps the submission timestamp stable when an operator edits
+    email or address, while Gable's deployed hash includes both editable
+    fields. Every entry path, including the manual row runner, must therefore
+    resolve the timestamp before storing or opening work.
     """
-    parts = [part for part in name.replace(",", " ").split() if part]
-    if len(parts) < 2:
-        return {}
-    first, last = parts[0].lower(), parts[-1].lower()
-    row = connection.execute(
-        "SELECT * FROM salespeople WHERE LOWER(first_name) = ? AND LOWER(last_name) = ?",
-        (first, last),
-    ).fetchone()
-    return dict(row) if row else {}
+    prior_id = store.response_id_for_timestamp(connection, submission.submitted_at)
+    if prior_id and prior_id != submission.response_row_id:
+        return replace(submission, response_row_id=prior_id)
+    return submission
 
 
 def find_salesperson(connection: Connection, email: str) -> dict[str, str]:

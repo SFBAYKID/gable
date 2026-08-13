@@ -18,16 +18,14 @@ trusted to the caller:
 4. **Gable posts to one channel.** The mention handler replies where it was
    spoken to; nothing else broadcasts.
 
-Run it with `python -m gable.slackapp.app`, or under the systemd unit in
-`deploy/`.
+Production construction and Socket Mode lifecycle live in
+``gable.slackapp.runtime``; importing this module performs no I/O.
 """
 
 from __future__ import annotations
 
 import logging
-import os
 import re
-import sys
 from collections.abc import Callable
 from typing import Any, Final
 
@@ -57,14 +55,15 @@ _CLIENT_FOOTER: Final[re.Pattern[str]] = re.compile(
 #: What Gable says when it genuinely cannot form a reply. Deliberately not an
 #: apology loop: it says what it can still do.
 FALLBACK: Final[str] = (
-    "Something went wrong at my end just now. Ask me again, or tell me which "
-    "listing you mean and I'll pick it up from there."
+    "I could not finish answering that Slack request because the reply step failed. "
+    "I did not make or confirm a flyer change. Ask me again."
 )
 
 ProgressReporter = Callable[[str], None]
 FileShareHandler = Callable[[dict[str, Any], Any, ProgressReporter], str]
 ActionHandler = Callable[[Decision, str, ProgressReporter], str]
 Thinker = Callable[..., Decision]
+CommandHandler = Callable[[str], tuple[str, ...]]
 
 ACTION_STAGES: Final[dict[str, str]] = {
     "set_font_size": "is updating the flyer text...",
@@ -108,6 +107,15 @@ def clean_mention_text(text: str) -> str:
     without_mentions = _MENTION.sub(" ", text or "")
     without_footer = _CLIENT_FOOTER.sub(" ", without_mentions)
     return " ".join(without_footer.split())
+
+
+def speaker_allowed(user_id: str, allowed_user_ids: frozenset[str]) -> bool:
+    """Return whether a Slack event came from Carmen or Chase.
+
+    An empty set exists only for isolated unit construction. Production config
+    requires explicit stable user IDs; display names are not an access check.
+    """
+    return not allowed_user_ids or user_id in allowed_user_ids
 
 
 def safe_reply(text: str) -> str:
@@ -395,20 +403,82 @@ def answer_thread_reply(
             logger.exception("could not deliver the thread fallback either")
 
 
+def answer_slash_command(
+    command: dict[str, Any],
+    ack: Callable[..., Any],
+    respond: Callable[..., Any],
+    handler: CommandHandler | None,
+    *,
+    allowed_channel: str,
+    allowed_user_ids: frozenset[str],
+) -> None:
+    """Acknowledge and route one operator-only ``/gable`` request.
+
+    Slack requires acknowledgement within three seconds, before database or
+    Drive work. The business operation lives in ``slackapp.commands``; this
+    boundary only enforces channel and speaker ownership and posts its safe
+    ephemeral result.
+
+    Args:
+        command: Bolt slash-command payload.
+        ack: Bolt acknowledgement function.
+        respond: Bolt response-URL helper.
+        handler: Parsed command service, or None during isolated bootstrap.
+        allowed_channel: Gable's one configured channel.
+        allowed_user_ids: Carmen and Chase's stable Slack user IDs.
+
+    Raises:
+        Nothing. Unauthorized commands are acknowledged silently; operational
+        failures receive a plain ephemeral sentence.
+    """
+    # Vendor contract: commands must be acknowledged before slow work.
+    # https://docs.slack.dev/tools/bolt-python/concepts/commands/
+    ack()
+    if allowed_channel and str(command.get("channel_id") or "") != allowed_channel:
+        return
+    if not speaker_allowed(str(command.get("user_id") or ""), allowed_user_ids):
+        return
+    if handler is None:
+        respond(
+            text="Gable's operator commands are not available right now.",
+            response_type="ephemeral",
+        )
+        return
+    try:
+        messages = handler(str(command.get("text") or ""))
+        for message in messages:
+            respond(text=safe_reply(message), response_type="ephemeral")
+    except Exception:
+        logger.exception("a slash command response failed")
+        respond(
+            text=(
+                "I could not deliver the command result. Check Gable's status before "
+                "trying it again."
+            ),
+            response_type="ephemeral",
+        )
+
+
 def build_app(
+    bot_token: str,
     file_share_handler: FileShareHandler | None = None,
     action_handler: ActionHandler | None = None,
+    command_handler: CommandHandler | None = None,
     allowed_channel: str = "",
+    allowed_user_ids: frozenset[str] = frozenset(),
     thinker: Thinker = think,
 ) -> Any:  # noqa: ANN401 - slack_bolt.App, imported lazily
     """Construct the Bolt app with its handlers registered.
 
     Args:
+        bot_token: Validated single-workspace bot credential.
         file_share_handler: Production photo workflow. Optional so import and
             isolated conversation tests need no Google or database clients.
         action_handler: Executes model-selected edits against a thread's flyer.
+        command_handler: Executes the six documented operator subcommands.
         allowed_channel: The only channel Gable may answer. Blank preserves the
             isolated app bootstrap used by connection checks.
+        allowed_user_ids: The only two people Gable may answer in production.
         thinker: Conversation decision function. Production supplies a
             budget-guarded wrapper; isolated checks use the pure default.
 
@@ -422,27 +492,31 @@ def build_app(
     """
     from slack_bolt import App
 
-    token = os.environ.get("SLACK_BOT_TOKEN", "")
-    if not token:
+    if not bot_token:
         msg = "SLACK_BOT_TOKEN is not set, so Gable would start and answer nobody"
         raise RuntimeError(msg)
 
-    # Bolt auto-enables an OAuth installation store when it sees SLACK_CLIENT_ID
-    # and SLACK_CLIENT_SECRET, and then *ignores the bot token entirely* — it
-    # says so in a warning that is easy to miss in a healthy-looking startup log.
-    # Gable is a single-workspace app installed once; those two variables are
-    # kept only so a future distribution does not need a scavenger hunt. Hiding
-    # them here keeps Bolt on the token we actually authenticate with.
-    for oauth_only in ("SLACK_CLIENT_ID", "SLACK_CLIENT_SECRET"):
-        os.environ.pop(oauth_only, None)
-
-    app = App(token=token, logger=logger)
+    app = App(token=bot_token, signing_secret="", logger=logger)
     thread_ownership = ThreadOwnership()
+
+    @app.command("/gable")
+    def handle_command(command: dict[str, Any], ack: Any, respond: Any) -> None:  # noqa: ANN401
+        """Acknowledge immediately, then delegate the requested operation."""
+        answer_slash_command(
+            command,
+            ack,
+            respond,
+            command_handler,
+            allowed_channel=allowed_channel,
+            allowed_user_ids=allowed_user_ids,
+        )
 
     @app.event("app_mention")
     def handle_mention(event: dict[str, Any], say: Any, client: Any) -> None:  # noqa: ANN401
         """Answer a direct mention, in the channel Gable is allowed to speak in."""
         if allowed_channel and event.get("channel") != allowed_channel:
+            return
+        if not speaker_allowed(str(event.get("user") or ""), allowed_user_ids):
             return
         answer_mention(event, say, client, thinker, action_handler)
 
@@ -461,6 +535,8 @@ def build_app(
         try:
             if allowed_channel and event.get("channel") != allowed_channel:
                 return
+            if not speaker_allowed(str(event.get("user") or ""), allowed_user_ids):
+                return
             route = thread_ownership.route(
                 event,
                 client,
@@ -476,38 +552,3 @@ def build_app(
             logger.exception("message handler failed")
 
     return app
-
-
-def main() -> int:
-    """Start the Socket Mode listener and block.
-
-    Returns:
-        A process exit code. Non-zero on a configuration problem, so systemd
-        restarts rather than sitting there looking healthy.
-
-    Raises:
-        Nothing.
-    """
-    from dotenv import load_dotenv
-
-    load_dotenv()
-    logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s %(message)s")
-
-    app_token = os.environ.get("SLACK_APP_TOKEN", "")
-    if not app_token:
-        logger.error("SLACK_APP_TOKEN is not set; Socket Mode cannot connect")
-        return 2
-    try:
-        from slack_bolt.adapter.socket_mode import SocketModeHandler
-
-        handler = SocketModeHandler(build_app(), app_token)
-        logger.info("Gable is listening")
-        handler.start()  # type: ignore[no-untyped-call]
-    except RuntimeError:
-        logger.exception("Gable could not start")
-        return 2
-    return 0
-
-
-if __name__ == "__main__":
-    sys.exit(main())

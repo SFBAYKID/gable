@@ -106,7 +106,7 @@ def test_the_mini_model_is_never_sent_input_fidelity() -> None:
     VERIFIED live 2026-08-11 against the real endpoint: sending it returns
     HTTP 400 `input_fidelity 'high' is not supported for gpt-image-1-mini`.
     This test previously asserted the opposite, which is why enlargement failed
-    on every call — `gpt-image-1-mini` is the configured default.
+    on every call — `gpt-image-1-mini` was the configured default at the time.
     """
     post = FakePost(_jpeg(1024, 1536))
 

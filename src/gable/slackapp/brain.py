@@ -16,8 +16,10 @@ Three things make this safe rather than merely clever:
 3. **Not knowing is a valid answer.** The system prompt says so explicitly, and
    `ask_clarifying` is a first-class tool rather than a failure path.
 
-Uses `GABLE_CONVERSATION_MODEL` (default `gpt-5-mini`) — chosen on cost, since
-this is the highest-volume path in the product. See `.env.example`.
+Uses `GABLE_CONVERSATION_MODEL` (default `gpt-5.6-sol`). The hard spend ledger
+still bounds the path, but ambiguous flyer edits and source-template decisions
+use the same flagship reasoning tier as the visual gate because a cheap wrong
+action costs more than this low-volume conversation call. See `.env.example`.
 
 Does not handle: sending anything to Slack, or executing the tool it picks.
 """
@@ -25,19 +27,22 @@ Does not handle: sending anything to Slack, or executing the tool it picks.
 from __future__ import annotations
 
 import json
-import os
+import logging
 import urllib.error
 import urllib.request
 from dataclasses import dataclass, field
 from typing import Any, Final
 
-from gable.slackapp.style import humanize_error, is_clean, strip_to_plain
+from gable.slackapp.style import is_clean, strip_to_plain
 
-#: OpenAI chat completions. Documented at
-#: https://platform.openai.com/docs/api-reference/chat
-_ENDPOINT: Final[str] = "https://api.openai.com/v1/chat/completions"
+#: GPT-5.6 reasoning with function tools belongs on Responses. Chat Completions
+#: rejects that combination unless reasoning is disabled, which silently took
+#: Gable's most important ambiguity handling offline.
+_ENDPOINT: Final[str] = "https://api.openai.com/v1/responses"
 
 _TIMEOUT_SECONDS: Final[int] = 60
+_DEFAULT_MODEL: Final[str] = "gpt-5.6-sol"
+logger = logging.getLogger("gable.slack.brain")
 
 #: What Gable is and how it speaks. Deliberately long: the style rules are the
 #: expensive part to get wrong, and repeating them here is cheaper than
@@ -72,13 +77,16 @@ WHAT YOU KNOW
   shared Generic Templates folder and the file name must match the request type.
   If no matching template is filed, you say so and stop. You never substitute
   a different design.
-- The agent's name, phone, email and headshot come from the roster. You do not
-  ask for them and you do not invent them.
+- The submitted name and email identify the agent. Their phone comes from the
+  contact workbook and their headshot comes from Head Shots. If either source
+  is missing something the chosen design needs, name what is missing and tell
+  Carmen or Chase where to add it; never invent or web-correct it.
 - You look up public facts yourself — beds, baths, square footage — from the
   address.
-- You DO ask when something is contradictory or genuinely unknowable: a sold
-  listing with no closing price, an open house with no time, or which photo to
-  use.
+- You DO ask when something is contradictory or genuinely unknowable: a price
+  reduction with no new price, an open house with no time, or which photo to
+  use. A sold request may omit its closing price only when its chosen design has
+  no price field; Gable's preflight names the missing field before building.
 
 WHAT YOU CANNOT DO — never offer any of these
 - You have no MLS access. You cannot pull MLS photos, MLS numbers, or listing
@@ -280,7 +288,7 @@ class Decision:
 
 
 def _post(payload: dict[str, Any], api_key: str) -> dict[str, Any]:
-    """One call to the chat endpoint.
+    """One call to the Responses endpoint.
 
     Args:
         payload: The request body.
@@ -303,6 +311,64 @@ def _post(payload: dict[str, Any], api_key: str) -> dict[str, Any]:
         return decoded
 
 
+def _response_tools() -> list[dict[str, Any]]:
+    """Translate the local tool catalogue into the Responses API shape."""
+    result: list[dict[str, Any]] = []
+    for tool in TOOLS:
+        function = tool.get("function", {})
+        result.append(
+            {
+                "type": "function",
+                "name": function.get("name", ""),
+                "description": function.get("description", ""),
+                "parameters": function.get("parameters", {}),
+            }
+        )
+    return result
+
+
+def _response_result(body: dict[str, Any]) -> tuple[str, str, dict[str, Any]]:
+    """Extract reply text and the first direct function call from Responses."""
+    if body.get("status") != "completed":
+        return "", "", {}
+    text_parts: list[str] = []
+    tool_name = ""
+    arguments: dict[str, Any] = {}
+    for item in body.get("output", []):
+        if not isinstance(item, dict):
+            continue
+        if item.get("type") == "function_call" and not tool_name:
+            tool_name = str(item.get("name") or "")
+            raw_arguments = item.get("arguments") or "{}"
+            try:
+                parsed = json.loads(raw_arguments) if isinstance(raw_arguments, str) else {}
+            except json.JSONDecodeError:
+                parsed = {}
+            if isinstance(parsed, dict):
+                arguments = parsed
+            continue
+        if item.get("type") != "message":
+            continue
+        for content in item.get("content", []):
+            if not isinstance(content, dict):
+                continue
+            if content.get("type") == "refusal":
+                return "", "", {}
+            if content.get("type") == "output_text" and isinstance(content.get("text"), str):
+                text_parts.append(str(content["text"]))
+    return "".join(text_parts).strip(), tool_name, arguments
+
+
+def _provider_unavailable() -> Decision:
+    """Return one provider-specific refusal that cannot blame Google Slides."""
+    return Decision(
+        reply=(
+            "I couldn't finish working out what you meant because the language model "
+            "was unavailable. I did not change the flyer. Try again."
+        )
+    )
+
+
 def think(
     message: str,
     history: list[tuple[str, str]] | None = None,
@@ -320,7 +386,7 @@ def think(
         speaker: The first name of whoever is talking, when known. Passed so a
             greeting names the person who actually asked rather than listing
             everyone who might be in the channel.
-        api_key: OpenAI key. Defaults to the environment.
+        api_key: OpenAI key passed by validated runtime configuration.
         model: Override the configured conversation model.
 
     Returns:
@@ -336,7 +402,7 @@ def think(
     if shortcut is not None:
         return shortcut
 
-    key = api_key or os.environ.get("OPENAI_IMAGE_API_KEY", "")
+    key = api_key or ""
     if not key:
         return Decision(
             reply=(
@@ -345,47 +411,49 @@ def think(
             )
         )
 
-    messages: list[dict[str, Any]] = [{"role": "system", "content": SYSTEM_PROMPT}]
+    instructions = [SYSTEM_PROMPT]
     if speaker:
-        messages.append(
-            {"role": "system", "content": f"You are speaking to {speaker}. Use their name."}
-        )
+        instructions.append(f"You are speaking to {speaker}. Use their name.")
     if context:
-        messages.append({"role": "system", "content": f"About the listing in hand:\n{context}"})
+        instructions.append(f"About the listing in hand:\n{context}")
+    messages: list[dict[str, Any]] = []
     for who, text in history or []:
         role = "assistant" if who.lower() in {"gable", "assistant"} else "user"
         messages.append({"role": role, "content": text})
     messages.append({"role": "user", "content": message})
 
     payload = {
-        "model": model or os.environ.get("GABLE_CONVERSATION_MODEL", "gpt-5-mini"),
-        "messages": messages,
-        "tools": TOOLS,
+        "model": model or _DEFAULT_MODEL,
+        "instructions": "\n\n".join(instructions),
+        "input": messages,
+        "tools": _response_tools(),
         "tool_choice": "auto",
-        "max_completion_tokens": 2000,
+        "reasoning": {"effort": "medium"},
+        "text": {"verbosity": "low"},
+        "max_output_tokens": 2000,
+        "store": False,
     }
 
     try:
         body = _post(payload, key)
     except urllib.error.HTTPError as exc:
-        raw = exc.read().decode("utf-8", "replace")
-        return Decision(reply=humanize_error(raw, "working out what you meant"))
-    except Exception as exc:
-        return Decision(reply=humanize_error(str(exc), "working out what you meant"))
+        # Do not read or log the body. Provider failures can echo request data,
+        # and no raw error belongs in Slack or the journal.
+        logger.warning("conversation model returned HTTP %s", exc.code)
+        return _provider_unavailable()
+    except Exception:
+        logger.exception("the conversation model could not be reached")
+        return _provider_unavailable()
 
-    choice = (body.get("choices") or [{}])[0].get("message", {})
-    said = (choice.get("content") or "").strip()
-    calls = choice.get("tool_calls") or []
+    said, tool_name, arguments = _response_result(body)
+    if body.get("status") != "completed":
+        logger.warning("conversation model returned an incomplete response")
+        return _provider_unavailable()
+    if not said and not tool_name:
+        logger.warning("conversation model returned no usable text or function call")
+        return _provider_unavailable()
 
-    tool_name, arguments = "", {}
-    if calls:
-        call = calls[0].get("function", {})
-        tool_name = str(call.get("name", ""))
-        try:
-            arguments = json.loads(call.get("arguments") or "{}")
-        except json.JSONDecodeError:
-            # A malformed argument blob is the model's problem, not Carmen's.
-            arguments = {}
+    if tool_name:
         if tool_name == "ask_clarifying" and not said:
             said = str(arguments.get("question", "")).strip()
         elif not said:

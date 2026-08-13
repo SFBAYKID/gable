@@ -127,12 +127,13 @@ def check_slack_channel(env: dict[str, str]) -> Result:
         return Result("Slack channel", OK, f"#{ch.get('name')} ({kind}), {member}")
     if body.get("error") == "missing_scope":
         # conversations.info needs channels:read / groups:read, which Gable does
-        # not otherwise require — chat:write.public lets it post to a channel it
-        # is not a member of. Not a failure, just an unverifiable channel id.
+        # not otherwise require. Gable must already be a member of its private
+        # operating channel; without the optional read scope this cheap checker
+        # cannot independently verify the id or membership.
         return Result(
             "Slack channel",
             SKIP,
-            "cannot verify id without channels:read (optional; posting does not need it)",
+            "cannot verify id or membership without the optional channels:read scope",
         )
     return Result("Slack channel", FAIL, str(body.get("error")))
 
@@ -152,7 +153,7 @@ def check_openai_models(env: dict[str, str]) -> Result:
     if status == 200:
         ids = {m.get("id") for m in body.get("data", []) if isinstance(m.get("id"), str)}
         wanted = {
-            env.get("GABLE_CONVERSATION_MODEL", "gpt-5-mini"),
+            env.get("GABLE_CONVERSATION_MODEL", "gpt-5.6-sol"),
             env.get("GABLE_VISION_MODEL", "gpt-5.6-sol"),
             env.get("GABLE_IMAGE_MODEL_HQ", "gpt-image-2"),
         }
@@ -218,7 +219,7 @@ def check_google(env: dict[str, str]) -> list[Result]:
     creds = service_account.Credentials.from_service_account_info(  # type: ignore[no-untyped-call]
         info,
         scopes=[
-            "https://www.googleapis.com/auth/spreadsheets",
+            "https://www.googleapis.com/auth/spreadsheets.readonly",
             "https://www.googleapis.com/auth/drive",
             "https://www.googleapis.com/auth/presentations",
         ],
@@ -263,11 +264,40 @@ def check_google(env: dict[str, str]) -> list[Result]:
         except Exception as exc:
             results.append(Result("Google Drive", FAIL, _short(exc)))
 
-    try:
-        build("slides", "v1", credentials=creds, cache_discovery=False)
-        results.append(Result("Google Slides", OK, "API client built; enabled on this project"))
-    except Exception as exc:
-        results.append(Result("Google Slides", FAIL, _short(exc)))
+    if not drive_id:
+        results.append(
+            Result("Google Slides", SKIP, "GABLE_DRIVE_ID is needed to find a test presentation")
+        )
+    else:
+        try:
+            drive_for_slides = build("drive", "v3", credentials=creds, cache_discovery=False)
+            candidates = (
+                drive_for_slides.files()
+                .list(
+                    corpora="drive",
+                    driveId=drive_id,
+                    includeItemsFromAllDrives=True,
+                    supportsAllDrives=True,
+                    q=("mimeType='application/vnd.google-apps.presentation' and trashed=false"),
+                    fields="files(id)",
+                    pageSize=1,
+                )
+                .execute()
+                .get("files", [])
+            )
+            if not candidates:
+                results.append(
+                    Result("Google Slides", SKIP, "the shared drive has no presentation to read")
+                )
+            else:
+                slides = build("slides", "v1", credentials=creds, cache_discovery=False)
+                slides.presentations().get(
+                    presentationId=candidates[0]["id"],
+                    fields="presentationId",
+                ).execute()
+                results.append(Result("Google Slides", OK, "presentations.get succeeded"))
+        except Exception as exc:
+            results.append(Result("Google Slides", FAIL, _short(exc)))
 
     return results
 

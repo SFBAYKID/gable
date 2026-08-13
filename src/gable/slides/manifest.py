@@ -53,10 +53,6 @@ class Manifest:
     template: str
     fields: tuple[Field, ...] = ()
 
-    def required_names(self) -> tuple[str, ...]:
-        """Fields that must be filled for this template to be renderable."""
-        return tuple(f.name for f in self.fields if f.required)
-
     def find(self, name: str) -> Field | None:
         """Look a field up by name."""
         return next((f for f in self.fields if f.name == name), None)
@@ -223,7 +219,7 @@ def validate(manifest: Manifest, values: dict[str, str]) -> list[Problem]:
         if not value:
             continue
 
-        if slot.kind is ADDRESS and not ADDRESS_SHAPE.match(value):
+        if slot.kind == ADDRESS and not ADDRESS_SHAPE.match(value):
             problems.append(
                 Problem(
                     slot.name,

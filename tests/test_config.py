@@ -48,7 +48,7 @@ def test_defaults_match_dotenv_example() -> None:
     assert settings.photo_jpeg_quality == 85
     assert settings.photo_public_root == Path("/var/www/gable-photos")
     assert settings.photo_public_base == "http://143.110.146.87"
-    assert settings.conversation_model == "gpt-5-mini"
+    assert settings.conversation_model == "gpt-5.6-sol"
     assert settings.vision_model == "gpt-5.6-sol"
     assert settings.image_model_hq == "gpt-image-2"
     assert settings.tab_responses == "Form Responses 1"
@@ -104,6 +104,11 @@ def test_missing_credentials_are_reported_when_required() -> None:
     joined = " ".join(excinfo.value.problems)
     assert "SLACK_BOT_TOKEN" in joined
     assert "FIRECRAWL_API_KEY" in joined
+    assert "GABLE_SLACK_ALLOWED_USER_IDS" in joined
+    assert "GABLE_DRIVE_ID" in joined
+    assert "GABLE_DRIVE_TEMPLATES_FOLDER_ID" in joined
+    assert "GABLE_DRIVE_OUTPUT_FOLDER_ID" in joined
+    assert "OPENAI_IMAGE_API_KEY" in joined
 
 
 def test_credential_value_never_appears_in_an_error_message() -> None:
@@ -135,11 +140,33 @@ def test_service_account_path_accepted_when_it_exists(tmp_path: Path) -> None:
             "GOOGLE_SERVICE_ACCOUNT_FILE": str(key),
             "SLACK_BOT_TOKEN": "xoxb-t",
             "SLACK_APP_TOKEN": "xapp-t",
+            "GABLE_SLACK_ALLOWED_USER_IDS": "U12345678,U87654321",
             "FIRECRAWL_API_KEY": "fc-t",
+            "GABLE_DRIVE_ID": "0Adrive",
+            "GABLE_DRIVE_TEMPLATES_FOLDER_ID": "templates",
+            "GABLE_DRIVE_OUTPUT_FOLDER_ID": "output",
+            "OPENAI_IMAGE_API_KEY": "openai-t",
         },
         require_credentials=True,
     )
     assert settings.google_service_account_file == key
+
+
+def test_only_two_stable_slack_user_ids_are_accepted() -> None:
+    settings = _load(GABLE_SLACK_ALLOWED_USER_IDS=" U12345678, U87654321 ")
+    assert settings.slack_allowed_user_ids == frozenset({"U12345678", "U87654321"})
+
+    with pytest.raises(ConfigError, match="exactly two"):
+        _load(GABLE_SLACK_ALLOWED_USER_IDS="U12345678")
+    with pytest.raises(ConfigError, match="beginning with U or W"):
+        _load(GABLE_SLACK_ALLOWED_USER_IDS="C12345678,U87654321")
+
+
+def test_stale_oauth_settings_are_rejected_before_bolt_can_ignore_the_bot_token() -> None:
+    with pytest.raises(ConfigError, match="SLACK_CLIENT_ID"):
+        _load(SLACK_CLIENT_ID="legacy-client")
+    with pytest.raises(ConfigError, match="SLACK_CLIENT_SECRET"):
+        _load(SLACK_CLIENT_SECRET="legacy-secret")
 
 
 # --- coercion ---------------------------------------------------------------
@@ -314,6 +341,10 @@ def test_env_example_documents_every_variable_the_code_reads() -> None:
             config_source,
         )
     )
+    # These two names are deliberately rejected, not read. Documenting them as
+    # usable settings would recreate the production OAuth/token conflict the
+    # validator exists to prevent.
+    read -= {"SLACK_CLIENT_ID", "SLACK_CLIENT_SECRET"}
     documented = set(re.findall(r"^([A-Z_]+)=", example, re.M))
     undocumented = sorted(read - documented)
     assert not undocumented, f".env.example is missing: {undocumented}"

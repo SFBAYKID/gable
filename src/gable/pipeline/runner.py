@@ -31,7 +31,7 @@ from typing import Any
 
 from gable.db import store
 from gable.listings.enrich import Facts
-from gable.listings.intake import Intake, price_note
+from gable.listings.intake import Intake, needs_two_agents, price_note
 from gable.pipeline import audit, people, run_values
 from gable.pipeline.orchestrator import Outcome, after_research, agent_slots, judge, plan
 from gable.pipeline.vision import Inspection, inspect
@@ -76,6 +76,9 @@ class Runner:
     copy_template: Callable[[str, str], tuple[str, str]]
     #: Applies find/replace pairs to a presentation.
     fill: Callable[[str, dict[str, str]], int]
+    #: Refuses a source whose proactive template audit is still unresolved.
+    #: Empty means the source is cleared for listing-specific preflight.
+    template_clearance: Callable[[str, str], str] = lambda _fid, _label: ""
     #: Reads every text box with its size and geometry, for fitting.
     read_text_boxes: Callable[[str], list[fitting.TextBox]] = lambda _fid: []
     #: Measures the current source template and this listing's real values
@@ -109,13 +112,8 @@ class Runner:
     #: Looks up public facts for an address.
     research: Callable[[str], Facts] = lambda _address: Facts()
     #: Publishes this agent's headshot and returns a URL Slides can fetch.
-    #: Empty leaves the design's own face, which is a flyer worth a look.
+    #: Preflight stops if the design has a headshot well and this stays empty.
     headshot_for: Callable[[str], str] = lambda _name: ""
-    #: Records an agent the roster has never seen, by looking them up on the
-    #: brokerage site. Returns the sentence saying what was written, or empty
-    #: when nothing was found — never raises, because a flyer with the office
-    #: number and a note is better than no flyer.
-    record_unknown_agent: Callable[[Intake], str] = lambda _intake: ""
     #: Names the stage being worked on, for Slack's waiting indicator. Cosmetic
     #: by contract: it is called around real work and must never affect it.
     progress: Callable[[str], None] = lambda _stage: None
@@ -138,6 +136,19 @@ class Runner:
         """
         try:
             run = store.start_run(self.connection, submission.response_row_id)
+        except store.RunAlreadyActiveError:
+            latest = store.latest_run(self.connection, submission.response_row_id)
+            result = RunResult(
+                run_id=latest.run_id if latest else "",
+                status=latest.status if latest else "failed",
+            )
+            spoken = safe(
+                "This listing is already being worked on, so I did not start a second "
+                "copy of the same work."
+            )
+            result.said.append(spoken)
+            self.say(spoken, latest.slack_thread_ts if latest else None)
+            return result
         except store.RunLimitReachedError:
             latest = store.latest_run(self.connection, submission.response_row_id)
             result = RunResult(
@@ -154,12 +165,20 @@ class Runner:
         result = RunResult(run_id=run.run_id, status="pending")
         return self._perform(run.run_id, submission.intake, result)
 
-    def resume(self, submission: repo.Submission, run_id: str) -> RunResult:
+    def resume(
+        self,
+        submission: repo.Submission,
+        run_id: str,
+        *,
+        resume_fields: dict[str, str | int] | None = None,
+    ) -> RunResult:
         """Continue an existing paused run after Carmen supplies its photo.
 
         Args:
             submission: The locally stored intake row for the paused run.
             run_id: The existing run to continue; no new attempt is opened.
+            resume_fields: Photo provenance or other run fields that must be
+                committed atomically with the paused-run claim.
 
         Returns:
             What the resumed run did.
@@ -167,13 +186,20 @@ class Runner:
         Raises:
             Nothing. The same failure boundary as a new run records problems.
         """
-        store.set_status(
-            self.connection,
-            run_id,
-            "pending",
-            "resumed from its Slack thread",
-            failure_reason="",
-        )
+        fields = {"failure_reason": "", **(resume_fields or {})}
+        if not store.claim_paused_run(self.connection, run_id, fields):
+            current = store.run_by_id(self.connection, run_id)
+            result = RunResult(
+                run_id=run_id,
+                status=current.status if current is not None else "failed",
+            )
+            spoken = safe(
+                "This listing is already being rechecked or is no longer waiting, so I "
+                "did not start another copy of the same work."
+            )
+            result.said.append(spoken)
+            self.say(spoken, self.origin_thread_ts or None)
+            return result
         result = RunResult(run_id=run_id, status="pending")
         return self._perform(run_id, submission.intake, result)
 
@@ -231,31 +257,24 @@ class Runner:
         if slots.outcome is Outcome.ASK:
             return self._ask(run_id, slots.say, slots.questions, result)
 
-        # A two-agent post names its co-agent in the notes. Both people's
-        # details have to come from the roster, because putting the submitter in
-        # both slots is wrong in a way that looks entirely deliberate on the
-        # finished flyer. Chase's rule when the roster is missing one: say so.
-        co_agent = people.co_agent(self.connection, intake)
-        if co_agent is not None and not co_agent.get("phone"):
-            missing = co_agent.get("_name", "the second agent")
+        # The parser can prove who is listing and who is hosting, but the
+        # generic template contract does not yet identify which text and photo
+        # objects belong to each role. Filling repeated labels by page order
+        # produced a polished but false flyer in the old partial path. Stop
+        # before source selection until a two-agent template has an explicit,
+        # testable slot contract.
+        if needs_two_agents(intake):
             return self._ask(
                 run_id,
-                f"This one names two agents and I do not have contact details for "
-                f"{missing}. What is their phone number and email?",
+                "This request needs two agent placements, but that template layout is not "
+                "certified yet. I cannot prove which text and photo spot belongs to the "
+                "listing agent and which belongs to the hosting agent, so I have not built it.",
                 [],
                 result,
+                status="needs_template",
             )
 
-        # 5a. An agent nobody has recorded is looked up and written down. This
-        # happens before the values are built, so the flyer carries their own
-        # number rather than the office line, and what was written is said out
-        # loud with the page it came from so a wrong detail is correctable.
-        added = ""
-        if not repo.find_salesperson(self.connection, intake.agent_email):
-            self.progress("is looking up the agent...")
-            added = self.record_unknown_agent(intake)
-
-        # 5b. Select and measure the current source before asking for the photo
+        # 5a. Select and measure the current source before asking for the photo
         # or creating a Drive copy. A template correction therefore costs no
         # abandoned flyer, and resuming this same run reads the updated file.
         self.progress("is choosing the design...")
@@ -280,14 +299,25 @@ class Runner:
             self.connection,
             run_id,
             "pending",
-            f"selected {template_label} for preflight",
+            f"selected {template_label} for source clearance and preflight",
             template_file_id=template_id,
             template_label=template_label,
         )
+        clearance_problem = self.template_clearance(template_id, template_label)
+        if clearance_problem:
+            return self._ask(
+                run_id,
+                clearance_problem,
+                [],
+                result,
+                status="needs_template",
+            )
         resolution = template_fields.resolve(self.read_slide_text(template_id))
         values = run_values.for_intake(self.connection, intake, known)
         values["address"] = template_manifest.normalise_address(values.get("address", ""))
         values["hero_photo"] = self.hero_photo_url
+        if not values.get("headshot"):
+            values["headshot"] = self.headshot_for(values.get("agent_name", ""))
 
         self.progress("is measuring the design...")
         measured = self.preflight_template(
@@ -325,11 +355,9 @@ class Runner:
             "building",
             f"preflight passed for {template_label}",
         )
-        if step.say:
-            result.said.append(safe(step.say))
+        run_notes = [safe(step.say)] if step.say else []
 
-        # What THIS design needs, not one global column set. Two flyers were
-        # reviewed and their field sets differed; treating them as one is what
+        # These designs differ; one global field set is what
         # shipped a flyer carrying the literal words "Phone" and "Website".
         manifest = template_manifest.manifest_for(template_label)
         field_problems = template_manifest.validate(manifest, values)
@@ -478,7 +506,7 @@ class Runner:
         # The sample face is the most visible thing Gable gets wrong: one agent's
         # name beside another agent's photograph. Best effort — a design with no
         # headshot frame is still a deliverable flyer.
-        headshot_url = values.get("headshot") or self.headshot_for(values.get("agent_name", ""))
+        headshot_url = values.get("headshot", "")
         headshot_failed = False
         if placed and headshot_url:
             self.progress("is putting the agent's face on it...")
@@ -599,6 +627,7 @@ class Runner:
                 "\n".join(
                     [
                         spoken,
+                        *run_notes,
                         *advisories,
                         f"Have a look and tell me what to change. <{output_url}|Open it>",
                     ]
@@ -621,6 +650,7 @@ class Runner:
         result.status = "delivered"
         result.output_url = output_url
         photo_note = self._photo_note(run_id)
+        missing_price_note = price_note(intake, "price" in resolution.fields)
         # One message, carrying the link and everything worth knowing with it.
         # Four separate messages for one outcome is how a thread stops being
         # readable, and the last of them looked like a question.
@@ -628,13 +658,10 @@ class Runner:
             "\n".join(
                 [
                     f"Your flyer is ready. <{output_url}|Open the flyer>",
+                    *run_notes,
                     *([photo_note] if photo_note else []),
                     *advisories,
-                    *[
-                        aside
-                        for aside in (added, price_note(intake, "price" in resolution.fields))
-                        if aside
-                    ],
+                    *([missing_price_note] if missing_price_note else []),
                 ]
             )
         )

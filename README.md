@@ -33,6 +33,9 @@ engineering constraints and the decision history live in `CLAUDE.md` and
 7. Only a confident pass is linked as ready. The output is a live Slides file,
    so Carmen can also correct it directly.
 
+When a cycle attempts at least two listings, its channel summary counts only
+delivered files as ready and separates paused, failed, and skipped requests.
+
 Every user-triggered Slack turn, including template rechecks and photo uploads,
 uses the same native purple waiting state and switches to the real work stage
 after the short personality sequence.
@@ -62,6 +65,24 @@ file and checks it again. A listing-specific warning also accepts an explicit
 instruction to run the current design anyway, but structural and unreadable
 problems are never overridable.
 
+Two-agent roles can be read from the form notes, but role-specific text and
+portrait objects are not certified yet. Those requests pause before copying a
+template rather than inferring placement from page order.
+
+## Slack operations
+
+Only the two stable user IDs in `GABLE_SLACK_ALLOWED_USER_IDS` can mention,
+reply to, upload to, or operate Gable. The `/gable` command supports:
+
+- `status` — latest-listing pending, ready, and failed counts plus poll state;
+- `run` — refresh sources and recheck current paused listings in the same run;
+- `retry run ID` — queue one fresh bounded attempt for the latest run;
+- `templates` — list current native Slides files in `Generic Templates`;
+- `pause` and `resume` — control scheduled polling without disabling threads.
+
+Slash replies are ephemeral. A queued paused-listing recheck uses the ordinary
+native purple waiting state in that listing's owned thread.
+
 ## Setup
 
 Requirements are Python 3.11 or newer, a Slack app installed in Socket Mode, a
@@ -82,6 +103,11 @@ python -m gable.slackapp.runtime
 
 Fill `.env` before running connection checks. Never commit it or place the
 service-account JSON inside the repository.
+
+Apply [slack/manifest.json](slack/manifest.json) and reinstall the Slack app when
+the command or scope set changes. Production startup requires the three Drive
+locations, the OpenAI key used by the fail-closed visual gate, and exactly two
+allowed Slack user IDs; legacy Slack OAuth client variables are rejected.
 
 ## Verification
 
@@ -109,6 +135,9 @@ a `finally` block.
 - Hero-photo web search, Drive-photo selection, MLS access, and synthetic
   property-photo generation are not connected. The runtime uses the one photo
   supplied in the listing's Slack thread.
+- The append-only run-event ledger has no operator history viewer yet.
+- Automatic focal-point crop retries and second-model visual consensus are not
+  connected; both need measured reliability evidence before becoming gates.
 - The source-template capacity check estimates average glyph width because the
   Slides API does not expose final line-break layout. Actual values are measured
   again, text is read back after mutation, and the rendered image is the final

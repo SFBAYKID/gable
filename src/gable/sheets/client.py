@@ -117,23 +117,3 @@ class SheetClient:
                 break
         msg = f"could not read {a1_range}: {type(last).__name__}"
         raise SheetError(msg) from last
-
-    def tab_names(self) -> list[str]:
-        """Every tab in the workbook.
-
-        Returns:
-            Tab titles in sheet order.
-
-        Raises:
-            SheetError: if the workbook cannot be read.
-        """
-        try:
-            meta = (
-                self.service.spreadsheets()
-                .get(spreadsheetId=self.spreadsheet_id, fields="sheets.properties.title")
-                .execute()
-            )
-        except Exception as exc:
-            msg = f"could not list tabs: {type(exc).__name__}"
-            raise SheetError(msg) from exc
-        return [s["properties"]["title"] for s in meta.get("sheets", [])]

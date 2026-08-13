@@ -1,5 +1,9 @@
 # Template certification ledger
 
+> Historical evidence from the 2026-08-11 deck walk. It explains defects that
+> drove the current guards; it is not a current runtime status report. See
+> `AUDIT_2026-08-12.md` for the implemented quality and triage path.
+
 What has actually been proved, per request type. Updated as runs complete, not
 batched at the end, so a session that dies mid-way loses nothing.
 

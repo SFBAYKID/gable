@@ -127,7 +127,18 @@ def main(argv: list[str] | None = None) -> int:
         redact_secrets=settings.log_redact_secrets,
     )
 
-    sheets, drive, slides = _google_clients(settings)
+    if not settings.google_service_account_file.is_file():
+        print(
+            "GOOGLE_SERVICE_ACCOUNT_FILE must name a readable credential file "
+            "even for a read-only dry run.",
+            file=sys.stderr,
+        )
+        return 2
+    try:
+        sheets, drive, slides = _google_clients(settings)
+    except Exception:
+        logger.exception("could not construct the Google clients")
+        return 2
     client = SheetClient(spreadsheet_id=settings.sheet_id, service=sheets)
     try:
         submission = read_one(client, args.tab, args.row)
@@ -170,6 +181,7 @@ def main(argv: list[str] | None = None) -> int:
         # for the same reason the poller refreshes it. It lives in the drive
         # now, beside the templates and the headshots.
         sync_contacts(drive, connection, settings.drive_id, settings.drive_templates_folder_id)
+        submission = repo.reconcile_identity(connection, submission)
         store.record_submission(
             connection,
             submission.response_row_id,
@@ -197,8 +209,12 @@ def main(argv: list[str] | None = None) -> int:
             if existing is None:
                 logger.error("row %d has never been run, so there is nothing to resume", args.row)
                 return 2
-            if existing.is_terminal:
-                logger.error("the most recent run for row %d is %s", args.row, existing.status)
+            if not existing.is_paused:
+                logger.error(
+                    "the most recent run for row %d is %s, not paused",
+                    args.row,
+                    existing.status,
+                )
                 return 2
             # Reuse the photo already fitted and published for this run. A
             # resumed run must also stay in its own thread, or the answer

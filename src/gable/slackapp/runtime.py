@@ -22,7 +22,7 @@ from gable.db.schema import apply_migrations, connect
 from gable.logging_setup import configure_logging
 from gable.photos.enhance import EnhancementError, upscale_real_photo
 from gable.pipeline.live import build_runner
-from gable.pipeline.poller import Poller
+from gable.pipeline.poller import BatchOutcome, Poller
 from gable.pipeline.runner import Runner
 from gable.pipeline.template_triage import TemplateTriage
 from gable.pipeline.template_vision import inspect_source_template
@@ -30,9 +30,12 @@ from gable.runtime import RuntimeComponents, serve
 from gable.sheets import repository as repo
 from gable.sheets.client import SheetClient
 from gable.slackapp.app import build_app
+from gable.slackapp.batches import summarize as summarize_batch
 from gable.slackapp.brain import Decision, think
+from gable.slackapp.commands import CommandService
 from gable.slackapp.editing import SlideEditor
 from gable.slackapp.photos import PhotoHandoff
+from gable.slackapp.status import Working
 from gable.slides.library import list_files as list_template_files
 
 logger = logging.getLogger("gable.slack.runtime")
@@ -119,6 +122,9 @@ def build_components(settings: Settings) -> RuntimeComponents:
 
     connection = connect(settings.db_path)
     apply_migrations(connection)
+    interrupted = store.recover_interrupted_runs(connection)
+    if interrupted:
+        logger.warning("marked %d interrupted run(s) failed during startup", interrupted)
 
     # Vendor contract: service-account credentials accept an explicit scope
     # list. https://google-auth.readthedocs.io/en/latest/reference/google.oauth2.service_account.html
@@ -290,6 +296,20 @@ def build_components(settings: Settings) -> RuntimeComponents:
                 action_drive = build(
                     "drive", "v3", credentials=action_credentials, cache_discovery=False
                 )
+                if mode == "check_updated" and run.template_file_id:
+                    # The person has said the source changed. Always reload its
+                    # current Drive revision; a stored ready verdict may belong
+                    # to the version from one second before this reply, before
+                    # the scheduled scanner has observed the edit.
+                    progress("is measuring the updated template...")
+                    verdict = template_triage_for(
+                        action_connection,
+                        action_drive,
+                        action_slides,
+                    ).recheck_file(run.template_file_id, progress)
+                    refreshed = store.template_audit(action_connection, run.template_file_id)
+                    if refreshed is None or refreshed.status != "ready":
+                        return verdict
                 captured: list[str] = []
 
                 def capture(text: str, _requested_thread: str | None) -> str:
@@ -385,17 +405,105 @@ def build_components(settings: Settings) -> RuntimeComponents:
         finally:
             thought_connection.close()
 
-    app = build_app(
-        file_share_handler=photo_handoff.handle,
-        action_handler=execute_action,
-        allowed_channel=settings.slack_channel_id,
-        thinker=guarded_think,
-    )
-
-    def on_submission(submission: repo.Submission) -> None:
+    def on_submission(submission: repo.Submission) -> str:
         """Give one new submission a fresh runner bound to the live clients."""
         runner = build_runner(settings, connection, drive, slides, slack_post)
-        runner.run(submission)
+        return runner.run(submission).status
+
+    def on_batch(outcomes: tuple[BatchOutcome, ...]) -> None:
+        """Post one aggregate only when this pass attempted several listings."""
+        message = summarize_batch(outcomes)
+        if message:
+            slack_post(message, None)
+
+    def on_retry(source_run_id: str) -> None:
+        """Start one explicit fresh attempt on the poller-owned thread."""
+        source = store.run_by_id(connection, source_run_id)
+        if source is None:
+            logger.error("operator retry source %s disappeared before execution", source_run_id)
+            return
+        latest = store.latest_run(connection, source.response_row_id)
+        if latest is None or latest.run_id != source_run_id:
+            logger.info(
+                "operator retry source %s is no longer the latest run; skipping stale request",
+                source_run_id,
+            )
+            return
+        stored = store.load_submission(connection, source.response_row_id)
+        if stored is None:
+            logger.error("operator retry source %s has no stored submission", source_run_id)
+            return
+        submission = repo.Submission(
+            response_row_id=stored.response_row_id,
+            sheet_row=stored.sheet_row,
+            submitted_at=stored.submitted_at,
+            intake=stored.intake,
+            content_hash=stored.content_hash,
+        )
+        build_runner(settings, connection, drive, slides, slack_post).run(submission)
+
+    def on_resume(run_id: str) -> None:
+        """Re-enter one still-paused run after rereading its stored request."""
+        source = store.run_by_id(connection, run_id)
+        if source is None or not source.is_paused:
+            logger.info("operator recheck skipped because run %s is no longer paused", run_id)
+            return
+        stored = store.load_submission(connection, source.response_row_id)
+        if stored is None:
+            logger.error("operator recheck source %s has no stored submission", run_id)
+            return
+        submission = repo.Submission(
+            response_row_id=stored.response_row_id,
+            sheet_row=stored.sheet_row,
+            submitted_at=stored.submitted_at,
+            intake=stored.intake,
+            content_hash=stored.content_hash,
+        )
+
+        def source_is_clear(progress: Callable[[str], None]) -> bool:
+            """Remeasure an unresolved audited source before resuming its listing."""
+            if not source.template_file_id:
+                return True
+            audit = store.template_audit(connection, source.template_file_id)
+            if audit is None or audit.status in {"baseline", "ready"}:
+                return True
+            progress("is measuring the updated template...")
+            verdict = template_triage.recheck_file(source.template_file_id, progress)
+            refreshed = store.template_audit(connection, source.template_file_id)
+            if refreshed is not None and refreshed.status == "ready":
+                return True
+            slack_post(verdict, source.slack_thread_ts or None)
+            return False
+
+        if source.slack_thread_ts:
+            # The slash payload itself has no message timestamp, but a paused
+            # listing does. Attach the same native waiting treatment to that
+            # owned thread while the queued main-thread recheck is running.
+            with Working(
+                app.client,
+                settings.slack_channel_id,
+                source.slack_thread_ts,
+                "is rechecking the listing...",
+            ) as waiting:
+                if not source_is_clear(waiting.stage):
+                    return
+                build_runner(
+                    settings,
+                    connection,
+                    drive,
+                    slides,
+                    slack_post,
+                    hero_photo_url=source.photo_url,
+                    origin_thread_ts=source.slack_thread_ts,
+                    progress=waiting.stage,
+                ).resume(submission, source.run_id)
+            return
+        if not source_is_clear(lambda _stage: None):
+            return
+        build_runner(settings, connection, drive, slides, slack_post).resume(
+            submission,
+            source.run_id,
+        )
 
     poller = Poller(
         client=sheet_client,
@@ -405,9 +513,49 @@ def build_components(settings: Settings) -> RuntimeComponents:
             drive, connection, settings.drive_id, settings.drive_templates_folder_id
         ),
         on_submission=on_submission,
+        on_batch=on_batch,
+        on_retry=on_retry,
+        on_resume=on_resume,
         scan_templates=template_triage.scan_new,
         schedule=settings.poll_schedule,
         max_per_pass=settings.max_batch,
+    )
+
+    def current_template_names() -> list[str]:
+        """Read current design names with a worker-owned Drive client."""
+        command_credentials = service_account.Credentials.from_service_account_file(  # type: ignore[no-untyped-call]
+            str(settings.google_service_account_file), scopes=list(GOOGLE_SCOPES)
+        )
+        command_drive = build(
+            "drive",
+            "v3",
+            credentials=command_credentials,
+            cache_discovery=False,
+        )
+        return [
+            item.name
+            for item in list_template_files(
+                command_drive,
+                settings.drive_id,
+                settings.drive_templates_folder_id,
+            )
+            if item.is_slides
+        ]
+
+    command_service = CommandService(
+        settings.db_path,
+        poller,
+        current_template_names,
+        polling_configured=settings.poll_enabled,
+    )
+    app = build_app(
+        settings.slack_bot_token,
+        file_share_handler=photo_handoff.handle,
+        action_handler=execute_action,
+        command_handler=lambda text: command_service.handle(text).messages,
+        allowed_channel=settings.slack_channel_id,
+        allowed_user_ids=settings.slack_allowed_user_ids,
+        thinker=guarded_think,
     )
     socket = SocketModeHandler(app, settings.slack_app_token)
     return RuntimeComponents(

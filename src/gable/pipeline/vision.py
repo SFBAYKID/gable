@@ -20,8 +20,6 @@ from __future__ import annotations
 import base64
 import json
 import logging
-import os
-import urllib.error
 import urllib.request
 from dataclasses import dataclass, field
 from typing import Any, Final
@@ -32,6 +30,7 @@ logger = logging.getLogger("gable.vision")
 
 _ENDPOINT: Final[str] = "https://api.openai.com/v1/responses"
 _TIMEOUT_SECONDS: Final[int] = 90
+_DEFAULT_MODEL: Final[str] = "gpt-5.6-sol"
 
 #: What the model is asked. Names the specific failures worth catching, because
 #: "does this look good" invites a compliment rather than an inspection.
@@ -211,7 +210,7 @@ def _inspect(
     reference_image_bytes: bytes = b"",
 ) -> Inspection:
     """Run one strict, fail-closed visual inspection request."""
-    key = api_key or os.environ.get("OPENAI_IMAGE_API_KEY", "")
+    key = api_key or ""
     if not key or not image_bytes:
         return Inspection(looks_right=False, confident=False, checked=False)
 
@@ -234,7 +233,7 @@ def _inspect(
         }
     )
     payload = {
-        "model": model or os.environ.get("GABLE_VISION_MODEL", "gpt-5.6-sol"),
+        "model": model or _DEFAULT_MODEL,
         "input": [{"role": "user", "content": content}],
         "reasoning": {"effort": "high"},
         "text": {
@@ -266,7 +265,7 @@ def inspect(
 
     Args:
         image_bytes: A PNG or JPEG of the rendered slide.
-        api_key: OpenAI key. Defaults to the environment.
+        api_key: OpenAI key passed by validated runtime configuration.
         model: Override the configured vision model.
         reference_image_bytes: The person's original property photo, when
             available. It is compared with the photo visible in the flyer in

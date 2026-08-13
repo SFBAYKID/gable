@@ -23,7 +23,7 @@ class TemplateTriage:
     list_templates: Callable[[], list[TemplateFile]]
     read_presentation: Callable[[str], dict[str, object]]
     say: Callable[[str, str | None], str]
-    look_at: Callable[[str], Inspection] = lambda _file_id: Inspection(True, True)
+    look_at: Callable[[str], Inspection] = lambda _file_id: Inspection(False, False, checked=False)
     slide_px: tuple[int, int] = (1080, 1350)
 
     def scan_new(self) -> int:
@@ -40,17 +40,21 @@ class TemplateTriage:
         checked = 0
         for item in templates:
             existing = store.template_audit(self.connection, item.file_id)
-            if existing is not None:
+            revision_changed = existing is not None and item.modified_time != existing.modified_time
+            if existing is not None and not revision_changed:
                 # A prior inspection may have finished just before Slack was
                 # unavailable. Retry only the stored message; never repeat the
                 # paid visual call on every poll.
                 if (
-                    existing.status != "baseline"
-                    and not existing.slack_thread_ts
+                    (existing.notification_pending or not existing.slack_thread_ts)
+                    and existing.status != "baseline"
                     and existing.summary
                 ):
-                    thread_ts = self.say(existing.summary, None)
-                    if thread_ts:
+                    posted_ts = self.say(
+                        existing.summary,
+                        existing.slack_thread_ts or None,
+                    )
+                    if posted_ts:
                         store.record_template_audit(
                             self.connection,
                             existing.file_id,
@@ -58,24 +62,16 @@ class TemplateTriage:
                             existing.modified_time,
                             existing.status,
                             existing.summary,
-                            thread_ts,
+                            existing.slack_thread_ts or posted_ts,
                         )
                 continue
-            if not item.is_slides:
-                message = self._unsupported_message(item.name, updated=False)
-                status = "needs_template"
-            elif name_counts[self._key(item.name)] > 1:
-                message = self._duplicate_message(item.name, updated=False)
-                status = "needs_template"
-            else:
-                report = self._inspect(item)
-                visual = self.look_at(item.file_id) if not report.issues else None
-                message, status = self._message(
-                    item.name,
-                    report,
-                    updated=False,
-                    visual=visual,
-                )
+            updated = existing is not None
+            message, status = self._review_item(
+                item,
+                duplicate=name_counts[self._key(item.name)] > 1,
+                updated=updated,
+            )
+            thread_ts = existing.slack_thread_ts if existing is not None else ""
             store.record_template_audit(
                 self.connection,
                 item.file_id,
@@ -83,10 +79,12 @@ class TemplateTriage:
                 item.modified_time,
                 status,
                 message,
+                thread_ts,
+                notification_pending=True,
             )
             checked += 1
-            thread_ts = self.say(message, None)
-            if thread_ts:
+            posted_ts = self.say(message, thread_ts or None)
+            if posted_ts:
                 store.record_template_audit(
                     self.connection,
                     item.file_id,
@@ -94,9 +92,30 @@ class TemplateTriage:
                     item.modified_time,
                     status,
                     message,
-                    thread_ts,
+                    thread_ts or posted_ts,
                 )
         return checked
+
+    def _review_item(
+        self,
+        item: TemplateFile,
+        *,
+        duplicate: bool,
+        updated: bool,
+    ) -> tuple[str, str]:
+        """Measure one new or changed Drive revision and choose its verdict."""
+        if not item.is_slides:
+            return self._unsupported_message(item.name, updated=updated), "needs_template"
+        if duplicate:
+            return self._duplicate_message(item.name, updated=updated), "needs_template"
+        report = self._inspect(item)
+        visual = self.look_at(item.file_id) if not report.issues else None
+        return self._message(
+            item.name,
+            report,
+            updated=updated,
+            visual=visual,
+        )
 
     def recheck(
         self,
@@ -107,16 +126,62 @@ class TemplateTriage:
         existing = store.template_for_thread(self.connection, thread_ts)
         if existing is None:
             return "I could not match this thread to a template, so I have not changed anything."
+        return self._recheck(existing, progress)
+
+    def recheck_file(
+        self,
+        file_id: str,
+        progress: Callable[[str], None] = lambda _stage: None,
+    ) -> str:
+        """Reload one audited source selected from a paused listing thread.
+
+        Args:
+            file_id: Drive id already recorded on the paused listing run.
+            progress: Truthful native-status stage reporter.
+
+        Returns:
+            The same precise verdict as a source-template-thread recheck.
+
+        Raises:
+            Nothing. Missing audit state becomes a plain refusal.
+        """
+        existing = store.template_audit(self.connection, file_id)
+        if existing is None:
+            return (
+                "I could not match this listing to a reviewed source template, so I "
+                "have not changed anything."
+            )
+        return self._recheck(existing, progress)
+
+    def _recheck(
+        self,
+        existing: store.TemplateAudit,
+        progress: Callable[[str], None],
+    ) -> str:
+        """Reload, measure, and persist one already-resolved source audit."""
         templates = self.list_templates()
         current = next(
             (item for item in templates if item.file_id == existing.file_id),
             None,
         )
         if current is None:
-            return (
+            message = (
                 f"I could not find the {existing.name} design in Generic Templates, so I "
                 "could not check the update. Put it back in that folder and ask me again."
             )
+            # A deleted or moved source must revoke an older ready verdict. The
+            # picker also fails closed, but persisting the real state keeps
+            # listing clearance and operator status truthful between scans.
+            store.record_template_audit(
+                self.connection,
+                existing.file_id,
+                existing.name,
+                existing.modified_time,
+                "needs_template",
+                message,
+                existing.slack_thread_ts,
+            )
+            return message
         if not current.is_slides:
             message = self._unsupported_message(current.name, updated=True)
             store.record_template_audit(
@@ -126,7 +191,7 @@ class TemplateTriage:
                 current.modified_time,
                 "needs_template",
                 message,
-                thread_ts,
+                existing.slack_thread_ts,
             )
             return message
         if sum(self._key(item.name) == self._key(current.name) for item in templates) > 1:
@@ -138,7 +203,7 @@ class TemplateTriage:
                 current.modified_time,
                 "needs_template",
                 message,
-                thread_ts,
+                existing.slack_thread_ts,
             )
             return message
         report = self._inspect(current)
@@ -159,7 +224,7 @@ class TemplateTriage:
             current.modified_time,
             status,
             message,
-            thread_ts,
+            existing.slack_thread_ts,
         )
         return message
 

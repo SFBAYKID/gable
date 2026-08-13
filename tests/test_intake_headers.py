@@ -169,3 +169,37 @@ def test_a_row_read_by_hand_has_the_same_identity_as_a_polled_one() -> None:
     polled = repo.read_submissions(_Sheet(), "Testing_1")
     assert [s.response_row_id for s in polled] == [by_hand.response_row_id]
     assert polled[0].sheet_row == by_hand.sheet_row == 78
+
+
+def test_correcting_identity_fields_changes_the_legacy_tuple_hash() -> None:
+    """The repository reconciles this hash change against stored timestamp state."""
+    columns = columns_from_header(TESTING_HEADER)
+    original = repo.submission_from_row(ROW_78, columns, 78)
+    corrected_row = ROW_78.copy()
+    corrected_row[1] = "corrected@example.com"
+    corrected_row[12] = "900 Corrected Address"
+
+    corrected = repo.submission_from_row(corrected_row, columns, 78)
+
+    assert corrected.response_row_id != original.response_row_id
+    assert corrected.content_hash != original.content_hash
+
+
+def test_two_rows_with_the_same_timestamp_are_refused() -> None:
+    duplicate = ROW_78.copy()
+    duplicate[12] = "900 Different Address"
+
+    class _Sheet:
+        def read(self, _range: str) -> list[list[str]]:
+            return [TESTING_HEADER, ROW_78, duplicate]
+
+    with pytest.raises(SheetError, match="same submission timestamp"):
+        repo.read_submissions(_Sheet(), "Testing_1")
+
+
+def test_a_row_without_a_timestamp_is_refused() -> None:
+    row = ROW_78.copy()
+    row[0] = ""
+
+    with pytest.raises(SheetError, match="no submission timestamp"):
+        repo.submission_from_row(row, columns_from_header(TESTING_HEADER), 78)

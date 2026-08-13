@@ -210,8 +210,8 @@ def upscale_real_photo(
     # full gpt-image-1 accepts this parameter. gpt-image-1-mini rejects it with
     # HTTP 400 "input_fidelity 'high' is not supported for gpt-image-1-mini",
     # and gpt-image-2 always uses high fidelity and does not accept the field.
-    # The previous check excluded only gpt-image-2, which meant the configured
-    # default (gpt-image-1-mini) failed every single call.
+    # The previous check excluded only gpt-image-2, which meant the then-current
+    # gpt-image-1-mini default failed every single call.
     if _accepts_input_fidelity(model):
         data["input_fidelity"] = "high"
     try:

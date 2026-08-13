@@ -1,9 +1,9 @@
 {
   "display_information": {
     "name": "Gable",
-    "description": "Turns listing form submissions into ready-to-polish social posts.",
+    "description": "Turns listing requests and supplied photos into editable Slides flyers.",
     "background_color": "#16222e",
-    "long_description": "Gable watches the listing intake sheet, resolves a photo for each property, verifies the submitting agent contact details against their brokerage site, matches the agent to their template, and assembles a finished post ready for review. It reports what it found and what it could not find, flags anything uncertain, and never marks a post ready while a required field is empty."
+    "long_description": "Gable watches the listing intake sheet, asks Carmen or Chase for one property photo, measures the matching Google Slides template, fills the submitted and roster data, and inspects the rendered result before linking an editable flyer. It flags uncertainty, pauses on unsafe template structure, and never marks a flyer ready while a required field is empty or visual review is inconclusive."
   },
   "features": {
     "bot_user": {
@@ -14,7 +14,7 @@
       {
         "command": "/gable",
         "description": "Check status, force a run, retry a listing, or list templates",
-        "usage_hint": "status | run | retry <run_id> | templates | pause | resume",
+        "usage_hint": "status | run | retry run ID | templates | pause | resume",
         "should_escape": false
       }
     ]
@@ -25,14 +25,8 @@
         "app_mentions:read",
         "channels:history",
         "chat:write",
-        "chat:write.public",
         "commands",
         "files:read",
-        "files:write",
-        "groups:history",
-        "im:history",
-        "im:write",
-        "reactions:write",
         "users:read"
       ]
     }
@@ -41,13 +35,8 @@
     "event_subscriptions": {
       "bot_events": [
         "app_mention",
-        "message.channels",
-        "message.groups",
-        "message.im"
+        "message.channels"
       ]
-    },
-    "interactivity": {
-      "is_enabled": true
     },
     "org_deploy_enabled": false,
     "socket_mode_enabled": true,

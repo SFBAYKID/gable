@@ -23,7 +23,7 @@ from PIL import Image
 
 from gable.db import store
 from gable.db.schema import connect
-from gable.photos.fit import normalise_for_fitting
+from gable.photos.fit import MAX_SOURCE_PIXELS, normalise_for_fitting
 from gable.photos.store import PublishError, publish_local, verify_public
 from gable.pipeline.runner import RunResult
 from gable.sheets import repository as repo
@@ -44,10 +44,43 @@ class PhotoHandoffError(Exception):
     """A private upload could not safely become a public fitted image."""
 
 
+def _is_slack_url(url: str) -> bool:
+    """Return whether an HTTPS URL is owned by Slack's file service."""
+    parsed = urllib.parse.urlparse(url)
+    host = (parsed.hostname or "").lower()
+    return parsed.scheme == "https" and any(
+        host.endswith(suffix) for suffix in _SLACK_HOST_SUFFIXES
+    )
+
+
+class _SlackOnlyRedirectHandler(urllib.request.HTTPRedirectHandler):
+    """Prevent urllib from forwarding the bot token to a redirect off Slack."""
+
+    def redirect_request(
+        self,
+        req: urllib.request.Request,
+        fp: Any,  # noqa: ANN401 - urllib's response type is intentionally private
+        code: int,
+        msg: str,
+        headers: Any,  # noqa: ANN401 - email.message.Message at runtime
+        newurl: str,
+    ) -> urllib.request.Request | None:
+        """Follow only redirects whose destination is another Slack HTTPS host."""
+        if not _is_slack_url(newurl):
+            raise PhotoHandoffError("Slack redirected the upload outside its file service")
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
+
+
 class ResumesRun(Protocol):
     """The narrow runner surface the handoff needs."""
 
-    def resume(self, submission: repo.Submission, run_id: str) -> RunResult:
+    def resume(
+        self,
+        submission: repo.Submission,
+        run_id: str,
+        *,
+        resume_fields: dict[str, str | int] | None = None,
+    ) -> RunResult:
         """Continue one existing run."""
         ...
 
@@ -71,15 +104,13 @@ def download_private_image(
         PhotoHandoffError: for a non-Slack URL, empty file, oversized file, or
             transport failure.
     """
-    parsed = urllib.parse.urlparse(url)
-    host = (parsed.hostname or "").lower()
-    is_slack_host = any(host.endswith(suffix) for suffix in _SLACK_HOST_SUFFIXES)
-    if parsed.scheme != "https" or not is_slack_host:
+    if not _is_slack_url(url):
         msg = "the upload link did not come from Slack"
         raise PhotoHandoffError(msg)
     request = urllib.request.Request(url, headers={"Authorization": f"Bearer {bot_token}"})
+    opener = urllib.request.build_opener(_SlackOnlyRedirectHandler())
     try:
-        with urllib.request.urlopen(request, timeout=60) as response:
+        with opener.open(request, timeout=60) as response:
             declared = response.headers.get("Content-Length", "")
             if declared.isdigit() and int(declared) > max_bytes:
                 msg = "the uploaded image is larger than the safe processing limit"
@@ -115,6 +146,9 @@ def download_private_image(
     # happened and what she can do about it.
     try:
         with Image.open(io.BytesIO(downloaded)) as probe:
+            if probe.width * probe.height > MAX_SOURCE_PIXELS:
+                msg = "the uploaded image dimensions exceed the safe processing limit"
+                raise PhotoHandoffError(msg)
             probe.verify()
     except Exception as exc:
         msg = "that upload did not arrive as a readable image"
@@ -237,18 +271,17 @@ class PhotoHandoff:
                 logger.exception("Slack file metadata could not be read")
                 return "I could not read that Slack upload. Please try sending it again."
 
-            store.set_status(
-                connection,
-                run.run_id,
-                "needs_photo",
-                "a person supplied an aspect-preserved and verified hero photo",
-                photo_url=public_url,
-                photo_source="slack_upload",
-                ai_enhanced=0,
-            )
             progress("is building the flyer...")
             runner = self.runner_for(connection, public_url, thread_ts, progress)
-            result = runner.resume(_submission(stored), run.run_id)
+            result = runner.resume(
+                _submission(stored),
+                run.run_id,
+                resume_fields={
+                    "photo_url": public_url,
+                    "photo_source": "slack_upload",
+                    "ai_enhanced": 0,
+                },
+            )
             # The run speaks for itself. Adding a line here after it has posted
             # its outcome and its link gives one event four messages, and the
             # last one restates what the thread already says.

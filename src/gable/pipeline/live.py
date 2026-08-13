@@ -16,13 +16,11 @@ from sqlite3 import Connection
 from typing import Any
 
 from gable import spend
-from gable.agents.contacts import Contact, ContactsError, append_contact
-from gable.agents.lookup import find_agent
 from gable.config import Settings
 from gable.db import store
 from gable.listings.enrich import default_research
-from gable.listings.intake import Intake
 from gable.photos.fit import assess, fit_locally, image_dimensions
+from gable.photos.headshots import MAX_HEADSHOT_BYTES
 from gable.photos.headshots import url_for_agent as headshot_url_for
 from gable.photos.store import publish_local, verify_public
 from gable.photos.verify import verify as verify_image
@@ -36,9 +34,97 @@ from gable.slides.hero import find_headshot_frame, find_hero_frame
 from gable.slides.library import list_files as list_template_files
 from gable.slides.replacement import confirmed_replacement_count, safe_replacement_requests
 from gable.slides.selection import template_picker
-from gable.voice import is_clean
+from gable.voice import is_clean, safe
 
 logger = logging.getLogger("gable.live")
+
+
+def _restore_replacement_z_order(
+    page: dict[str, Any], target_id: str, replacement_id: str
+) -> list[dict[str, Any]] | None:
+    """Keep a newly created element at the deleted target's original depth.
+
+    Slides creates the replacement independently of the deleted shape. Moving
+    it to the back is not equivalent to replacing the shape: it can put a house
+    behind a full-slide background. ``pageElements`` is ordered back-to-front,
+    and a multi-element z-order request preserves the moved elements' relative
+    order, so bringing only the elements that were above the target back to the
+    front recreates the target's exact layer boundary in one request.
+
+    Returns:
+        The optional z-order request, an empty list when the target was already
+        frontmost, or None when the source order is not safe to interpret.
+    """
+    if not replacement_id or replacement_id == target_id:
+        return None
+    elements = page.get("pageElements", [])
+    target_indexes = [
+        index for index, element in enumerate(elements) if element.get("objectId") == target_id
+    ]
+    if len(target_indexes) != 1:
+        return None
+    above = elements[target_indexes[0] + 1 :]
+    above_ids = [element.get("objectId") for element in above]
+    if any(not isinstance(object_id, str) or not object_id for object_id in above_ids):
+        return None
+    if not above_ids:
+        return []
+    return [
+        {
+            "updatePageElementsZOrder": {
+                "pageElementObjectIds": above_ids,
+                "operation": "BRING_TO_FRONT",
+            }
+        }
+    ]
+
+
+def template_clearance(
+    connection: Connection,
+    file_id: str,
+    label: str,
+    current_modified_time: str = "",
+) -> str:
+    """Return why proactive source review still blocks this design.
+
+    Args:
+        connection: Database holding the template catalogue and verdicts.
+        file_id: Current Google Drive source id.
+        label: Human-visible source name.
+        current_modified_time: Revision timestamp from the same Drive listing
+            that selected this source. Blank preserves compatibility with
+            isolated callers that have no Drive metadata.
+
+    Returns:
+        Empty for a baseline or certified design; otherwise a safe explanation
+        that pauses the listing before preflight or copy.
+
+    Raises:
+        sqlite3.Error: If the stored verdict cannot be read.
+    """
+    audit = store.template_audit(connection, file_id)
+    if audit is None:
+        if not store.template_catalog_adopted(connection):
+            # A manual run can precede the poller's first safe catalogue
+            # adoption. Listing-specific preflight and final inspection remain
+            # mandatory in that narrow bootstrap case.
+            return ""
+        return safe(
+            f"I have not finished checking the {label} design yet, so I have not "
+            "built anything. Tell me to check that template again."
+        )
+    if current_modified_time and current_modified_time != audit.modified_time:
+        return safe(
+            f"The {label} design changed after its last review, so I have not "
+            "built anything from the older verdict. Tell me to check the updated "
+            "template again."
+        )
+    if audit.status in {"baseline", "ready"}:
+        return ""
+    return audit.summary or safe(
+        f"The {label} design still needs attention, so I have not built anything. "
+        "Fix it and tell me to check the template again."
+    )
 
 
 def place_hero_photo(
@@ -122,6 +208,10 @@ def place_hero_photo(
             return False
 
         hero_id = f"gableHero_{uuid.uuid4().hex}"
+        z_order = _restore_replacement_z_order(page, target_id, hero_id)
+        if z_order is None:
+            logger.error("hero photo placement could not preserve the measured layer order")
+            return False
         requests: list[dict[str, Any]] = [
             {"deleteObject": {"objectId": target_id}},
             {
@@ -149,13 +239,8 @@ def place_hero_photo(
                     },
                 }
             },
-            {
-                "updatePageElementsZOrder": {
-                    "pageElementObjectIds": [hero_id],
-                    "operation": "SEND_TO_BACK",
-                }
-            },
         ]
+        requests.extend(z_order)
         response = (
             slides.presentations()
             .batchUpdate(presentationId=file_id, body={"requests": requests})
@@ -175,6 +260,8 @@ def place_headshot(
     slides: Any,  # noqa: ANN401 - googleapiclient resource, untyped upstream
     file_id: str,
     url: str,
+    refit: Callable[[str, int, int], str] = lambda existing, _w, _h: existing,
+    slide_px: tuple[int, int] = (1080, 1350),
 ) -> bool | None:
     """Put the agent's own face on the flyer.
 
@@ -187,6 +274,8 @@ def place_headshot(
         slides: A Slides v1 resource.
         file_id: The copied presentation to edit.
         url: A public image URL for this agent's headshot.
+        refit: Crops the source once to the measured frame and republishes it.
+        slide_px: Pixel dimensions corresponding to the Slides page.
 
     Returns:
         True when Google accepted the replacement, None when the design has no
@@ -218,13 +307,23 @@ def place_headshot(
         if frame is None:
             logger.info("no headshot frame recognised; leaving the design alone")
             return None
+        frame_width_px = max(1, round(frame.width / slide_w * slide_px[0]))
+        frame_height_px = max(1, round(frame.height / slide_h * slide_px[1]))
+        placed_url = refit(url, frame_width_px, frame_height_px)
+        if not placed_url:
+            logger.error("the agent headshot could not be fitted to its frame")
+            return False
         face_id = f"gableFace_{uuid.uuid4().hex}"
+        z_order = _restore_replacement_z_order(page, frame.object_id, face_id)
+        if z_order is None:
+            logger.error("headshot placement could not preserve the measured layer order")
+            return False
         requests: list[dict[str, Any]] = [
             {"deleteObject": {"objectId": frame.object_id}},
             {
                 "createImage": {
                     "objectId": face_id,
-                    "url": url,
+                    "url": placed_url,
                     "elementProperties": {
                         "pageObjectId": page["objectId"],
                         "size": {
@@ -242,6 +341,7 @@ def place_headshot(
                 }
             },
         ]
+        requests.extend(z_order)
         response = (
             slides.presentations()
             .batchUpdate(presentationId=file_id, body={"requests": requests})
@@ -304,9 +404,11 @@ def build_runner(
             return ""
         return str(slack_post(text, thread) or "")
 
+    template_revisions: dict[str, str] = {}
+
     def list_templates() -> list[dict[str, str]]:
-        return [
-            {"id": item.file_id, "name": item.name}
+        files = [
+            item
             for item in list_template_files(
                 drive,
                 settings.drive_id,
@@ -314,6 +416,9 @@ def build_runner(
             )
             if item.is_slides
         ]
+        template_revisions.clear()
+        template_revisions.update({item.file_id: item.modified_time for item in files})
+        return [{"id": item.file_id, "name": item.name} for item in files]
 
     def read_slide_text(file_id: str) -> list[str]:
         presentation = slides.presentations().get(presentationId=file_id).execute()
@@ -415,6 +520,23 @@ def build_runner(
                     )
                 )
             photo_size = (verdict.width, verdict.height)
+        headshot_url = values.get("headshot", "")
+        if headshot_url:
+            headshot = verify_image(headshot_url, "any")
+            if not headshot.ok:
+                agent = values.get("agent_name", "the agent").strip() or "the agent"
+                return preflight.Report(
+                    issues=(
+                        preflight.Issue(
+                            "unusable_headshot",
+                            f"I checked the filed headshot for {agent} before building, "
+                            f"but {headshot.say}. Replace it in Head Shots, then tell me "
+                            "to run again.",
+                            blocking=True,
+                            status="needs_info",
+                        ),
+                    )
+                )
         return preflight.analyze(
             presentation,
             template_label,
@@ -466,12 +588,10 @@ def build_runner(
         shapes in the API. The shared hero-frame detector applies the same
         measured structural rules used by preflight and refuses ambiguity.
 
-        **Crop to the frame, not to the canvas.** The upload is fitted to the
-        slide's 4:5 canvas when it arrives, which is the wrong shape for a
-        design whose photo is a wide top band. `createImage` fits an image
-        inside its box rather than filling it, so that photo was scaled to the
-        band's height and centred, leaving the layout showing on both sides.
-        It is recropped to the measured frame's own pixel size first.
+        **Crop to the frame, not to the canvas.** The upload used to be fitted
+        to the slide's 4:5 canvas on arrival, which permanently discarded the
+        wrong pixels for a wide top band. It now keeps its composition until
+        this function recrops it once to the measured frame's own pixel size.
 
         **Replace the placeholder, do not sit behind it.** These designs ship
         with sky-and-grass artwork in the photo frame. A photo merely sent to
@@ -548,79 +668,51 @@ def build_runner(
         )
         return url
 
-    def record_unknown_agent(intake: Intake) -> str:
-        """Find an agent the roster has never seen, write them down, and say so.
-
-        Args:
-            intake: The submission naming them.
-
-        Returns:
-            A sentence naming what was written and the page it came from, or
-            empty when nothing usable was found.
-
-        Raises:
-            Nothing. A flyer built with the office line and an honest note is
-            better than no flyer.
-        """
-        name = intake.agent_name.strip()
+    def refit_headshot(existing: str, width_px: int, height_px: int) -> str:
+        """Fit a filed portrait to its measured slot without altering the source."""
         try:
-            found = spend.guarded_call(
-                connection,
-                spend.Estimate(
-                    service="firecrawl",
-                    model="search",
-                    usd=spend.FIRECRAWL_PER_SEARCH,
-                    detail="agent lookup on the brokerage site",
-                ),
-                lambda: find_agent(name, settings.firecrawl_api_key),
+            with urllib.request.urlopen(existing, timeout=30) as response:
+                original = response.read(MAX_HEADSHOT_BYTES + 1)
+            if not original or len(original) > MAX_HEADSHOT_BYTES:
+                logger.error("the filed headshot is empty or too large to fit")
+                return ""
+            fitted = fit_locally(original, width_px, height_px)
+            url = publish_local(
+                settings.photo_public_root,
+                settings.photo_public_base,
+                fitted,
             )
         except Exception:
-            logger.exception("the agent lookup did not complete")
+            logger.exception("the agent headshot could not be fitted to its measured frame")
             return ""
-        if not found.is_usable:
-            return (
-                f"I do not have contact details for {name}, so this uses the "
-                "office number. Send me their number and I will record it."
-            )
-        parts = [part for part in name.split() if part]
-        contact = Contact(
-            email=found.email or intake.agent_email,
-            first_name=parts[0] if parts else "",
-            last_name=" ".join(parts[1:]),
-            phone=found.phone,
-        )
-        try:
-            written = append_contact(
-                drive, settings.drive_id, settings.drive_templates_folder_id, contact
-            )
-        except ContactsError:
-            logger.exception("the contact workbook could not be updated")
+        usable, detail = verify_public(url)
+        if not usable:
+            logger.error("the fitted headshot is not fetchable: %s", detail)
             return ""
-        if not written:
-            return ""
-        store.upsert_salesperson(
-            connection,
-            email=contact.email,
-            first_name=contact.first_name,
-            last_name=contact.last_name,
-            phone=contact.phone,
-        )
-        detail = " and ".join(part for part in (contact.phone, contact.email) if part)
-        return (
-            f"I did not have {name}, so I added them from the brokerage site: "
-            f"{detail}. Worth checking before this goes out."
-        )
+        return url
 
     return Runner(
         connection=connection,
         say=say,
         pick_template=template_picker(list_templates),
+        template_clearance=lambda file_id, label: template_clearance(
+            connection,
+            file_id,
+            label,
+            template_revisions.get(file_id, ""),
+        ),
         read_slide_text=read_slide_text,
         copy_template=copy_template,
         fill=fill,
         research=default_research(settings.firecrawl_api_key, connection),
         place_photo=place_photo,
-        place_headshot=lambda fid, url: place_headshot(slides, fid, url),
+        place_headshot=lambda fid, url: place_headshot(
+            slides,
+            fid,
+            url,
+            refit=refit_headshot,
+            slide_px=(settings.slide_width_px, settings.slide_height_px),
+        ),
         check_photo=check_photo,
         look_at=look_at,
         read_text_boxes=read_text_boxes,
@@ -629,7 +721,6 @@ def build_runner(
         thumbnail=thumbnail,
         hero_photo_url=hero_photo_url,
         origin_thread_ts=origin_thread_ts,
-        record_unknown_agent=record_unknown_agent,
         headshot_for=lambda name: headshot_url_for(
             drive,
             settings.drive_id,

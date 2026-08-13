@@ -132,27 +132,8 @@ class Fit:
         """True when the text is currently wider than its box."""
         return self.fitted_pt < self.current_pt
 
-    #: Font weight, carried through so `widen_to` matches what was measured.
+    #: Font weight, carried through so preflight can measure needed width.
     weight: int = 400
-
-    @property
-    def widen_to(self) -> float:
-        """How wide this box would need to be for its text at a readable size.
-
-        Returns:
-            The required width in points, or 0.0 when the text already fits.
-
-        Note:
-            Reported only. An attempt to act on this by scaling the box with
-            `applyMode: RELATIVE` moved an email address 2.5 inches off the right
-            edge of the slide, because RELATIVE multiplies the existing
-            translation as well as the scale — the trap recorded in CLAUDE.md
-            4.3, which the code that broke it quoted while breaking it. Widening
-            a box safely needs the element's current transform and an ABSOLUTE
-            request; until that exists this stays a measurement.
-        """
-        needed = estimate_width_pt(self.text, self.fitted_pt, self.weight)
-        return needed if needed > self.box_width_pt else 0.0
 
     @property
     def too_small_to_read(self) -> bool:
@@ -211,8 +192,8 @@ def fit_for(
     # The design sized those boxes for the words "Phone" and "Email". A real
     # phone number and a real email are several times longer, so honouring the
     # box means destroying the type. Keeping the type readable and reporting the
-    # box as too narrow is the honest trade, and `widen_to` says how much room
-    # the text actually needs.
+    # box as too narrow is the honest trade; preflight reports the extra room
+    # from the same width estimator.
     fitted = max(MIN_READABLE_PT, min(MAX_FONT_PT, round(scaled, 1)))
     return Fit(object_id, text, current_pt, box_width_pt, fitted, weight)
 

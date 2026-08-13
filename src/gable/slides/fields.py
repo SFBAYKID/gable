@@ -221,7 +221,7 @@ PATTERNS: Final[dict[str, tuple[re.Pattern[str], ...]]] = {
         re.compile(
             r"^C:\s*(?:"
             + "|".join(re.escape(v) for v in SAMPLE_CONTACTS if "@" not in v)
-            + r")\s*\n\s*O:\s*[\d().\-\s]+$",
+            + r")\s+O:\s*[\d().\-\s]+$",
             re.IGNORECASE,
         ),
         re.compile(
@@ -374,8 +374,6 @@ def resolve(texts: list[str], wanted: list[str] | None = None) -> Resolution:
 
     for raw in texts:
         text = " ".join(raw.split())
-        if not _looks_fillable(text):
-            continue
         matched = False
         for name, patterns in PATTERNS.items():
             if not any(pattern.match(text) for pattern in patterns):
@@ -400,7 +398,11 @@ def resolve(texts: list[str], wanted: list[str] | None = None) -> Resolution:
                     also[name].append(raw)
             matched = True
             break
-        if not matched and ("[" in text or text.isupper()):
+        # Recognised long prose, especially the sample testimonial, must be
+        # tried before the generic short-field filter. The previous order made
+        # the review rule unreachable for every realistic quote and allowed a
+        # source testimonial to survive as if it were intentional body copy.
+        if not matched and _looks_fillable(text) and ("[" in text or text.isupper()):
             unrecognised.append(text)
 
     absent = [name for name in (wanted or []) if name not in found]
@@ -410,16 +412,6 @@ def resolve(texts: list[str], wanted: list[str] | None = None) -> Resolution:
         absent=absent,
         also={name: tuple(extra) for name, extra in also.items()},
     )
-
-
-#: Which first-agent field a repeated literal belongs to when a design carries
-#: two agents. A second "AGENT NAME" on a two-agent layout is the co-agent, not
-#: another copy of the submitter.
-SECOND_AGENT_OF: Final[dict[str, str]] = {
-    "agent_name": "agent2_name",
-    "agent_phone": "agent2_phone",
-    "agent_email": "agent2_email",
-}
 
 
 def replacements(resolution: Resolution, values: dict[str, str]) -> dict[str, str]:
@@ -447,13 +439,7 @@ def replacements(resolution: Resolution, values: dict[str, str]) -> dict[str, st
     # Every other literal carrying the same field, so a design that labels one
     # thing twice does not ship with the second label still showing.
     for name, extras in resolution.also.items():
-        # On a two-agent design the repeated agent literals belong to the
-        # co-agent. Filling them from the submitter put the same person on the
-        # flyer twice, which is wrong in a way that looks deliberate.
-        second = SECOND_AGENT_OF.get(name, "")
-        value = values.get(second, "").strip() if second else ""
-        if not value:
-            value = values.get(name, "").strip()
+        value = values.get(name, "").strip()
         if not value:
             continue
         for literal in extras:

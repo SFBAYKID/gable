@@ -23,7 +23,11 @@ FIRECRAWL_PER_SEARCH: Final[float] = 0.01
 #: Conservative reservations for calls whose actual token count is not known
 #: until after the vendor replies. Both exceed the configured maximum-output
 #: cost plus the normal prompt, so the guard stops early rather than late.
-CONVERSATION_RESERVE_USD: Final[float] = 0.01
+# Sol is $5 per million input tokens and $30 per million output tokens as of
+# 2026-08-12. The 2,000-token output ceiling alone can cost six cents, before
+# the system prompt and reasoning tokens, so the old one-cent mini-model
+# reservation understated the call. Ten cents remains deliberately rounded up.
+CONVERSATION_RESERVE_USD: Final[float] = 0.10
 # The final gate now sends both a source photo and a render at original detail.
 # Ten cents remains intentionally above the documented token-price estimate,
 # including the configured output ceiling, instead of understating a two-image

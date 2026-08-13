@@ -42,8 +42,6 @@ class Outcome(StrEnum):
     RESEARCH = "research"
     ASK = "ask"
     BUILD = "build"
-    DELIVER = "deliver"
-    PAUSE = "pause"
     SKIP = "skip"
 
 
@@ -136,9 +134,7 @@ def after_research(intake: Intake, found: Facts, known: dict[str, str]) -> Step:
         # rather than being quietly used.
         return Step(
             outcome=Outcome.ASK,
-            questions=[
-                Question("researched facts", f"{found.caveats[0]}. Can you confirm it?", True)
-            ],
+            questions=[Question("researched facts", f"{found.caveats[0]}. Can you confirm it?")],
             say=f"{found.caveats[0].capitalize()}. Can you confirm it before I build this?",
             category=intake.category,
             detail="research returned an implausible value",
@@ -148,9 +144,7 @@ def after_research(intake: Intake, found: Facts, known: dict[str, str]) -> Step:
         readable = ", ".join(name.replace("_", " ") for name in still_missing)
         return Step(
             outcome=Outcome.ASK,
-            questions=[
-                Question("facts", f"I could not find the {readable}. Do you have them?", True)
-            ],
+            questions=[Question("facts", f"I could not find the {readable}. Do you have them?")],
             say=f"I could not find the {readable} for this one. Do you have them?",
             category=intake.category,
             detail=f"research did not settle {readable}",
@@ -196,9 +190,9 @@ def judge(rendered_text: str, expected_values: dict[str, str], pass_number: int)
     document and rendered clipped to "$510,00" because the box was sized for a
     shorter placeholder; the address overflowed onto the divider and the email
     ran off the bottom of the slide. Every value was present, so this passed it.
-    Catching that needs the vision pass over the rendered thumbnail
-    (ARCHITECTURE.md §4.7b), which is not wired yet. Until it is, a delivered
-    flyer is guaranteed to be *complete*, not to be *well laid out*.
+    Catching that needs the connected, fail-closed vision pass over the rendered
+    thumbnail (ARCHITECTURE.md §4.7b). This function remains the deterministic
+    text half of that two-layer gate.
 
     Args:
         rendered_text: All text read back from the rendered slide.
@@ -253,7 +247,6 @@ def agent_slots(intake: Intake) -> Step:
                         "agents",
                         "This sounds like a two-agent post. Who are the two agents, "
                         "and which role does each have?",
-                        True,
                     )
                 ],
                 say=(
@@ -276,7 +269,7 @@ def agent_slots(intake: Intake) -> Step:
         )
     return Step(
         outcome=Outcome.ASK,
-        questions=[Question("agents", "Which of them is the listing agent?", True)],
+        questions=[Question("agents", "Which of them is the listing agent?")],
         say=(
             f"This one names {' and '.join(sorted(set(roles.values())))}. "
             "Which of them is the listing agent?"

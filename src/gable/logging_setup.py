@@ -225,7 +225,7 @@ class JsonFormatter(logging.Formatter):
     def format(self, record: logging.LogRecord) -> str:
         """Serialize the record to a single-line JSON object."""
         payload: dict[str, Any] = {
-            # UTC always. ARCHITECTURE.md 3.3 stores ISO 8601 UTC in `Runs`, and
+            # UTC always. ARCHITECTURE.md 3.3 stores ISO 8601 UTC in SQLite, and
             # a log in droplet-local time cannot be lined up against it.
             "ts": self.formatTime(record, "%Y-%m-%dT%H:%M:%S") + f".{int(record.msecs):03d}Z",
             "level": record.levelname,

@@ -16,14 +16,11 @@ license = { text = "Proprietary" }
 # section 2.6 or required by a stage in ARCHITECTURE.md section 4.
 dependencies = [
     "httpx>=0.27",                    # HTTP with first-class timeouts (5.4)
-    "tenacity>=8.2",                  # bounded retry + jittered backoff (5.4)
-    "pydantic>=2.7",                  # row validation into models.py
     "slack-bolt>=1.18",               # Socket Mode app (ARCHITECTURE 2.2)
     "google-api-python-client>=2.130", # Sheets + Drive + Slides
     "google-auth>=2.29",              # service-account credentials
     "openpyxl>=3.1",                  # the agent roster workbook in Drive
     "pillow>=10.3",                   # photo normalize: JPEG, resize, EXIF strip
-    "python-ulid>=2.5",               # Runs.run_id (ARCHITECTURE 3.3)
     "python-dotenv>=1.0",             # load .env once in config.py
 ]
 
@@ -106,7 +103,6 @@ module = [
     "google.oauth2.*",
     "slack_bolt.*",
     "slack_sdk.*",
-    "ulid.*",
 ]
 ignore_missing_imports = true
 

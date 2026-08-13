@@ -79,6 +79,12 @@ _Affine = tuple[float, float, float, float, float, float]
 
 _IDENTITY: Final[_Affine] = (1.0, 0.0, 0.0, 0.0, 1.0, 0.0)
 
+# A smaller empty guide fully inside a hero well occurs in imported templates.
+# It is safe to keep the clearly larger outer well, but two similarly sized or
+# separate candidates are an ambiguity, not permission to pick the largest.
+_MAX_NESTED_GUIDE_AREA_FRACTION: Final[float] = 0.60
+_MIN_NESTED_GUIDE_CONTAINMENT: Final[float] = 0.95
+
 
 def _affine_of(element: dict[str, Any]) -> _Affine:
     """Read one element's own transform."""
@@ -188,6 +194,27 @@ def _element_bounds(element: dict[str, Any]) -> tuple[float, float, float, float
     )
 
 
+def _axis_aligned_positive(element: dict[str, Any]) -> bool:
+    """Return whether an element can be replaced by an axis-aligned image."""
+    transform = element.get("transform", {})
+    try:
+        return (
+            float(transform.get("scaleX", 1.0)) > 0
+            and float(transform.get("scaleY", 1.0)) > 0
+            and abs(float(transform.get("shearX", 0.0))) < 1e-9
+            and abs(float(transform.get("shearY", 0.0))) < 1e-9
+        )
+    except (TypeError, ValueError):
+        return False
+
+
+def _overlap_area(left: HeroFrame, right: HeroFrame) -> float:
+    """Return rectangular overlap between two axis-aligned frame candidates."""
+    width = min(left.x + left.width, right.x + right.width) - max(left.x, right.x)
+    height = min(left.y + left.height, right.y + right.height) - max(left.y, right.y)
+    return max(0.0, width) * max(0.0, height)
+
+
 def _carries_text(element: dict[str, Any]) -> bool:
     """Whether a shape has any non-whitespace text in it.
 
@@ -252,7 +279,7 @@ def find_hero_frame(
         return None
 
     slide_area = slide_width * slide_height
-    best: HeroFrame | None = None
+    candidates: list[HeroFrame] = []
 
     for element in page.get("pageElements", []):
         # A group is not a candidate: deleting one removes everything inside it,
@@ -262,6 +289,8 @@ def find_hero_frame(
         if element.get("shape", {}).get("shapeType") == "TEXT_BOX":
             continue
         if _carries_text(element):
+            continue
+        if not _axis_aligned_positive(element):
             continue
 
         # A shape painted with a colour is a card or a panel, not a photo well.
@@ -285,12 +314,21 @@ def find_hero_frame(
             continue
 
         candidate = HeroFrame(element["objectId"], x, y, width, height)
-        # Prefer the largest: where two full-width bands nest, the outer one is
-        # the photo and the inner is a crop guide or a tint band over it. That
-        # is the case the hand-measurement got backwards.
-        if best is None or candidate.area > best.area:
-            best = candidate
+        candidates.append(candidate)
 
+    if not candidates:
+        return None
+    candidates.sort(key=lambda candidate: candidate.area, reverse=True)
+    best = candidates[0]
+    for other in candidates[1:]:
+        # ASSUMPTION: an imported inner crop guide is materially smaller and at
+        # least 95% contained by the actual well. The final render remains the
+        # backstop; a separate or similarly sized candidate is refused here.
+        if (
+            other.area > best.area * _MAX_NESTED_GUIDE_AREA_FRACTION
+            or _overlap_area(best, other) < other.area * _MIN_NESTED_GUIDE_CONTAINMENT
+        ):
+            return None
     return best
 
 
@@ -303,13 +341,13 @@ _HEADSHOT_MIN_WIDTH_FRACTION: Final[float] = 0.10
 _HEADSHOT_MAX_WIDTH_FRACTION: Final[float] = 0.60
 
 
-def find_headshot_frame(
+def headshot_frames(
     page: dict[str, Any],
     slide_width: float,
     slide_height: float,
     exclude_object_id: str = "",
-) -> HeroFrame | None:
-    """Measure where the agent's headshot goes on one slide.
+) -> tuple[HeroFrame, ...]:
+    """Return every safe, plausible agent-headshot well on one slide.
 
     The sample face is the most visible thing Gable gets wrong: a flyer went out
     carrying one agent's name beside a different agent's photograph. The roster
@@ -324,16 +362,17 @@ def find_headshot_frame(
             a face on designs where the hero is itself square.
 
     Returns:
-        The frame, or None when no candidate is convincing. None means leave the
-        design alone rather than paste a face over something else.
+        All plausible frames, largest first. The caller may act only when there
+        is exactly one; two candidates can represent two agents and choosing
+        either would attach the wrong face.
 
     Raises:
         Nothing.
     """
     if slide_width <= 0 or slide_height <= 0:
-        return None
+        return ()
 
-    best: HeroFrame | None = None
+    candidates: list[HeroFrame] = []
     for element in page.get("pageElements", []):
         if "shape" not in element or "elementGroup" in element:
             continue
@@ -342,6 +381,8 @@ def find_headshot_frame(
         if element.get("shape", {}).get("shapeType") == "TEXT_BOX":
             continue
         if _carries_text(element) or _is_filled(element):
+            continue
+        if not _axis_aligned_positive(element):
             continue
 
         x, y, width, height = _element_bounds(element)
@@ -364,9 +405,19 @@ def find_headshot_frame(
         # the frame. Verified on a rendered flyer 2026-08-11.
         if _is_overlaid(page, candidate, _MAX_HEADSHOT_OVERLAP_FRACTION):
             continue
-        if best is None or candidate.area > best.area:
-            best = candidate
-    return best
+        candidates.append(candidate)
+    return tuple(sorted(candidates, key=lambda candidate: candidate.area, reverse=True))
+
+
+def find_headshot_frame(
+    page: dict[str, Any],
+    slide_width: float,
+    slide_height: float,
+    exclude_object_id: str = "",
+) -> HeroFrame | None:
+    """Return the one unambiguous headshot well, or None."""
+    candidates = headshot_frames(page, slide_width, slide_height, exclude_object_id)
+    return candidates[0] if len(candidates) == 1 else None
 
 
 #: How much of a frame another element may cover before the frame is treated as

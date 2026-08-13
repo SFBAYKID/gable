@@ -68,6 +68,7 @@ def test_the_upscale_threshold_is_the_boundary() -> None:
     at_limit = assess(FRAME_W // 2, FRAME_H // 2, FRAME_W, FRAME_H)
     assert at_limit.upscale_factor == pytest.approx(MAX_TOLERABLE_UPSCALE)
     assert at_limit.needs_model is False
+    assert at_limit.action is FitAction.LOCAL_ENLARGE
 
     past_limit = assess(FRAME_W // 3, FRAME_H // 3, FRAME_W, FRAME_H)
     assert past_limit.needs_model is True
@@ -188,6 +189,15 @@ def test_unreadable_bytes_raise_rather_than_stretch() -> None:
     """An unreadable upload deserves a specific message, not a silent fallback."""
     with pytest.raises(OSError):
         fit_locally(b"this is not an image", FRAME_W, FRAME_H)
+
+
+def test_a_compressed_image_cannot_expand_past_the_process_pixel_budget(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("gable.photos.fit.MAX_SOURCE_PIXELS", 100)
+
+    with pytest.raises(ValueError, match="dimensions exceed"):
+        fit_locally(_png(20, 20), FRAME_W, FRAME_H)
 
 
 # --- EXIF orientation -------------------------------------------------------

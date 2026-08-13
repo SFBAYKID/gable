@@ -41,7 +41,7 @@ testing. Gable posts nowhere else without explicit instruction.
 
 ### 2.0 House style — enforced, not remembered
 
-`GABLE-STYLE.md` governs every message. It is implemented in
+The rules in this section govern every message. They are implemented in
 `slackapp/style.py`, and `violations()` runs on a message **before** it is
 posted, so a breach cannot reach Carmen.
 
@@ -72,29 +72,24 @@ Every example below obeys this. If one ever does not, the example is the bug.
 ### 2.1 Listing ready
 
 ```
-123 Anywhere St, Any City, ST 12345
-     Agent     Jane Doe · jane@brokerage.com · (555) 123-4567
-     Template  Luxury Estate
-     Photo     Supplied with the request
-     Price     $1,200,000
+Your flyer is ready. Open the flyer.
 
-     I shortened the description to fit its box.
-
-     [ Approve ]  [ Replace photo ]  [ Skip ]
+I resized and fitted the photo and finished the flyer.
 ```
+
+Open the flyer is descriptive linked text in Slack, never a pasted URL.
 
 ### 2.2 Photo needs attention
 
 ```
-456 Oak Ave, Any City, ST 12345 — needs a photo
+New Sold request from Jane Doe — 456 Oak Ave, Any City, ST 12345
 
-     Nothing came with the request. I looked in the Drive folder, on the
-     brokerage site, and on the web. The closest match came from her
-     brokerage page, but I am not confident it is this house, so I have
-     not used it.
-
-     [ Use this photo ]  [ Upload one ]  [ Skip listing ]
+Can you send me the image?
 ```
+
+Automatic photo discovery is not connected. Gable never claims it searched
+Drive, a brokerage site, the web, or an MLS. The one connected hero source is a
+photo Carmen or Chase supplies in the owned listing thread.
 
 ### 2.2a A supplied photo is small
 
@@ -121,7 +116,7 @@ I sharpened, enlarged, and fitted the photo and finished the flyer.
 On the local path it says “resized and fitted”; it never claims AI enhancement
 when the model result was not used.
 
-### 2.3 AI-generated photo — when policy permits it
+### 2.3 AI-generated photo — future safety contract
 
 ```
 789 Pine Rd, Any City, ST 12345
@@ -133,7 +128,6 @@ when the model result was not used.
 
      Please do not use this publicly without confirming it is acceptable.
 
-     [ Use anyway ]  [ Upload the real photo ]  [ Skip listing ]
 ```
 
 This warning is **never** softened, shortened, or dropped, under any policy
@@ -141,27 +135,32 @@ setting. If a synthetic image reaches a flyer, the record of that must be
 impossible to miss. It is written in words rather than behind a warning glyph
 precisely so it cannot be skimmed past.
 
-### 2.4 Unknown agent
+Synthetic property-photo generation is not connected. Startup rejects either
+generation policy so this future warning cannot be mistaken for current
+behavior.
+
+### 2.4 Unknown agent details
 
 ```
 321 Elm St — submitted by newagent@brokerage.com
 
-     I do not have a template mapped for this agent. Add a row to the
-     Sales_People tab, or tell me which template to use.
-
-     [ Use Template 1 ]  [ Use Template 2 ]  [ Use Template 3 ]  [ Skip ]
+     The selected design has a phone spot, but this agent is not complete in
+     the contact workbook. Add the direct number there, then tell me to run
+     again.
 ```
+
+The request type selects the template. An agent never receives a guessed
+template, phone number, email address, or web-corrected contact record.
 
 ### 2.5 Batch delivered
 
 ```
 4 posts ready
 
-     Each one is a Google Slides file. Open its link to tweak it yourself,
-     or reply in that thread and I will redo it.
+     Each ready item is a Google Slides file linked in its own listing thread.
 
-     Included:  123 Anywhere St · 456 Oak Ave · 789 Pine Rd · 321 Elm St
-     Held back: 1 listing waiting on a photo
+     Included  123 Anywhere St · 456 Oak Ave · 789 Pine Rd · 321 Elm St
+     Held back  1 listing waiting for a person
 ```
 
 Never report a count that includes held-back listings. "4 posts ready" means
@@ -225,12 +224,13 @@ Name the listing, name the field, say why it matters — as a sentence.
      I do not have a phone number for this listing and the template has a
      spot for one. What should it say?
 
-     If it is the same on every listing of hers, I can save it to the
-     Sales_People tab so I stop asking.
+     Add it to the agent contact workbook, then tell me to run again.
 ```
 
 Status is `needs_info`. The listing is **paused, not failed** — it waits
-indefinitely and re-enters on `/gable run`.
+indefinitely. Carmen or Chase fixes the form row, contact workbook, or Head
+Shots folder, then replies that it is updated or uses `/gable run`. Gable
+refreshes those sources before re-entering the same run.
 
 ### 2.8 Working — the thinking indicator
 
@@ -258,6 +258,12 @@ This is not a message, reaction, placeholder, or emoji. It must never be edited
 into the reply or replaced with a posted animation. The initial automatic form
 poll has no user message or Slack thread to attach a native waiting state to.
 
+A slash command also has no message timestamp, so Slack gives Gable no thread
+to which the native state can attach. It is acknowledged immediately with an
+ephemeral result. When `/gable run` rechecks an already-paused listing, the
+queued work uses that listing's existing owned thread and the same native
+waiting sequence there.
+
 Two rules keep this useful rather than noisy:
 
 - **Name the real stage when you can.** "Fitting the image to the template" tells
@@ -277,7 +283,8 @@ that check fails, it says so rather than shipping something it doubts.
      The house is cropped through the roofline. The photo is a lot wider
      than the space the template leaves for it.
 
-     [ Show me anyway ]  [ Try a different crop ]  [ Send a new photo ]
+     Send a different photo, or adjust the source template and tell me to run
+     again.
 ```
 
 ### 2.10 Something failed
@@ -302,11 +309,15 @@ next message.
 | Command | Behavior |
 |---|---|
 | `/gable status` | Pending, ready, and failed counts; last poll time |
-| `/gable run` | Force a poll cycle now |
-| `/gable retry <run_id>` | Re-run one listing from scratch |
-| `/gable templates` | List the `Salespeople` tab mapping |
+| `/gable run` | Refresh the Sheet and templates, then re-check each latest paused listing in its existing run |
+| `/gable retry run ID` | Re-run one listing from scratch |
+| `/gable templates` | List the current Google Slides files in `Generic Templates` |
 | `/gable pause` / `/gable resume` | Stop and start polling |
 | `@gable <question>` | Free-form; answers only about its own state and data |
+
+The command, mention, thread-reply, and shared-photo boundaries accept only the
+two configured stable Slack user IDs for Carmen and Chase. A display name is
+never an access check.
 
 `@gable` is not a general-purpose chatbot. If asked something outside its
 domain, it says so briefly rather than improvising.
@@ -321,11 +332,13 @@ Gable must never:
    Slides file into the Gable drive and links Carmen to it. She decides what
    leaves the building.
 2. **Email or message a real-estate agent, or anyone outside `C0BP597644B`.**
-3. **Modify the form-responses tab.** Read only. Append to `Runs` only.
+3. **Modify the form-responses tab.** It is read only. Derived submissions,
+   runs, transitions, template audits, and spend are written only to SQLite.
 4. **Overwrite a photo Carmen supplied.** A human-supplied photo is final.
-5. **Use a photo below the confidence threshold without asking.**
+5. **Use any property photo other than the one Carmen or Chase supplied.**
 6. **Emit a synthetic image without the `ai_disclosure: app_generated` tag, the
-   Slack warning, and the `ai_generated` flag in `Runs`.** All three, always.
+   Slack warning, and the `ai_generated` flag on the SQLite run.** All three,
+   always.
 7. **"Correct" a name, email, or phone number from web data.** Flag the
    discrepancy; use what the agent submitted.
 8. **Report a flyer ready with any required field empty.**
@@ -339,9 +352,10 @@ Gable must never:
 
 These mirror `CLAUDE.md` §2, applied to the running system.
 
-- If a photo's provenance is uncertain, say "I think" and give the confidence.
+- If a photo's provenance is uncertain, do not use it. The connected runtime
+  accepts only the human-supplied Slack upload.
 - If verification could not run, say so — do not imply details were confirmed.
-- If a description was truncated, say where and by how much.
+- If text had to shrink to fit, say so in the delivery outcome.
 - If a placeholder in the template had no value to fill it, say which one — do
   not deliver a post with a visible `{{price}}` and call it ready.
 - If the render check (§2.9) was inconclusive, say it was inconclusive. "I
@@ -358,63 +372,65 @@ the bad one.
 ## 6. State machine
 
 ```
-new ─► normalized ─► verified ─► photo_resolved ─► rendered ─► checked ─► delivered
-  │         │            │             │              │           │
-  │         │            │             └─► needs_photo ┤          │
-  │         │            │                             │          │
-  │         │            └─► (verification skipped, flagged)      │
-  │         │                                          │          │
-  │         ├─► needs_template ─────────────────────────┤          │
-  │         └─► needs_info ─────────────────────────────┤          │
-  │                                                    │          │
-  │                          (render looked wrong) ◄────┴──────────┘
-  │                                                    │
-  └─► failed ◄─────────────────────────────────────────┘
-                              (Carmen resolves → re-enters pipeline)
+pending ─► building ─► delivered
+   │            │
+   ├─► needs_photo
+   ├─► needs_template
+   ├─► needs_info
+   ├─► needs_review
+   ├─► skipped
+   └─► failed
+
+needs_photo · needs_template · needs_info · needs_review
+                 │
+                 └─► Carmen or Chase resolves it ─► same run re-enters pending
 ```
 
-The three `needs_*` states are **paused**, not failed. They wait for Carmen
+The four `needs_*` states are **paused**, not failed. They wait for Carmen
 indefinitely and are re-checked on `/gable run`:
 
 | State | What is missing | How it clears |
 |---|---|---|
-| `needs_photo` | No hero image, or none above the confidence threshold | Carmen uploads one, or approves a candidate |
-| `needs_template` | The submitting agent is not in `Salespeople` | Carmen picks a template, or a row is added |
-| `needs_info` | A field the template needs and the form did not collect — usually the phone number | Carmen answers in the thread |
+| `needs_photo` | No supplied hero image, or the upload could not be used | Carmen or Chase uploads one in the owned thread |
+| `needs_template` | No exact request-type design, unsafe structure, unresolved new-template audit, or measured capacity warning | The source is fixed or added, then its thread or `/gable run` rechecks it |
+| `needs_info` | A required form, contact-workbook, or headshot value is missing | The source record or Head Shots folder is fixed, then the run is rechecked |
+| `needs_review` | Build/readback/photo placement/render inspection could not prove the output is right | Carmen or Chase resolves the named problem and requests a recheck or retry |
 
 `rendered → checked` is the vision pass of ARCHITECTURE.md §4.7b. A post that
 fails it goes back to Carmen (§2.9) rather than forward to `delivered`. Gable
 delivering something it doubts is the failure this whole state machine exists to
 prevent.
 
-Every transition writes to `Runs` with a timestamp. A listing whose state cannot
-be explained from that log is a bug.
+Every transition updates the current SQLite run and appends to `run_events` with
+a timestamp. A listing whose state cannot be explained from that log is a bug.
 
 ---
 
 ## 7. Rate and cost discipline
 
 - Max `GABLE_MAX_BATCH` (default 25) listings per cycle.
-- Max 1 Firecrawl call per unique `brokerage_url` per 24 hours.
 - Max 1 image-model call per listing, whether generation or real-photo
   upscaling. A paid image edit is never retried automatically.
 - Never retry a failing listing more than 3 times. Enforced by
   `db.store.start_run`; paused states resume the same run and do not consume a
   new attempt.
-- Bounded exponential backoff with jitter on every external call.
-- Log the cost-bearing calls (Firecrawl, image generation) with enough detail to
+- Sheet reads use bounded exponential backoff with jitter. Paid model and
+  Firecrawl calls are not automatically retried, so one failure cannot spend
+  again behind the user's back.
+- Log the cost-bearing calls (Firecrawl, conversation, visual inspection, and
+  photo enhancement) with enough detail to
   reconstruct a bill.
 
 An agent that can spend money in a loop must have a hard ceiling. Put the
 ceiling in code, not in a comment.
 
-The current paid paths — Firecrawl property research, conversation, and visual
-inspection — all call `spend.guarded_call` before the vendor. Each reserves a
-conservative amount and writes it to the spend table even if the vendor fails;
-reaching $50 prevents the call. Image generation is not connected yet and must
-use the same guard plus its per-listing cap when it is added. The 24-hour
-brokerage-URL cache belongs to the future web-photo resolver and remains a
-requirement for that path.
+The current paid paths — Firecrawl property research, conversation, visual
+inspection, and real-photo enhancement — all call `spend.guarded_call` before
+the vendor. Each reserves a conservative amount and writes it to the spend
+table even if the vendor fails; reaching $50 prevents the call. Image
+generation is not connected and must use the same guard plus its per-listing
+cap if it is ever added. A 24-hour brokerage-URL cache remains a requirement
+only for a future web-photo resolver.
 
 ---
 

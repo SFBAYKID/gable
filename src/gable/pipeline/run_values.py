@@ -12,7 +12,6 @@ from typing import Final
 
 from gable.listings.intake import Intake
 from gable.listings.review import review_values
-from gable.pipeline import people
 from gable.sheets import repository as repo
 
 DEFAULT_BROKERAGE_URL: Final[str] = "cornerhouserealty.com"
@@ -43,15 +42,20 @@ def for_intake(
         "baths": known.get("baths", ""),
         "square_feet": known.get("square_feet", ""),
         "agent_name": name or intake.agent_name,
-        "agent_phone": person.get("phone", "") or OFFICE_PHONE,
+        # A missing direct line stays missing. Preflight asks when the selected
+        # design has a phone field; silently substituting the brokerage office
+        # number makes a plausible flyer with the wrong contact path.
+        "agent_phone": person.get("phone", ""),
         "agent_email": intake.agent_email,
         "open_house": intake.open_house,
         "website": person.get("brokerage_url", "") or DEFAULT_BROKERAGE_URL,
         "headshot": person.get("headshot_url", ""),
-        "agent_title": "REALTOR",
+        # REALTOR is a membership credential, not a generic synonym for agent.
+        # Neither current source records a title, so a design that needs one
+        # must ask instead of printing a plausible professional claim.
+        "agent_title": "",
         "social_handle": DEFAULT_SOCIAL_HANDLE,
         "neighborhood": _city_of(intake.address),
-        **people.co_agent_values(connection, intake),
         **review_values(intake.request_type, intake.post_details or intake.extra_notes),
     }
 

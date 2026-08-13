@@ -23,10 +23,15 @@ from typing import Any, Final
 from gable.photos.fit import assess
 from gable.slides import fields, fitting
 from gable.slides.elements import descendants, font_size_pt, font_weight, text_content
-from gable.slides.hero import find_hero_frame
+from gable.slides.hero import find_hero_frame, headshot_frames
 
 PHOTO_CROP_WARNING: Final[float] = 0.30
 _TOKEN_MARKS: Final[re.Pattern[str]] = re.compile(r"[\[\]{}<>]")
+_FIELDISH_UNKNOWN: Final[re.Pattern[str]] = re.compile(
+    r"\b(?:ADDRESS|AGENT|BATHS?|BEDS?|CLIENT|DATE|EMAIL|HANDLE|MLS|NAME|PHONE|"
+    r"PRICE|QUOTE|REVIEW|SQ\.?\s*FT|SQFT|TIME|TITLE|WEBSITE)\b",
+    re.IGNORECASE,
+)
 
 # A new design is checked with realistic upper-bound content before any listing
 # depends on it. These are capacities, not values Gable will ever print. They
@@ -106,6 +111,20 @@ def _implied_font_size_pt(height_emu: float) -> float:
     if height_emu <= 0:
         return 0.0
     return max(1.0, (height_emu / fitting.EMU_PER_POINT) / 1.2)
+
+
+def _axis_aligned_positive(element: dict[str, Any]) -> bool:
+    """Whether exact one-dimensional text-capacity measurement is valid."""
+    transform = element.get("transform", {})
+    try:
+        return (
+            float(transform.get("scaleX", 1.0)) > 0
+            and float(transform.get("scaleY", 1.0)) > 0
+            and abs(float(transform.get("shearX", 0.0))) < 1e-9
+            and abs(float(transform.get("shearY", 0.0))) < 1e-9
+        )
+    except (TypeError, ValueError):
+        return False
 
 
 def text_boxes(presentation: dict[str, Any]) -> list[fitting.TextBox]:
@@ -335,7 +354,12 @@ def analyze(
         )
 
     suspicious = next(
-        (literal for literal in resolution.unrecognised if _TOKEN_MARKS.search(literal)), ""
+        (
+            literal
+            for literal in resolution.unrecognised
+            if _TOKEN_MARKS.search(literal) or _FIELDISH_UNKNOWN.search(literal)
+        ),
+        "",
     )
     if suspicious:
         issues.append(
@@ -363,6 +387,34 @@ def analyze(
 
     hero_width_px = max(1, round(frame.width / slide_width * slide_px[0]))
     hero_height_px = max(1, round(frame.height / slide_height * slide_px[1]))
+
+    # A sample face is not decorative filler. If this source has a recognisable
+    # headshot well, a run without the named agent's file must pause before a
+    # copy exists; the final visual model cannot know that a plausible portrait
+    # belongs to somebody else.
+    headshots = headshot_frames(pages[0], slide_width, slide_height, frame.object_id)
+    if len(headshots) > 1:
+        issues.append(
+            Issue(
+                "ambiguous_headshot_frame",
+                f"I checked the {template_label} design before building, but I found more "
+                "than one possible agent-photo spot. I cannot prove which face belongs in "
+                "which spot. Keep one separate headshot frame, then tell me to check it again.",
+                blocking=True,
+            )
+        )
+    elif values and headshots and not values.get("headshot", "").strip():
+        agent = values.get("agent_name", "the agent").strip() or "the agent"
+        issues.append(
+            Issue(
+                "missing_headshot",
+                f"I checked the {template_label} design before building. It has an agent "
+                f"photo spot, but I could not find a headshot for {agent}. Add that image "
+                "to Head Shots, then tell me to run again.",
+                blocking=True,
+                status="needs_info",
+            )
+        )
 
     top_level_ids = {
         str(element.get("objectId") or "")
@@ -393,6 +445,29 @@ def analyze(
                 "field is inside grouped artwork, so I cannot measure its final text "
                 "capacity reliably. Ungroup that field into its own text box, then tell "
                 "me to check it again.",
+                blocking=True,
+            )
+        )
+
+    transformed_field = next(
+        (
+            name
+            for page in pages
+            for element in page.get("pageElements", [])
+            for name, literals in literals_by_field.items()
+            if text_content(element).strip() in {literal.strip() for literal in literals}
+            and not _axis_aligned_positive(element)
+        ),
+        "",
+    )
+    if transformed_field:
+        readable = transformed_field.replace("_", " ")
+        issues.append(
+            Issue(
+                f"unsupported_transform_{transformed_field}",
+                f"I checked the {template_label} design before building. Its {readable} "
+                "box is rotated, skewed, or mirrored, so I cannot measure its text capacity "
+                "exactly. Make that box axis-aligned, then tell me to check it again.",
                 blocking=True,
             )
         )

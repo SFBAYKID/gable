@@ -1,10 +1,10 @@
 """Frozen application settings, parsed once from the environment at startup.
 
-Every production variable documented in `.env.example` is represented here
-(CLAUDE.md section 5.4), so this is the authoritative place to inspect or add a
-runtime setting. The standalone Slack and model adapters retain narrow
-environment fallbacks for direct diagnostic use; production assembly passes
-the parsed values explicitly.
+Every production behavior variable documented in `.env.example` is represented
+here (CLAUDE.md section 5.4), so this is the authoritative place to inspect or
+add a runtime setting. Runtime assembly passes parsed values explicitly. The
+logging boundary separately reads secret literals only to redact them; it does
+not choose application behavior from the environment.
 
 Parse failures are **collected, not raised one at a time**. A half-configured
 droplet should fail on first boot with the complete list of what is wrong, not
@@ -25,6 +25,7 @@ Sheets client, because this module must never hold key material it could log.
 from __future__ import annotations
 
 import os
+import re
 from collections.abc import Mapping
 from dataclasses import dataclass
 from enum import StrEnum
@@ -98,6 +99,7 @@ class Settings:
     slack_bot_token: str
     slack_app_token: str
     slack_channel_id: str
+    slack_allowed_user_ids: frozenset[str]
 
     # --- Google ---
     google_service_account_file: Path
@@ -223,19 +225,35 @@ class Settings:
 
         problems: list[str] = []
         reader = _Reader(environ, problems)
+        reader.forbidden(
+            "SLACK_CLIENT_ID",
+            "Gable is a single-workspace Socket Mode app; remove the stale OAuth setting",
+        )
+        reader.forbidden(
+            "SLACK_CLIENT_SECRET",
+            "Gable is a single-workspace Socket Mode app; remove the stale OAuth setting",
+        )
 
         settings = cls(
             slack_bot_token=reader.secret("SLACK_BOT_TOKEN", require_credentials),
             slack_app_token=reader.secret("SLACK_APP_TOKEN", require_credentials),
             slack_channel_id=reader.str_value("GABLE_SLACK_CHANNEL_ID", DEFAULT_SLACK_CHANNEL_ID),
+            slack_allowed_user_ids=reader.slack_user_ids(
+                "GABLE_SLACK_ALLOWED_USER_IDS",
+                required=require_credentials,
+            ),
             google_service_account_file=reader.path(
                 "GOOGLE_SERVICE_ACCOUNT_FILE", must_exist=require_credentials
             ),
             sheet_id=reader.required("GABLE_SHEET_ID"),
             tab_responses=reader.str_value("GABLE_TAB_RESPONSES", "Form Responses 1"),
-            drive_id=reader.str_value("GABLE_DRIVE_ID", ""),
-            drive_templates_folder_id=reader.str_value("GABLE_DRIVE_TEMPLATES_FOLDER_ID", ""),
-            drive_output_folder_id=reader.str_value("GABLE_DRIVE_OUTPUT_FOLDER_ID", ""),
+            drive_id=reader.required_when("GABLE_DRIVE_ID", require_credentials),
+            drive_templates_folder_id=reader.required_when(
+                "GABLE_DRIVE_TEMPLATES_FOLDER_ID", require_credentials
+            ),
+            drive_output_folder_id=reader.required_when(
+                "GABLE_DRIVE_OUTPUT_FOLDER_ID", require_credentials
+            ),
             slide_width_px=reader.int_value("GABLE_SLIDE_WIDTH_PX", 1080, minimum=100),
             slide_height_px=reader.int_value("GABLE_SLIDE_HEIGHT_PX", 1350, minimum=100),
             firecrawl_api_key=reader.secret("FIRECRAWL_API_KEY", require_credentials),
@@ -266,8 +284,8 @@ class Settings:
             max_batch=reader.int_value("GABLE_MAX_BATCH", 25, minimum=1, maximum=MAX_ALLOWED_BATCH),
             dry_run=reader.bool_value("GABLE_DRY_RUN", False),
             db_path=reader.path_value("GABLE_DB_PATH", Path("/opt/gable/var/gable.db")),
-            openai_image_api_key=reader.secret("OPENAI_IMAGE_API_KEY", False),
-            conversation_model=reader.str_value("GABLE_CONVERSATION_MODEL", "gpt-5-mini"),
+            openai_image_api_key=reader.secret("OPENAI_IMAGE_API_KEY", require_credentials),
+            conversation_model=reader.str_value("GABLE_CONVERSATION_MODEL", "gpt-5.6-sol"),
             vision_model=reader.str_value("GABLE_VISION_MODEL", "gpt-5.6-sol"),
             image_model_hq=reader.str_value("GABLE_IMAGE_MODEL_HQ", "gpt-image-2"),
             log_level=reader.str_value("LOG_LEVEL", "INFO").upper(),
@@ -354,6 +372,13 @@ class _Reader:
             self._problems.append(f"{name} is required and is unset or blank")
         return value
 
+    def required_when(self, name: str, required: bool) -> str:
+        """Read a behavior value required only for production construction."""
+        value = self._raw(name)
+        if required and not value:
+            self._problems.append(f"{name} is required and is unset or blank")
+        return value
+
     def secret(self, name: str, required: bool) -> str:
         """Read a credential, required only when `required` is True.
 
@@ -364,6 +389,26 @@ class _Reader:
         if required and not value:
             self._problems.append(f"{name} is required and is unset or blank")
         return value
+
+    def forbidden(self, name: str, reason: str) -> None:
+        """Reject a legacy variable whose presence changes an SDK's behavior."""
+        if self._raw(name):
+            self._problems.append(f"{name} is no longer supported. {reason}")
+
+    def slack_user_ids(self, name: str, *, required: bool) -> frozenset[str]:
+        """Read exactly Carmen and Chase's stable comma-separated Slack IDs."""
+        raw = self._raw(name)
+        if not raw:
+            if required:
+                self._problems.append(f"{name} is required and is unset or blank")
+            return frozenset()
+        values = frozenset(part.strip() for part in raw.split(",") if part.strip())
+        invalid = sorted(value for value in values if not re.fullmatch(r"[UW][A-Z0-9]{8,}", value))
+        if invalid:
+            self._problems.append(f"{name} must contain Slack user IDs beginning with U or W")
+        if len(values) != 2:
+            self._problems.append(f"{name} must contain exactly two user IDs, for Carmen and Chase")
+        return values
 
     def path(self, name: str, must_exist: bool) -> Path:
         """Read a filesystem path, optionally requiring that it exists."""

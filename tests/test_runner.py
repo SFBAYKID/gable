@@ -8,7 +8,6 @@ it safe to run unattended: every exit records a status, and nothing is guessed.
 from __future__ import annotations
 
 import sqlite3
-import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -16,149 +15,18 @@ import pytest
 
 from gable.db.schema import apply_migrations, connect
 from gable.listings.enrich import Facts
-from gable.listings.intake import from_row
-from gable.pipeline.runner import Runner
 from gable.pipeline.vision import Inspection
-from gable.sheets import repository as repo
-
-
-def _submission(**over: str) -> repo.Submission:
-    row = [
-        over.get("ts", "8/11/2026 09:00:00"),
-        over.get("email", "lolo@cornerhouserealty.com"),
-        over.get("name", "Lolo Simmons"),
-        "ack",
-        over.get("request_type", "New Listing"),
-        "",
-        "",
-        "",
-        "",
-        "",
-        "Static",
-        over.get("address", "7940 Oakwood Rd, Glen Burnie, MD 21061"),
-        "",
-        over.get("details", ""),
-        over.get("open_house", ""),
-        over.get("new_price", ""),
-        over.get("closing_price", ""),
-    ]
-    return repo.Submission(
-        response_row_id=over.get("rid", "rid-1"),
-        sheet_row=100,
-        submitted_at=row[0],
-        intake=from_row(row),
-        content_hash="hash",
-    )
+from tests.runner_support import Recorder
+from tests.runner_support import record as _record
+from tests.runner_support import runner as _runner
+from tests.runner_support import submission as _submission
 
 
 @pytest.fixture
-def db() -> sqlite3.Connection:
-    connection = connect(Path(tempfile.mkdtemp()) / "g.db")
+def db(tmp_path: Path) -> sqlite3.Connection:
+    connection = connect(tmp_path / "g.db")
     apply_migrations(connection)
     return connection
-
-
-class Recorder:
-    """Captures what the runner tried to do."""
-
-    def __init__(self, slide_text: list[str] | None = None) -> None:
-        """Start with a template whose text the runner will resolve."""
-        self.said: list[str] = []
-        self.threads: list[str | None] = []
-        self.filled: dict[str, str] = {}
-        self.copied = False
-        self.photo_placed = False
-        self.slide_text = slide_text or [
-            "[PROPERTY ADDRESS]",
-            "[PRICE]",
-            "[ 4 BEDS ]",
-            "[ 4 BATHS ]",
-            "[ SQFT ]",
-            "AGENT NAME",
-            "Phone",
-        ]
-        self.output_text: list[str] = []
-
-    def say(self, text: str, thread: str | None = None) -> str:
-        """Record a message with the thread it went to, and hand back an id."""
-        self.said.append(text)
-        self.threads.append(thread)
-        return "1786.0"
-
-    def pick(self, category: str, intake: object = None) -> tuple[str, str]:  # noqa: ARG002
-        """Always find a template."""
-        return ("tmpl-1", f"{category} — Bracket Placeholders (cleanest)")
-
-    def read(self, file_id: str) -> list[str]:
-        """Template text before a fill, output text after."""
-        return self.output_text if file_id == "out-1" and self.output_text else self.slide_text
-
-    def copy(self, template_id: str, name: str) -> tuple[str, str]:  # noqa: ARG002
-        """Pretend to copy, and remember that it happened."""
-        self.copied = True
-        return ("out-1", "https://docs.google.com/presentation/d/out-1/edit")
-
-    def place_photo(
-        self,
-        _run_id: str,
-        _file_id: str,
-        _url: str,
-        _template_label: str,
-    ) -> bool:
-        """Pretend the hero photo went on, and remember that it did."""
-        self.photo_placed = True
-        return True
-
-    def fill(self, file_id: str, pairs: dict[str, str]) -> int:  # noqa: ARG002
-        """Record the replacements and simulate their effect."""
-        self.filled = pairs
-        self.output_text = [pairs.get(text, text) for text in self.slide_text]
-        return len(pairs)
-
-
-def _runner(db: sqlite3.Connection, rec: Recorder, facts: Facts | None = None) -> Runner:
-    db.execute(
-        "INSERT INTO salespeople (email, first_name, last_name, phone, template, synced_at)"
-        " VALUES ('lolo@cornerhouserealty.com','Lolo','Simmons',"
-        "'(443) 854-8554','Just Listed','now')"
-        " ON CONFLICT(email) DO NOTHING"
-    )
-    return Runner(
-        connection=db,
-        hero_photo_url="http://198.51.100.7/abcdef0123456789.jpg",
-        place_photo=rec.place_photo,
-        say=rec.say,
-        pick_template=rec.pick,
-        read_slide_text=rec.read,
-        copy_template=rec.copy,
-        fill=rec.fill,
-        look_at=lambda _run_id, _image: Inspection(looks_right=True, confident=True),
-        research=lambda _address: (
-            facts
-            or Facts(
-                beds="4",
-                baths="3",
-                square_feet="1,804",
-                list_price="$515,000",
-                source_url="https://redfin.test",
-                confidence=0.95,
-            )
-        ),
-    )
-
-
-def _record(db: sqlite3.Connection, submission: repo.Submission) -> None:
-    store_row = submission
-    from gable.db import store
-
-    store.record_submission(
-        db,
-        store_row.response_row_id,
-        store_row.sheet_row,
-        store_row.submitted_at,
-        store_row.intake,
-        store_row.content_hash,
-    )
 
 
 # --- the happy path ---------------------------------------------------------
@@ -304,6 +172,28 @@ def test_two_agents_with_unclear_roles_stops_and_asks(db: sqlite3.Connection) ->
     assert rec.copied is False
 
 
+def test_two_agents_with_clear_roles_stop_until_the_layout_is_certified(
+    db: sqlite3.Connection,
+) -> None:
+    """Page order is not proof of which person's text and photo belong together."""
+    submission = _submission(
+        request_type="Open House",
+        details="Listed by: Stacey Abbott. Hosted by: Jason Vetter",
+        open_house="Saturday, August 15 from 1 to 3 PM",
+        rid="rid-two-clear",
+    )
+    _record(db, submission)
+    rec = Recorder()
+
+    result = _runner(db, rec).run(submission)
+
+    assert result.status == "needs_template"
+    assert "not certified" in rec.said[-1].lower()
+    assert "listing agent" in rec.said[-1].lower()
+    assert "hosting agent" in rec.said[-1].lower()
+    assert rec.copied is False
+
+
 # --- the two quality passes -------------------------------------------------
 
 
@@ -422,6 +312,19 @@ def test_a_template_without_a_field_does_not_fail_the_check(db: sqlite3.Connecti
     assert result.status == "delivered"
 
 
+def test_a_missing_agent_phone_stays_missing_instead_of_using_the_office_line(
+    db: sqlite3.Connection,
+) -> None:
+    """A plausible fallback phone is still the wrong phone on a client flyer."""
+    from gable.pipeline import run_values
+
+    submission = _submission(rid="rid-no-agent-phone", email="new.agent@example.test")
+    values = run_values.for_intake(db, submission.intake, {})
+
+    assert values["agent_phone"] == ""
+    assert values["agent_phone"] != run_values.OFFICE_PHONE
+
+
 def test_a_design_without_a_headshot_slot_can_still_be_delivered(
     db: sqlite3.Connection,
 ) -> None:
@@ -505,6 +408,39 @@ def test_a_structural_preflight_problem_cannot_be_overridden(db: sqlite3.Connect
     result = runner.run(submission)
     assert result.status == "needs_template"
     assert rec.copied is False
+
+
+def test_an_unresolved_proactive_template_audit_blocks_before_preflight_or_copy(
+    db: sqlite3.Connection,
+) -> None:
+    """A source Gable told Carmen to fix must not be used by a listing anyway."""
+    submission = _submission(rid="rid-audit-blocked")
+    _record(db, submission)
+    rec = Recorder()
+    runner = _runner(db, rec)
+    measured = False
+
+    def preflight(*_args: object) -> object:
+        nonlocal measured
+        measured = True
+        raise AssertionError("an unresolved source audit must gate first")
+
+    runner.preflight_template = preflight  # type: ignore[assignment]
+    runner.template_clearance = lambda _fid, _label: (
+        "I checked the new design, but its email field is too narrow. Fix it and ask me "
+        "to check the template again."
+    )
+
+    result = runner.run(submission)
+
+    assert result.status == "needs_template"
+    assert measured is False
+    assert rec.copied is False
+    assert any("email field is too narrow" in message for message in result.said)
+    from gable.db import store
+
+    run = store.run_by_id(db, result.run_id)
+    assert run is not None and run.template_file_id == "tmpl-1"
 
 
 def test_an_updated_template_can_be_rechecked_before_a_photo_exists(
@@ -727,6 +663,26 @@ def test_a_photo_resumes_the_existing_run_without_opening_another(
     ]
     assert "needs_photo" in statuses
     assert statuses[-1] == "delivered"
+
+
+def test_a_second_resume_does_not_build_a_duplicate_flyer(db: sqlite3.Connection) -> None:
+    """The first paused-run claim wins even when another event has stale context."""
+    submission = _submission(rid="rid-resume-once")
+    _record(db, submission)
+    waiting = _runner(db, Recorder())
+    waiting.hero_photo_url = ""
+    paused = waiting.run(submission)
+
+    first_rec = Recorder()
+    first = _runner(db, first_rec).resume(submission, paused.run_id)
+    second_rec = Recorder()
+    second = _runner(db, second_rec).resume(submission, paused.run_id)
+
+    assert first.status == "delivered"
+    assert second.status == "delivered"
+    assert first_rec.copied is True
+    assert second_rec.copied is False
+    assert "another copy" in second_rec.said[-1]
 
 
 def test_a_photo_that_will_not_go_on_stops_delivery(db: sqlite3.Connection) -> None:

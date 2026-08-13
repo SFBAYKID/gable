@@ -1,9 +1,8 @@
 """Every module in the package tree must import cleanly with no side effects.
 
-Phase 0's modules are docstring-only placeholders, so this currently proves only
-that the tree is well-formed. It stays valuable as code lands: CLAUDE.md 5.4
-forbids network calls in constructors and scattered `os.environ` reads, and the
-first violation of either usually shows up as an import that needs credentials.
+This proves the complete runtime tree remains import-safe. CLAUDE.md 5.4 forbids
+network calls in constructors and scattered environment reads, and the first
+violation of either usually appears as an import that needs credentials.
 """
 
 from __future__ import annotations

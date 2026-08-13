@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
-from gable.pipeline.live import place_hero_photo
+from gable.db import store
+from gable.db.schema import apply_migrations, connect
+from gable.pipeline.live import place_headshot, place_hero_photo, template_clearance
 from gable.slides.replacement import confirmed_replacement_count, safe_replacement_requests
 
 
@@ -17,11 +20,15 @@ class FakeSlides:
         fail_update: bool = False,
         complete_reply: bool = True,
         include_target: bool = True,
+        include_overlay: bool = False,
+        include_headshot: bool = False,
     ) -> None:
         """Configure whether the batch succeeds and reports every request."""
         self.fail_update = fail_update
         self.complete_reply = complete_reply
         self.include_target = include_target
+        self.include_overlay = include_overlay
+        self.include_headshot = include_headshot
         self.operation = ""
         self.body: dict[str, Any] = {}
 
@@ -82,6 +89,43 @@ class FakeSlides:
                         "shape": {"shapeProperties": {"shapeBackgroundFill": {}}},
                     }
                 )
+            if self.include_overlay:
+                elements.append(
+                    {
+                        "objectId": "headline-overlay",
+                        "size": {
+                            "width": {"magnitude": 2_000_000},
+                            "height": {"magnitude": 500_000},
+                        },
+                        "transform": {
+                            "scaleX": 1,
+                            "scaleY": 1,
+                            "translateX": 500_000,
+                            "translateY": 500_000,
+                        },
+                        "shape": {
+                            "shapeType": "TEXT_BOX",
+                            "text": {"textElements": [{"textRun": {"content": "JUST LISTED"}}]},
+                        },
+                    }
+                )
+            if self.include_headshot:
+                elements.append(
+                    {
+                        "objectId": "headshot-frame",
+                        "size": {
+                            "width": {"magnitude": 1_500_000},
+                            "height": {"magnitude": 1_500_000},
+                        },
+                        "transform": {
+                            "scaleX": 1,
+                            "scaleY": 1,
+                            "translateX": 8_000_000,
+                            "translateY": 10_000_000,
+                        },
+                        "shape": {"shapeProperties": {"shapeBackgroundFill": {}}},
+                    }
+                )
             return {
                 "pageSize": {
                     "width": {"magnitude": 10_000_000},
@@ -121,7 +165,6 @@ def test_hero_photo_success_is_based_on_the_slides_reply() -> None:
     assert [next(iter(request)) for request in requests] == [
         "deleteObject",
         "createImage",
-        "updatePageElementsZOrder",
     ]
     hero_id = requests[1]["createImage"]["objectId"]
     assert hero_id.startswith("gableHero_")
@@ -140,7 +183,28 @@ def test_hero_photo_success_is_based_on_the_slides_reply() -> None:
         "translateY": 0,
         "unit": "EMU",
     }
-    assert requests[2]["updatePageElementsZOrder"]["pageElementObjectIds"] == [hero_id]
+
+
+def test_hero_photo_preserves_the_template_frames_original_layer() -> None:
+    slides = FakeSlides(include_overlay=True)
+
+    assert place_hero_photo(
+        slides,
+        "deck-1",
+        "https://images.example/house.jpg",
+        "New Listing",
+    )
+
+    requests = slides.body["requests"]
+    assert [next(iter(request)) for request in requests] == [
+        "deleteObject",
+        "createImage",
+        "updatePageElementsZOrder",
+    ]
+    assert requests[2]["updatePageElementsZOrder"] == {
+        "pageElementObjectIds": ["headline-overlay"],
+        "operation": "BRING_TO_FRONT",
+    }
 
 
 def test_hero_photo_is_refitted_to_the_measured_frame_once() -> None:
@@ -214,6 +278,67 @@ def test_hero_photo_refuses_when_the_measured_layer_is_absent() -> None:
         is False
     )
     assert slides.body == {}
+
+
+def test_headshot_is_fitted_once_to_its_measured_frame_before_placement() -> None:
+    slides = FakeSlides(include_headshot=True)
+    measured: list[tuple[str, int, int]] = []
+
+    def refit(url: str, width: int, height: int) -> str:
+        measured.append((url, width, height))
+        return "https://images.example/fitted-headshot.jpg"
+
+    assert place_headshot(
+        slides,
+        "deck-1",
+        "https://images.example/original-headshot.jpg",
+        refit=refit,
+    )
+
+    assert measured == [("https://images.example/original-headshot.jpg", 162, 162)]
+    requests = slides.body["requests"]
+    assert requests[0]["deleteObject"]["objectId"] == "headshot-frame"
+    assert requests[1]["createImage"]["url"] == ("https://images.example/fitted-headshot.jpg")
+
+
+def test_listing_template_clearance_uses_the_persisted_triage_verdict(tmp_path: Path) -> None:
+    connection = connect(tmp_path / "gable.db")
+    apply_migrations(connection)
+    store.adopt_template_catalog(connection, [("baseline", "Sold", "one")])
+    store.record_template_audit(
+        connection,
+        "new-file",
+        "New Listing",
+        "two",
+        "needs_template",
+        "The email section is too narrow. Fix it and ask me to check it again.",
+    )
+
+    assert template_clearance(connection, "baseline", "Sold") == ""
+    assert "email section is too narrow" in template_clearance(
+        connection, "new-file", "New Listing"
+    )
+    assert "not finished checking" in template_clearance(connection, "unseen-file", "Open House")
+    connection.close()
+
+
+def test_listing_template_clearance_refuses_a_newer_unreviewed_revision(
+    tmp_path: Path,
+) -> None:
+    connection = connect(tmp_path / "gable.db")
+    apply_migrations(connection)
+    store.adopt_template_catalog(connection, [("source", "Sold", "revision-one")])
+
+    outcome = template_clearance(
+        connection,
+        "source",
+        "Sold",
+        "revision-two",
+    )
+
+    assert "changed after its last review" in outcome
+    assert "older verdict" in outcome
+    connection.close()
 
 
 def test_replacement_is_refused_when_a_literal_matches_a_substring_twice() -> None:

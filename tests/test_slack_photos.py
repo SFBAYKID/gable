@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import io
 import sqlite3
+import urllib.request
 from pathlib import Path
 from typing import Any
 
@@ -18,7 +19,11 @@ from gable.photos.enhance import EnhancementError
 from gable.photos.store import PublishError
 from gable.pipeline.runner import RunResult
 from gable.sheets import repository as repo
-from gable.slackapp.photos import PhotoHandoff
+from gable.slackapp.photos import (
+    PhotoHandoff,
+    PhotoHandoffError,
+    _SlackOnlyRedirectHandler,
+)
 from gable.slackapp.runtime import guarded_upscale_photo
 
 CHANNEL = "C0BP597644B"
@@ -92,9 +97,18 @@ class FakeRunner:
         self.connection = connection
         self.seen = seen
 
-    def resume(self, submission: repo.Submission, run_id: str) -> RunResult:
+    def resume(
+        self,
+        submission: repo.Submission,
+        run_id: str,
+        *,
+        resume_fields: dict[str, str | int] | None = None,
+    ) -> RunResult:
         """Record a same-run resume without rendering Google Slides."""
         self.seen.extend([submission.response_row_id, run_id])
+        fields = resume_fields or {}
+        claimed = store.claim_paused_run(self.connection, run_id, fields)
+        assert claimed
         store.set_status(self.connection, run_id, "delivered", "test delivered")
         return RunResult(
             run_id=run_id,
@@ -144,6 +158,42 @@ def _event(**overrides: object) -> dict[str, Any]:
     }
     event.update(overrides)
     return event
+
+
+def test_a_slack_download_redirect_cannot_leak_the_bot_token_off_slack() -> None:
+    request = urllib.request.Request(
+        "https://files.slack.com/files-pri/photo.jpg",
+        headers={"Authorization": "Bearer test-token"},
+    )
+
+    with pytest.raises(PhotoHandoffError, match="outside its file service"):
+        _SlackOnlyRedirectHandler().redirect_request(
+            request,
+            None,
+            302,
+            "Found",
+            {},
+            "https://attacker.example/capture",
+        )
+
+
+def test_a_slack_download_may_redirect_only_to_another_slack_host() -> None:
+    request = urllib.request.Request(
+        "https://files.slack.com/files-pri/photo.jpg",
+        headers={"Authorization": "Bearer test-token"},
+    )
+
+    redirected = _SlackOnlyRedirectHandler().redirect_request(
+        request,
+        None,
+        302,
+        "Found",
+        {},
+        "https://files.slack-edge.com/files-pri/photo.jpg",
+    )
+
+    assert redirected is not None
+    assert redirected.full_url == "https://files.slack-edge.com/files-pri/photo.jpg"
 
 
 def test_one_thread_image_resumes_the_same_run_without_a_new_attempt(tmp_path: Path) -> None:

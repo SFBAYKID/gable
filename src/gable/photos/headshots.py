@@ -96,8 +96,8 @@ def list_headshots(drive: Any, drive_id: str, templates_folder_id: str) -> list[
         Files with `id` and `name`, empty when the folder is missing.
 
     Raises:
-        Nothing. A missing folder leaves the design's own face in place, which
-        is a flyer worth reviewing rather than a failed run.
+        Nothing. A missing or ambiguous folder returns no files. Listing
+        preflight then pauses any design with a recognised headshot frame.
     """
     try:
         # Drive query grammar: https://developers.google.com/drive/api/guides/search-files
@@ -121,6 +121,9 @@ def list_headshots(drive: Any, drive_id: str, templates_folder_id: str) -> list[
         )
         if not folders:
             logger.error("the %s folder is not in the drive", HEADSHOTS_FOLDER)
+            return []
+        if len(folders) > 1:
+            logger.error("more than one folder is named %s; refusing to choose", HEADSHOTS_FOLDER)
             return []
         out: list[dict[str, str]] = []
         page_token: str | None = None
@@ -173,10 +176,11 @@ def url_for_agent(
     Returns:
         A public image URL, or an empty string when this agent has no file,
         the download fails, or the published URL does not verify. Empty means
-        the design keeps its own face, which the caller already handles.
+        listing preflight must decide whether the chosen design requires one.
 
     Raises:
-        Nothing. A missing face must never fail a run that is otherwise ready.
+        Nothing. A missing face is represented by an empty result rather than
+        an exception; a design with a recognised headshot frame then pauses.
     """
     if not agent_name.strip():
         return ""

@@ -14,7 +14,7 @@ behavior while building it.
 
 Carmen is a designer. Real-estate agents submit listings through a Google Form.
 Each submission becomes a social post she builds by hand — roughly 20 minutes
-each, most of it spent hunting down a photo of the house.
+each, much of it spent retyping fields and fitting the supplied property photo.
 
 Gable removes that work. It watches the Google Sheet behind the form, identifies
 the submitting agent, picks their template, asks Carmen in Slack for the hero
@@ -22,8 +22,8 @@ photo, fits that photo to the template frame, renders a finished **Google Slides
 file, and posts her a link. She opens it, adjusts anything she wants, or replies
 in the thread and Gable redoes it. Her 20 minutes becomes about one.
 
-**Gable does not replace Carmen's judgment. It removes her typing and her photo
-hunting.** Every post still passes through her before it reaches a client.
+**Gable does not replace Carmen's judgment. It removes her typing and routine
+photo fitting.** Every post still passes through her before it reaches a client.
 
 ## 2. Non-negotiable rules for you, the building agent
 
@@ -218,10 +218,11 @@ Two further Canva paths were closed at the same time:
 
 ### 4.2 What replaced it
 
-Google Slides, on infrastructure already required for the Sheet. `replaceAllText`
-fills the copy and `replaceAllShapesWithImage` places the photo from a public
-URL. No Enterprise plan, no marketplace review, no second language, same service
-account.
+Google Slides, on infrastructure already required for the Sheet. Safe
+`replaceAllText` requests fill standalone fields. The measured photo frame is
+deleted and a fitted `createImage` replacement is created at the same exact
+size and transform from a public URL. No Enterprise plan, marketplace review,
+or second language is required; the same service account handles it.
 
 Design detail lives in `ARCHITECTURE.md` §2.1 and the §9 decision log. Do not
 re-open Canva without reading both.
@@ -229,7 +230,9 @@ re-open Canva without reading both.
 ### 4.3 Verified evidence, so build on these
 
 Items 1–6 were established against the real APIs. Item 7 combines Slack's
-current vendor contract with Chase's report of the previously visible behavior:
+current vendor contract with Chase's report of the previously visible behavior.
+Item 8 was refreshed against first-party model documentation and a live model
+call on 2026-08-12:
 
 1. **Slides accepts a plain `http://` image URL.** It rejects every Google Drive
    URL form, even when the file is world-readable and serves valid bytes to an
@@ -252,6 +255,17 @@ current vendor contract with Chase's report of the previously visible behavior:
    The restored timed sequence still needs a watched live confirmation after
    deployment. Vendor contract:
    https://docs.slack.dev/reference/methods/assistant.threads.setStatus/
+8. **Exact Slides geometry plus a frontier visual judge is the strongest
+   connected measurement stack.** Google requires rendered size to combine an
+   element's size and affine transform, including parent groups. OpenAI's model
+   catalogue names GPT-5.6 Sol as its flagship and says current models support
+   image input; the configured account completed a strict Responses vision
+   request with `gpt-5.6-sol`. GPT Image 2 is the current state-of-the-art
+   OpenAI image editing model and is reserved for one real-photo enlargement
+   beyond 2x, never property invention. Sources:
+   https://developers.google.com/workspace/slides/api/concepts/transforms
+   https://developers.openai.com/api/docs/models
+   https://developers.openai.com/api/docs/models/gpt-image-2
 
 Each of these cost a real failure to learn. They are in the decision log with
 their evidence.
@@ -331,19 +345,21 @@ gable/
 ├── tools/
 │   ├── check_connections.py     # prove every .env credential works, live
 │   ├── adopt_backfill.py        # mark existing rows as history, build none
-│   └── run_row.py               # start one row by tab and number, or resume it
+│   ├── run_row.py               # start one row by tab and number, or resume it
+│   └── template_smoke_test.py   # recoverable live new-template path
 ├── src/gable/
 │   ├── config.py                # frozen settings dataclass, env parsing
 │   ├── logging_setup.py         # structured logging + secret redaction
 │   ├── agents/
-│   │   ├── contacts.py          # the roster workbook in Drive: read, mirror, append
-│   │   └── lookup.py            # an unknown agent, found on the brokerage site
+│   │   └── contacts.py          # read-only roster workbook mirrored atomically
 │   ├── sheets/
 │   │   ├── client.py            # Google Sheets API wrapper
 │   │   └── repository.py        # tab reads/writes, idempotency
 │   ├── db/
 │   │   ├── schema.py            # tables and migrations (SQLite)
-│   │   └── store.py             # submissions, runs, facts, spend
+│   │   ├── store.py             # submissions, facts, roster, spend + reexports
+│   │   ├── run_store.py         # attempts, states, latest counts, event writes
+│   │   └── template_store.py    # source catalogue and triage verdicts
 │   ├── listings/
 │   │   ├── intake.py            # the eleven columns that matter, found by header
 │   │   ├── headers.py           # how a header is compared, never a position
@@ -364,10 +380,15 @@ gable/
 │   │   ├── fitting.py           # shrink text that does not fit its box
 │   │   ├── manifest.py          # what a design needs before it renders
 │   │   ├── hero.py              # measure the photo and headshot frames
+│   │   ├── preflight.py         # source structure, exact fit and crop checks
+│   │   ├── replacement.py       # substring-safe fills and reply proof
+│   │   ├── library.py           # current Generic Templates contents
 │   │   └── edit_common.py       # shared colours, guards, request type
 │   ├── slackapp/
 │   │   ├── app.py               # Socket Mode listener
+│   │   ├── batches.py           # ready-only multi-listing summary
 │   │   ├── brain.py             # reads intent, picks a tool, asks when unsure
+│   │   ├── commands.py          # bounded operator command service
 │   │   ├── editing.py           # execute edits on the thread's Slides file
 │   │   ├── photos.py            # Slack upload to fitted same-run resume
 │   │   ├── routing.py           # keep ordinary replies inside Gable-owned threads
@@ -375,9 +396,14 @@ gable/
 │   │   ├── status.py            # a working indicator that cannot break the work
 │   │   └── style.py             # the house style, enforced
 │   ├── pipeline/
+│   │   ├── runner.py            # one complete listing, every exit recorded
+│   │   ├── live.py              # concrete Google, photo, research and vision seams
 │   │   ├── schedule.py          # when to poll: busy hours vs quiet
-│   │   ├── poller.py            # the watch loop, and the backfill refusal
-│   │   └── orchestrator.py      # decides each step; performs none of them
+│   │   ├── poller.py            # watch loop, backfill guard and operator queue
+│   │   ├── template_triage.py   # proactive source audit and recheck
+│   │   ├── template_vision.py   # spend-gated source render inspection
+│   │   ├── vision.py            # strict source-versus-render visual verdict
+│   │   └── orchestrator.py      # pure listing decisions
 │   ├── runtime.py               # Slack-free process lifecycle
 │   └── cli.py                   # local invocation without Slack
 └── tests/
@@ -403,20 +429,17 @@ the droplet provisioned and serving photos.
 Sheet watcher → normalize → identify the agent → research what is public → ask
 what is not → render a Slides copy → check it twice → post the link.
 
-**Built and tested:** the renderer, the edit tools, photo fitting and hosting,
-the template catalogue, the poll schedule, the house style, the Slack listener,
-the database, the read-only sheet client, the backfill guard, enrichment, and
-the orchestrator's decisions.
-
-**Not yet joined up:** the orchestrator decides but nothing calls it in sequence
-against a live submission. That wiring is the remaining work, and it is
-deliberately last — every piece it will call is already tested on its own.
+**Built, joined, and tested:** the runner drives the orchestrator, property
+research, current-template preflight, supplied-photo handoff, copy/fill/readback,
+photo and headshot placement, text fitting, strict rendered inspection, Slack
+delivery, and same-thread edits. The poller invokes that runner for new rows and
+queues operator retries and paused-run rechecks onto its owning thread.
 
 **Before the poller runs against the live Sheet**, `tools/adopt_backfill.py`
 must be run once. There are 99 historical rows and `Poller.ready()` refuses
 until they are adopted.
 
-### Phase 2 — only once Phase 1 has run for a week on real listings
+### Phase 2 — after Phase 1 has run for a week on real listings
 
 Reconcile the three placeholder conventions across the 45 templates, then
 consider the dual-agent open-house designs. Neither is code work first; both are
@@ -424,45 +447,35 @@ decisions about what Carmen wants.
 
 ## 8. The photo policy
 
-**Chase has not decided this yet.** He leans toward allowing free AI generation.
-Do not hardcode either answer. It is a single configuration value.
+The connected source is one real property photo Carmen or Chase supplies in the
+owned Slack listing thread. The default and production setting is
+`retrieve_only`; despite its compatibility name it does not perform automatic
+retrieval. `no_ai` additionally disables paid enlargement.
 
 ```
-GABLE_PHOTO_POLICY=retrieve_only | generate_with_approval | generate_freely | no_ai
+GABLE_PHOTO_POLICY=retrieve_only | no_ai
 ```
 
-Default in `.env.example`: `generate_with_approval`.
-
-The cascade, in order, always:
-
-1. Photo attached to the form submission
-2. Designated Google Drive folder, matched by address or listing ID
-3. The listing agent's own brokerage site (best rights position)
-4. Broader web search
-5. Ask Carmen in Slack
-6. Generate — **only if policy permits**
+Default in `.env.example`: `retrieve_only`.
 
 ### Why the default is what it is
 
 An image model cannot know what a specific address looks like. Given "123 Main
 St," it invents a house. On a listing flyer that is not a stylistic choice — it
 is a factually wrong photograph of a specific for-sale property, and a buyer can
-drive to that address and find a different building. The real photo almost always
-exists publicly, which makes this a retrieval problem, not a generation problem.
+drive to that address and find a different building. That is why the supplied
+human photo remains the source of truth.
 
-There is also a rights dimension: listing photos are typically the photographer's
-copyright, and scraping Zillow violates their terms of service. Pulling from the
-agent's own brokerage site is materially safer ground.
+The legacy enum still parses `generate_with_approval` and `generate_freely` so
+old configuration produces a precise startup error rather than an unknown-value
+error. Runtime rejects both: there is no synthetic generator, approval action,
+or disclosure workflow. If generation is ever connected, it must carry all
+three `AGENTS.md` disclosure mechanisms or fail closed.
 
-**Implement all four policies faithfully.** If Chase sets `generate_freely`, honor
-it — but the generated image must always be tagged `ai_disclosure:
-app_generated`, watermarked in the Slack preview as AI-generated, and logged as
-such in the `Runs` tab. Never let a synthetic photo reach a flyer without leaving
-a trace that says so.
-
-Enhancement of a **real retrieved** photo (exposure, straightening, upscaling,
-sky replacement) is permitted under every policy except `no_ai`. Enhancement and
-generation are different operations and must be separate code paths.
+Enhancement and generation are separate. `retrieve_only` permits one
+preservation-only GPT Image 2 enlargement when a real supplied photo needs more
+than 2x scaling. `no_ai` keeps every fit local. Neither policy changes the
+property, replaces a sky, or invents missing content.
 
 ---
 
@@ -473,9 +486,10 @@ generation are different operations and must be separate code paths.
   `Makefile`. The original plan said the $4 / 512MB tier; the machine that was
   actually built is the 1GB one. Size against 1 GB, not 512MB.
 - 1 GB is still tight for Python plus image handling. The **1GB swap file is
-  provisioned and active** (`/swapfile`, confirmed). **Stream images to disk —
-  never load a full image into memory.** If you find yourself needing more, say
-  so rather than quietly bloating the process.
+  provisioned and active** (`/swapfile`, confirmed). Slack downloads are capped
+  at 25 MB before Pillow opens them; resized derivatives and model payloads are
+  held in memory only within that bound. Do not add unbounded reads or retain
+  images between runs.
 - **Python 3.12.3** on the droplet (confirmed). `mypy` is nonetheless pinned to
   `python_version = "3.11"` as a deliberate floor — see the `ARCHITECTURE.md`
   decision log. `systemd` service, not `nohup`. Restart on failure.
@@ -485,7 +499,8 @@ generation are different operations and must be separate code paths.
 - **Socket Mode, not HTTP events.** No inbound ports, no TLS certificate, no
   domain. The tradeoff: without a public endpoint you cannot receive a Google
   Apps Script webhook, so the Sheet is **polled** on `GABLE_POLL_INTERVAL_SECONDS`
-  (default 180). At this volume polling is correct and far simpler. Document that
+  (default 600 outside business hours; 120 during them). At this volume polling
+  is correct and far simpler. Document that
   tradeoff in `ARCHITECTURE.md`.
 
 ---
@@ -515,8 +530,9 @@ A task is complete only when all of these are true:
 
 - Enter any credential anywhere.
 - Commit `.env` or a service-account JSON.
-- Delete or overwrite rows in the Google Sheet. Gable **appends** to `Runs` and
-  reads everything else. It never mutates form responses.
+- Delete or overwrite rows in the Google Sheet. Gable reads the response tab
+  only; submissions, run states, append-only transitions, template audits, and
+  spend live in SQLite.
 - **Post anything to `C0BP597644B` while testing.** That is **#calvo, the
   production channel**, where Carmen and real staff are. All testing goes to
   **`C0B02721MNK` (monarch-bot-playground)** and nowhere else.
