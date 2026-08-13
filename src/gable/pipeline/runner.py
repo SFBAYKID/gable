@@ -283,14 +283,14 @@ class Runner:
                 # Carmen's, and asking her which image she wants "as the hero"
                 # asks her to learn our vocabulary to answer a simple question.
                 #
-                # The request type and the agent lead the sentence because
-                # Carmen reads this in a channel carrying every listing at once.
-                # "We got a new submission" names none of the three things she
-                # needs to place it: what kind of post, whose, and which house.
-                f"{people.announce(self.connection, intake)}. Can you send me the image?",
+                "Can you send me the image?",
                 [],
                 result,
                 status="needs_photo",
+                # The request type, the agent and the property lead the thread,
+                # because Carmen reads this in a channel carrying every listing
+                # at once and needs all three to place it.
+                headline=people.announce(self.connection, intake),
             )
 
         # 6. Build.
@@ -573,11 +573,25 @@ class Runner:
         questions: list[Any],
         result: RunResult,
         status: str = "needs_info",
+        headline: str = "",
     ) -> RunResult:
-        """Stop the run and put a question in Slack."""
+        """Stop the run and put a question in Slack, under a headline if given.
+
+        A headline is announced as its own channel message and the question
+        posted underneath it as a reply. That is not decoration: one combined
+        message sits flat in the channel and starts no thread, and the photo
+        handoff only accepts an upload that arrives inside the listing's thread,
+        so a flat message leaves Carmen nowhere to put the photo.
+        """
         asked = safe(question or "I need one more thing before I can build this.")
-        posted_ts = self.say(asked, self.origin_thread_ts or None)
-        thread_root = self.origin_thread_ts or posted_ts
+        if headline and not self.origin_thread_ts:
+            root_ts = self.say(safe(headline), None)
+            posted_ts = self.say(asked, root_ts or None)
+            thread_root = root_ts or posted_ts
+            result.said.append(safe(headline))
+        else:
+            posted_ts = self.say(asked, self.origin_thread_ts or None)
+            thread_root = self.origin_thread_ts or posted_ts
         store.set_status(
             self.connection,
             run_id,

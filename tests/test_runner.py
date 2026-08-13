@@ -63,6 +63,7 @@ class Recorder:
     def __init__(self, slide_text: list[str] | None = None) -> None:
         """Start with a template whose text the runner will resolve."""
         self.said: list[str] = []
+        self.threads: list[str | None] = []
         self.filled: dict[str, str] = {}
         self.copied = False
         self.photo_placed = False
@@ -77,9 +78,10 @@ class Recorder:
         ]
         self.output_text: list[str] = []
 
-    def say(self, text: str, thread: str | None = None) -> str:  # noqa: ARG002
-        """Record a message and hand back a thread id."""
+    def say(self, text: str, thread: str | None = None) -> str:
+        """Record a message with the thread it went to, and hand back an id."""
         self.said.append(text)
+        self.threads.append(thread)
         return "1786.0"
 
     def pick(self, category: str, intake: object = None) -> tuple[str, str]:  # noqa: ARG002
@@ -543,11 +545,19 @@ def test_no_flyer_is_delivered_without_a_hero_photo(db: sqlite3.Connection) -> N
 
     assert result.status == "needs_photo"
     assert rec.copied is False, "nothing should be built before there is a photo"
+
+    # Two messages, not one. A single flat message starts no thread, and the
+    # photo handoff only accepts an upload that arrives inside the listing's
+    # thread — so a combined message leaves Carmen nowhere to put the photo.
+    headline, question = rec.said[0], rec.said[1]
+    assert submission.intake.address in headline
+    assert rec.threads[0] is None, "the announcement is the root of the thread"
+    assert rec.threads[1] == "1786.0", "the question is a reply underneath it"
+
     # Plain words. "Hero" is our name for the photo well, not Carmen's, and the
     # question has to be answerable without learning our vocabulary.
-    assert "send me the image" in rec.said[0].lower()
-    assert "hero" not in rec.said[0].lower()
-    assert submission.intake.address in rec.said[0]
+    assert "send me the image" in question.lower()
+    assert "hero" not in question.lower()
 
 
 def test_an_unusable_photo_url_stops_before_a_flyer_is_copied(
