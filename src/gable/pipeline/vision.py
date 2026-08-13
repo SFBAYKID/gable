@@ -32,6 +32,14 @@ logger = logging.getLogger("gable.vision")
 _ENDPOINT: Final[str] = "https://api.openai.com/v1/responses"
 _TIMEOUT_SECONDS: Final[int] = 90
 _DEFAULT_MODEL: Final[str] = "gpt-5.6-sol"
+#: Reasoning tokens are drawn from this same budget, so it must cover the
+#: model's private thinking *plus* the JSON verdict. Measured live on
+#: 2026-08-13: a real Sold flyer spent 886 reasoning tokens at `effort: high`,
+#: leaving ~114 of the previous 1000-token cap for the answer. The JSON
+#: truncated mid-array, `parse` failed, and a correct build was reported as
+#: "the visual inspection could not run". This is a ceiling, not a target;
+#: a completed verdict costs far less.
+_MAX_OUTPUT_TOKENS: Final[int] = 4000
 
 #: What the model is asked. Names the specific failures worth catching, because
 #: "does this look good" invites a compliment rather than an inspection.
@@ -416,7 +424,7 @@ def _inspect(
                 "strict": True,
             }
         },
-        "max_output_tokens": 1000,
+        "max_output_tokens": _MAX_OUTPUT_TOKENS,
     }
     try:
         body = _post(payload, key)
@@ -424,7 +432,37 @@ def _inspect(
         logger.exception("the vision check could not run")
         return Inspection(looks_right=False, confident=False, checked=False)
 
+    # A verdict cut off by the token ceiling parses as unreadable, which is
+    # indistinguishable from a refusal or a malformed reply in the run's
+    # "could not run" outcome. Name it here so the next occurrence is one log
+    # line rather than another live reproduction.
+    _warn_if_truncated(body)
     return parse(_output_text(body), has_reference_photo=bool(reference_image_bytes))
+
+
+def _warn_if_truncated(body: dict[str, Any]) -> None:
+    """Log when a reply exhausted the output budget instead of finishing.
+
+    Args:
+        body: One decoded Responses payload.
+
+    Raises:
+        Nothing. Diagnosis must never change the verdict.
+    """
+    usage = body.get("usage")
+    if not isinstance(usage, dict):
+        return
+    spent = usage.get("output_tokens")
+    if not isinstance(spent, int) or spent < _MAX_OUTPUT_TOKENS:
+        return
+    details = usage.get("output_tokens_details")
+    reasoning = details.get("reasoning_tokens") if isinstance(details, dict) else None
+    logger.error(
+        "the visual inspection exhausted its %d-token output budget "
+        "(%s reasoning tokens), so its verdict was cut off",
+        _MAX_OUTPUT_TOKENS,
+        reasoning if reasoning is not None else "unknown",
+    )
 
 
 def inspect(

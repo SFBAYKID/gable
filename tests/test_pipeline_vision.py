@@ -336,3 +336,72 @@ def test_an_inconsistent_remedy_fails_closed(reply: str) -> None:
     result = vision.parse(reply)
 
     assert result.checked is False
+
+
+def test_the_output_budget_leaves_room_for_a_verdict_after_high_effort_reasoning() -> None:
+    """Reasoning is drawn from the same budget, so 1000 tokens was not enough.
+
+    Measured live on 2026-08-13: a real Sold flyer spent 886 reasoning tokens at
+    `effort: high`, so the previous 1000-token ceiling left ~114 for the answer
+    and the JSON truncated mid-array.
+    """
+    assert vision._MAX_OUTPUT_TOKENS >= 3000
+
+
+def test_a_verdict_truncated_by_the_token_ceiling_is_not_a_pass(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The exact live failure: valid JSON cut off mid-array must not approve."""
+    truncated = (
+        '{"looks_right":false,"confident":true,"problems":["the call to action has '
+        'very low contrast against the background","the phone number and email are '
+        'small and low-contrast"],'
+    )
+    monkeypatch.setattr(vision, "_post", lambda _payload, _key: _completed(truncated))
+
+    result = vision.inspect(b"image bytes", api_key="test-key")
+
+    assert result.checked is False
+    assert result.looks_right is False
+
+
+def test_an_exhausted_output_budget_is_named_in_the_log(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A cut-off verdict must be diagnosable without another live reproduction."""
+    body = _completed('{"looks_right":false,')
+    body["usage"] = {
+        "output_tokens": vision._MAX_OUTPUT_TOKENS,
+        "output_tokens_details": {"reasoning_tokens": 3886},
+    }
+    monkeypatch.setattr(vision, "_post", lambda _payload, _key: body)
+
+    with caplog.at_level("ERROR", logger="gable.vision"):
+        result = vision.inspect(b"image bytes", api_key="test-key")
+
+    assert result.checked is False
+    assert "exhausted its" in caplog.text
+    assert "3886" in caplog.text
+
+
+def test_a_completed_verdict_well_inside_the_budget_is_not_flagged(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The ordinary path must stay quiet."""
+    body = _completed(
+        '{"looks_right":true,"confident":true,"problems":[],"problem_kinds":[],'
+        '"remedy":"none","source_conflict_visible":false}'
+    )
+    body["usage"] = {
+        "output_tokens": 420,
+        "output_tokens_details": {"reasoning_tokens": 300},
+    }
+    monkeypatch.setattr(vision, "_post", lambda _payload, _key: body)
+
+    with caplog.at_level("ERROR", logger="gable.vision"):
+        result = vision.inspect(b"image bytes", api_key="test-key")
+
+    assert result.looks_right and result.checked
+    assert "exhausted" not in caplog.text
