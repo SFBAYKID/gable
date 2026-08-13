@@ -182,13 +182,13 @@ def place_hero_photo(
             logger.error("hero photo placement found no usable slide size")
             return False
 
-        # Measure the frame rather than looking up a hand-read object id. Only
-        # three of the 45 designs ever had one recorded, and one of those three
-        # was wrong — `Just Listed — Plus Open House — Offered At` named a band
-        # inside the photo instead of the photo. See `slides/hero.py` for how
-        # the templates are actually built and why an image-element search finds
-        # nothing on 44 of them.
-        frame = find_hero_frame(page, slide_w, slide_h)
+        # The frame is measured, not trusted. `hero.HERO_OBJECT_IDS` names the
+        # photo well for the six Carmen-maintained designs, because each PPTX
+        # import leaves a second unfilled shape overlapping the photo band and
+        # the geometric search correctly refuses to choose between them. The
+        # named shape is re-measured every time and an absent or implausible one
+        # falls back to that search, so a redesign degrades to "ask".
+        frame = find_hero_frame(page, slide_w, slide_h, template_label)
         if frame is None:
             logger.error("hero photo placement could not find a photo frame in %s", template_label)
             return False
@@ -313,6 +313,12 @@ def place_headshot(
         page = pages[0]
         slide_w = presentation.get("pageSize", {}).get("width", {}).get("magnitude", 0)
         slide_h = presentation.get("pageSize", {}).get("height", {}).get("magnitude", 0)
+        # No template label here, so this stays on the geometric search. The
+        # frame is used only to exclude the hero from headshot candidates, and
+        # on all six designs the hero is a 99-100% wide band while a headshot
+        # well must be 10-60% wide, so the exclusion is redundant for them.
+        # Client Review Post is the one design whose hero is narrow enough to
+        # matter, and its search already resolves without a hint.
         hero = find_hero_frame(page, slide_w, slide_h)
         frames = headshot_frames(
             page,

@@ -390,7 +390,7 @@ def analyze(
             )
         )
 
-    frame = find_hero_frame(pages[0], slide_width, slide_height)
+    frame = find_hero_frame(pages[0], slide_width, slide_height, template_label)
     if frame is None:
         issues.append(
             Issue(

@@ -263,8 +263,74 @@ def _is_filled(element: dict[str, Any]) -> bool:
     return any(key in fill for key in ("solidFill", "gradientFill", "stretchedPictureFill"))
 
 
+#: The photo well for each Carmen-maintained design, where the geometric search
+#: cannot choose. Every PPTX import carries a second unfilled, untexted shape
+#: overlapping the photo band, so `find_hero_frame` sees two candidates and
+#: correctly refuses. The second shape is *not* disposable: deleting Sold's
+#: removed the white panel behind the Corner House logo and left it washed out
+#: over the brickwork.
+#:
+#: An earlier generation of hand-read ids was abandoned because one of three was
+#: wrong. These are different in the ways that caused that: there are six
+#: designs rather than forty-five, and each id was measured against that
+#: template's own render rather than read by eye — the rejected candidate in
+#: four cases contains 9-20% near-white pixels because it also covers the logo
+#: strip, while the chosen one is pure photograph, and Under Contract was
+#: settled by finding lawn colour continuing to 66% of the slide.
+#:
+#: This is a hint, never an authority. `find_hero_frame` re-measures the named
+#: shape and falls back to the geometric search when it is absent or implausible,
+#: so a redesigned template degrades to "ask" rather than to a wrong frame.
+HERO_OBJECT_IDS: Final[dict[str, str]] = {
+    "sold": "p1_i87",
+    "under contract": "p1_i88",
+    "open house": "p1_i104",
+    "new listing": "p1_i92",
+    "new listing with open house": "p1_i92",
+    "client review post": "p1_i90",
+}
+
+
+def _named_hero_frame(
+    page: dict[str, Any], slide_width: float, slide_height: float, object_id: str
+) -> HeroFrame | None:
+    """Measure one named shape, or return None when it is unusable.
+
+    Args:
+        page: A `slides[n]` entry from a presentations.get response.
+        slide_width: Slide width in EMU.
+        slide_height: Slide height in EMU.
+        object_id: The recorded photo-well id for this design.
+
+    Returns:
+        The measured frame, or None when the shape is missing, is a group, is
+        not axis-aligned, or reports implausible bounds. Every None sends the
+        caller back to the geometric search.
+
+    Raises:
+        Nothing.
+    """
+    for element in page.get("pageElements", []):
+        if element.get("objectId") != object_id:
+            continue
+        if "shape" not in element or "elementGroup" in element:
+            return None
+        if not _axis_aligned_positive(element):
+            return None
+        x, y, width, height = _element_bounds(element)
+        if width <= 0 or height <= 0:
+            return None
+        if width > slide_width * _MAX_SANE_MULTIPLE or height > slide_height * _MAX_SANE_MULTIPLE:
+            return None
+        return HeroFrame(object_id, x, y, width, height)
+    return None
+
+
 def find_hero_frame(
-    page: dict[str, Any], slide_width: float, slide_height: float
+    page: dict[str, Any],
+    slide_width: float,
+    slide_height: float,
+    template_label: str = "",
 ) -> HeroFrame | None:
     """Measure where the hero photo goes on one slide.
 
@@ -272,6 +338,9 @@ def find_hero_frame(
         page: A `slides[n]` entry from a presentations.get response.
         slide_width: Slide width in EMU.
         slide_height: Slide height in EMU.
+        template_label: The design's name. When it matches `HERO_OBJECT_IDS`
+            the recorded shape is re-measured and used; anything unrecorded,
+            missing, or implausible falls through to the geometric search.
 
     Returns:
         The frame, or None when no candidate is convincing. None means ask,
@@ -283,6 +352,12 @@ def find_hero_frame(
     """
     if slide_width <= 0 or slide_height <= 0:
         return None
+
+    recorded = HERO_OBJECT_IDS.get(" ".join(template_label.split()).casefold(), "")
+    if recorded:
+        named = _named_hero_frame(page, slide_width, slide_height, recorded)
+        if named is not None:
+            return named
 
     slide_area = slide_width * slide_height
     candidates: list[HeroFrame] = []
