@@ -76,6 +76,9 @@ class Runner:
     template_clearance: Callable[[str, str], str] = lambda _fid, _label: ""
     #: Reads every text box with its size and geometry, for fitting.
     read_text_boxes: Callable[[str], list[fitting.TextBox]] = lambda _fid: []
+    #: Reads one presentation whole, for the geometric audit that compares a
+    #: built flyer with the design it was copied from.
+    read_presentation: Callable[[str], dict[str, Any]] = lambda _fid: {}
     #: Measures the current source template and this listing's real values
     #: before any Drive copy is created.
     preflight_template: Callable[
@@ -283,13 +286,18 @@ class Runner:
         # waits until the selected source reveals which facts it displays.
         step = plan(intake, required_public_facts=frozenset())
         if step.outcome is Outcome.ASK:
-            if not all(question.absent for question in step.questions):
-                # A contradiction is not a gap. An address that reads as a
-                # review link cannot be left as a placeholder and cannot be
-                # guessed past, so it still stops here on its own.
-                return self._ask(run_id, intake, step.say, step.questions, result)
+            stopping = [
+                question for question in step.questions if not needs.joins_one_ask(question)
+            ]
+            if stopping:
+                # A contradiction is not a gap. A price reduction with no new
+                # price cannot be left as a placeholder and cannot be guessed
+                # past, so it still stops here on its own.
+                return self._ask(run_id, intake, stopping[0].ask, stopping, result)
             if not allow_blank:
-                outstanding.add_values(list(step.missing))
+                outstanding.add_values(
+                    [question.field_name for question in step.questions],
+                )
         if step.outcome is Outcome.SKIP:
             store.set_status(self.connection, run_id, "skipped", step.detail)
             result.status = "skipped"
@@ -486,32 +494,14 @@ class Runner:
         output_id, output_url = self.copy_template(template_id, run_values.output_name(intake))
         changed = self.fill(output_id, pairs)
         logger.info("run %s filled %d field(s)", run_id, changed)
-        if not pairs or changed != len(pairs):
-            # Two different situations. "No pairs" means the design has nothing
-            # Gable recognises — the Client Review layouts are a client quote, a
-            # client name and stars, with no address or price because there is
-            # no property. Reporting that as a field failing to match sends
-            # whoever reads it looking for a text bug that is not there.
-            nothing_matched = not pairs
-            detail = (
-                "this design has no fields Gable knows how to fill"
-                if nothing_matched
-                else "the template text did not match each intended field exactly once"
-            )
-            spoken = safe(
-                "I do not know how to fill this design — none of its text matches "
-                "anything I recognise. It may need a kind of information I do not "
-                "collect yet."
-                if nothing_matched
-                else "I copied the design, but one of its fields did not match exactly "
-                "once. I stopped before changing any text."
-            )
+        unfinished = run_reporting.fill_failure(pairs, changed)
+        if unfinished is not None:
             return self._outcome(
                 run_id,
-                spoken,
+                unfinished.spoken,
                 result,
                 status="needs_review",
-                detail=detail,
+                detail=unfinished.detail,
                 output_file_id=output_id,
                 output_url=output_url,
             )
@@ -640,7 +630,24 @@ class Runner:
             logger.info("run %s refitted %d text box(es)", run_id, text_fit.count)
             advisories.append(safe(text_fit.note))
 
-        # 7b. Check it twice: once on the text, once by looking at it.
+        # 7b. Measure what the build did to the design's own layout.
+        unfinished = run_reporting.layout_failure(
+            self.read_presentation(template_id),
+            self.read_presentation(output_id),
+        )
+        if unfinished is not None:
+            logger.error("run %s moved the layout: %s", run_id, unfinished.detail)
+            return self._outcome(
+                run_id,
+                unfinished.spoken,
+                result,
+                status="needs_review",
+                detail=unfinished.detail,
+                output_file_id=output_id,
+                output_url=output_url,
+            )
+
+        # 7c. Check it twice: once on the text, once by looking at it.
         checked = run_reporting.verify_rendered(
             run_id,
             output_id,

@@ -26,6 +26,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Final
 
+from gable.listings.intake import Question
+
 #: Research names the same value differently from the form. Anything absent
 #: from this map is already the words a person would use.
 _READABLE: Final[dict[str, str]] = {
@@ -34,6 +36,40 @@ _READABLE: Final[dict[str, str]] = {
     "new_price": "new price",
     "open_house": "open house date and time",
 }
+
+#: Contradictions a person can answer in the same breath as the photograph, so
+#: they ride the one batched ask instead of costing their own round trip.
+#:
+#: An address is the only one today. Chase, 2026-08-14, on a nineteen-message
+#: thread: "If a user has to go back and forth 19 times they are just going to
+#: build it themselves." Asking for the address, waiting, then asking for the
+#: photograph is two waits for one person's attention. Batching it is safe
+#: because it cannot leak: `slides.manifest.ADDRESS_SHAPE` refuses to build a
+#: listing whose address is still unreadable, so an unanswered address stops
+#: the flyer either way — it just stops without having cost an extra turn.
+#:
+#: A price reduction with no new price is NOT here. Nothing downstream can
+#: catch it, so a silent answer would ship a price-reduction flyer with no
+#: price on it.
+BATCHABLE_CONTRADICTIONS: Final[frozenset[str]] = frozenset({"address"})
+
+
+def joins_one_ask(question: Question) -> bool:
+    """Whether this question can ride the batched ask rather than stop the run.
+
+    Args:
+        question: One thing the run needs from a person.
+
+    Returns:
+        True when leaving it unanswered is safe because a later gate still
+        refuses to build, or when the value is simply absent — an absent value
+        has always been allowed to fall back to the design's own placeholder.
+
+    Raises:
+        Nothing.
+    """
+    return question.absent or question.field_name in BATCHABLE_CONTRADICTIONS
+
 
 #: The sentence that makes an unanswered item safe to leave out. It is the
 #: whole reason one round of questions is enough: Carmen knows in advance that

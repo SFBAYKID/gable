@@ -429,6 +429,9 @@ def build_runner(
         check_photo=check_photo,
         look_at=look_at,
         read_text_boxes=read_text_boxes,
+        read_presentation=lambda file_id: dict(
+            slides.presentations().get(presentationId=file_id).execute()
+        ),
         preflight_template=preflight_template,
         apply=apply,
         thumbnail=thumbnail,

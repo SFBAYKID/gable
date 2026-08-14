@@ -249,3 +249,40 @@ def test_the_readback_checks_what_was_written_not_the_raw_value() -> None:
     )
 
     assert checked.ok, f"unexpected problems: {checked.problems}"
+
+
+# --- an unreadable address rides the one ask -------------------------------
+
+
+def test_an_unreadable_address_is_asked_for_with_the_photo_not_before_it() -> None:
+    """It rides the batch instead of costing its own round trip.
+
+    Chase, 2026-08-14, on a nineteen-message thread: nineteen turns and Carmen
+    builds it herself. Asking for the address, waiting, then asking for the
+    photograph is two waits for one person's attention.
+    """
+    from gable.listings.intake import Question
+    from gable.pipeline.needs import joins_one_ask
+
+    unreadable = Question("address", "I cannot make sense of the address on this one.")
+
+    assert joins_one_ask(unreadable)
+
+
+def test_a_price_reduction_with_no_new_price_still_stops_on_its_own() -> None:
+    """Nothing downstream catches it, so silence would ship a flyer with no price."""
+    from gable.listings.intake import Question
+    from gable.pipeline.needs import joins_one_ask
+
+    contradiction = Question("new price", "This is a price reduction, but no new price came.")
+
+    assert not joins_one_ask(contradiction)
+
+
+def test_an_absent_value_has_always_been_allowed_to_ride_the_one_ask() -> None:
+    from gable.listings.intake import Question
+    from gable.pipeline.needs import joins_one_ask
+
+    absent = Question("square_feet", "What is the square footage?", absent=True)
+
+    assert joins_one_ask(absent)

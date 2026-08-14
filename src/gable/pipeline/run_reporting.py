@@ -12,7 +12,7 @@ from gable.db import store
 from gable.pipeline.orchestrator import QualityVerdict
 from gable.pipeline.vision import Inspection
 from gable.slides import fields as template_fields
-from gable.slides import fitting, preflight
+from gable.slides import fitting, layout, preflight
 from gable.voice import safe
 
 logger = logging.getLogger("gable.runner")
@@ -352,3 +352,77 @@ def record_unhandled_failure(connection: Connection, run_id: str, reason: str) -
         )
     except Exception:
         logger.exception("could not record failure for run %s", run_id)
+
+
+@dataclass(frozen=True, slots=True)
+class Unfinished:
+    """One reason a built flyer must not be called finished."""
+
+    spoken: str
+    detail: str
+
+
+def fill_failure(pairs: dict[str, str], changed: int) -> Unfinished | None:
+    """Why a fill that did not land exactly once stops the run.
+
+    Two different situations. "No pairs" means the design has nothing Gable
+    recognises — a Client Review layout is a client quote, a client name and
+    stars, with no address or price because there is no property. Reporting that
+    as a field failing to match sends whoever reads it looking for a text bug
+    that is not there.
+
+    Args:
+        pairs: The find/replace pairs the fill was asked to make.
+        changed: How many the API confirmed.
+
+    Returns:
+        What to say and what to record, or None when the fill was exact.
+
+    Raises:
+        Nothing.
+    """
+    if pairs and changed == len(pairs):
+        return None
+    if not pairs:
+        return Unfinished(
+            safe(
+                "I do not know how to fill this design — none of its text matches "
+                "anything I recognise. It may need a kind of information I do not "
+                "collect yet."
+            ),
+            "this design has no fields Gable knows how to fill",
+        )
+    return Unfinished(
+        safe(
+            "I copied the design, but one of its fields did not match exactly once. "
+            "I stopped before changing any text."
+        ),
+        "the template text did not match each intended field exactly once",
+    )
+
+
+def layout_failure(source: dict[str, Any], built: dict[str, Any]) -> Unfinished | None:
+    """Why a built flyer moved its design's layout, if it did.
+
+    Chase reported a band running off the page edge and elements running into
+    each other on 2026-08-14, and the rendered inspection had reported neither.
+    Rectangles are evidence where pixels were an opinion. Judged against this
+    design's own geometry, so its deliberate bleeds stay silent.
+
+    Args:
+        source: The design as filed in Generic Templates.
+        built: The finished copy.
+
+    Returns:
+        What to say and what to record, or None when nothing moved.
+
+    Raises:
+        Nothing.
+    """
+    moved = layout.regressions(source, built)
+    if not moved:
+        return None
+    return Unfinished(
+        safe(f"I built the flyer, but {moved[0][0].lower()}{moved[0][1:]}"),
+        f"layout regression against the source design: {moved[0]}",
+    )
