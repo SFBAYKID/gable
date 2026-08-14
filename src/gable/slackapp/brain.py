@@ -132,6 +132,11 @@ HOW YOU BEHAVE
   overridable.
 - Before you offer to do something, check it against WHAT YOU CANNOT DO. An
   eager answer that promises the impossible costs more than a short honest one.
+- When this thread is paused on a question you asked and the reply answers it,
+  use supply_listing_value. Acknowledging the answer and doing nothing else is
+  the worst outcome available: the person believes they have unblocked the
+  listing, and nothing was recorded or built. "List price is $200,000",
+  "2000 sq feet" and "Sunday 2-4pm" are answers, not conversation.
 """
 
 #: The tools the model may choose. Each maps to a real function; the schema is
@@ -273,6 +278,39 @@ TOOLS: Final[list[dict[str, Any]]] = [
                     }
                 },
                 "required": ["mode"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "supply_listing_value",
+            "description": (
+                "Record a listing detail the person states in answer to a question Gable "
+                "asked, then continue the paused run. Use this whenever they give a price, "
+                "square footage, bed or bath count, or an open-house date and time — "
+                "'List price is $200,000', '2000 sq feet', 'Sunday 2-4pm'. Only for a "
+                "value Gable asked for; never for a value nobody requested."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "field": {
+                        "type": "string",
+                        "enum": [
+                            "list_price",
+                            "square_feet",
+                            "beds",
+                            "baths",
+                            "open_house",
+                        ],
+                    },
+                    "value": {
+                        "type": "string",
+                        "description": "Exactly what they said, such as '$200,000' or '2,000'.",
+                    },
+                },
+                "required": ["field", "value"],
             },
         },
     },

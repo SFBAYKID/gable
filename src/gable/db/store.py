@@ -13,6 +13,7 @@ from __future__ import annotations
 import sqlite3
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from typing import Final
 
 from gable.db.event_store import (
     AbandonedSlackEvent,
@@ -500,3 +501,72 @@ def record_spend(
         " VALUES (?,?,?,?,?,?,?)",
         (run_id, _now(), service, model, units, unit_kind, note),
     )
+
+
+#: The facts a person may state in Slack when Gable asks for them. Restricted to
+#: what a design displays and research can fail to find; a price that is not a
+#: public list price still comes only from its own form column.
+SUPPLIABLE_FIELDS: Final[frozenset[str]] = frozenset(
+    {"beds", "baths", "square_feet", "list_price", "open_house"}
+)
+
+
+def remember_supplied_fact(
+    connection: sqlite3.Connection,
+    address: str,
+    field: str,
+    value: str,
+    supplied_by: str = "",
+) -> None:
+    """Record a fact a person stated, as distinct from one that was looked up.
+
+    Args:
+        connection: An open connection.
+        address: The property address the fact is about.
+        field: One of `SUPPLIABLE_FIELDS`.
+        value: What was stated, kept verbatim.
+        supplied_by: The Slack user id, for the audit trail.
+
+    Raises:
+        ValueError: If the field is not one a person may supply. Guessing at an
+            unknown field would put an unchecked string on a client-facing
+            flyer.
+        sqlite3.Error: on a write failure.
+    """
+    if field not in SUPPLIABLE_FIELDS:
+        msg = f"{field!r} is not a fact a person may supply"
+        raise ValueError(msg)
+    if not value.strip():
+        msg = "a supplied fact cannot be blank"
+        raise ValueError(msg)
+    connection.execute(
+        """
+        INSERT INTO supplied_facts (address_key, field, value, supplied_by, supplied_at)
+        VALUES (?,?,?,?,?)
+        ON CONFLICT(address_key, field) DO UPDATE SET
+            value=excluded.value, supplied_by=excluded.supplied_by,
+            supplied_at=excluded.supplied_at
+        """,
+        (address_key(address), field, value.strip(), supplied_by, _now()),
+    )
+    connection.commit()
+
+
+def recall_supplied_facts(connection: sqlite3.Connection, address: str) -> dict[str, str]:
+    """Every fact a person has stated about this property.
+
+    Args:
+        connection: An open connection.
+        address: The property address.
+
+    Returns:
+        Field to stated value, empty when nobody has answered for this address.
+
+    Raises:
+        sqlite3.Error: on a query failure.
+    """
+    rows = connection.execute(
+        "SELECT field, value FROM supplied_facts WHERE address_key = ?",
+        (address_key(address),),
+    ).fetchall()
+    return {str(row["field"]): str(row["value"]) for row in rows if str(row["value"]).strip()}

@@ -37,7 +37,15 @@ def resolve(
     # that distinguishes a matching property page from a plausible wrong search
     # result.  Keep them for audit, but do not trust them to fill a flyer.  A
     # selected gap is resolved by one current strict lookup or remains missing.
-    known: dict[str, str] = {}
+    # A person who answered Gable's question outranks anything on the web, and
+    # is the reason the question was asked at all. Without this the answer was
+    # acknowledged in Slack and then discarded: the run stayed at needs_info and
+    # the next attempt asked for the same number again.
+    known = {
+        field: value
+        for field, value in store.recall_supplied_facts(connection, intake.address).items()
+        if field in required
+    }
     step = plan(intake, known, required)
     if step.outcome is not Outcome.RESEARCH:
         return step, known
@@ -54,5 +62,8 @@ def resolve(
             found.source_url,
             found.confidence,
         )
-        known = found.as_dict()
+        # A stated fact still wins. Research runs whenever any required field is
+        # missing, so a lookup triggered by an absent square footage must not
+        # replace the price a person just gave with whatever a listing page says.
+        known = {**found.as_dict(), **known}
     return after_research(intake, found, known, required), known

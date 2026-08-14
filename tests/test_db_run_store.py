@@ -76,9 +76,9 @@ def test_schema_six_migrates_through_current_durable_state(
     connection.execute("DELETE FROM schema_version WHERE version >= 7")
     assert current_version(connection) == 6
 
-    assert apply_migrations(connection) == 4
+    assert apply_migrations(connection) == 5
 
-    assert current_version(connection) == SCHEMA_VERSION == 10
+    assert current_version(connection) == SCHEMA_VERSION == 11
     columns = connection.execute("PRAGMA table_info(operation_releases)").fetchall()
     assert [str(row["name"]) for row in columns] == [
         "id",
@@ -112,9 +112,9 @@ def test_deployed_schema_seven_gains_the_generalized_outbox(tmp_path: Path) -> N
     connection.execute("DELETE FROM schema_version WHERE version >= 8")
     assert current_version(connection) == 7
 
-    assert apply_migrations(connection) == 3
+    assert apply_migrations(connection) == 4
 
-    assert current_version(connection) == SCHEMA_VERSION == 10
+    assert current_version(connection) == SCHEMA_VERSION == 11
     columns = {
         str(row["name"])
         for row in connection.execute("PRAGMA table_info(run_questions)").fetchall()

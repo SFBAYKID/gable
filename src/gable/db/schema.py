@@ -27,7 +27,7 @@ from typing import Final
 
 #: Bumped whenever a migration is added. `apply_migrations` uses it to decide
 #: what still needs running.
-SCHEMA_VERSION: Final[int] = 10
+SCHEMA_VERSION: Final[int] = 11
 
 #: Each migration is (version, sql). They run in order and only once. Never edit
 #: one that has shipped — add another, the same rule as the decision log.
@@ -362,6 +362,32 @@ MIGRATIONS: Final[tuple[tuple[int, str], ...]] = (
 
         CREATE INDEX IF NOT EXISTS idx_slack_event_claims_subject
             ON slack_event_claims (subject_id, claimed_at);
+        """,
+    ),
+    (
+        11,
+        """
+        -- A person answering the question Gable asked is the best evidence
+        -- there is, and until now it had nowhere to live. `research_gate`
+        -- starts from an empty `known` and trusts only a freshly proven web
+        -- result, so Chase replying "List price is $200,000" was acknowledged
+        -- and then discarded: the run stayed at needs_info and the value never
+        -- reached property_facts.
+        --
+        -- This is a separate table rather than a row in property_facts because
+        -- the provenance is different in kind. property_facts holds one row per
+        -- address with one source_url, so a later scrape would silently
+        -- overwrite what a human stated, and a human value would erase the
+        -- scrape's audit URL. Kept apart, a stated fact always outranks a
+        -- looked-up one and neither destroys the other.
+        CREATE TABLE IF NOT EXISTS supplied_facts (
+            address_key TEXT NOT NULL,
+            field       TEXT NOT NULL,
+            value       TEXT NOT NULL,
+            supplied_by TEXT NOT NULL DEFAULT '',
+            supplied_at TEXT NOT NULL,
+            PRIMARY KEY (address_key, field)
+        );
         """,
     ),
 )

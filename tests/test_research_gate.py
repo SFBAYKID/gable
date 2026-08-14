@@ -258,3 +258,65 @@ def test_malformed_firecrawl_entries_are_skipped_without_aborting_valid_results(
 
 def test_blank_source_url_is_not_authoritative() -> None:
     assert not enrich.has_authoritative_source(Facts(beds="4", identity_verified=True))
+
+
+def test_a_stated_fact_answers_the_question_without_paying_for_research(
+    tmp_path: Path,
+) -> None:
+    """Chase answered "List price is $200,000" and the run stayed paused anyway.
+
+    `resolve` started from an empty `known` and trusted only a freshly proven
+    web result, so the answer was acknowledged in Slack and discarded. The run
+    asked for the same number on every attempt.
+    """
+    connection = connect(tmp_path / "supplied.db")
+    apply_migrations(connection)
+    item = submission()
+    store.remember_supplied_fact(connection, item.intake.address, "list_price", "$200,000")
+    calls: list[str] = []
+
+    def research(address: str, _fields: frozenset[str]) -> Facts:
+        calls.append(address)
+        return Facts()
+
+    step, known = research_gate.resolve(
+        connection,
+        item.intake,
+        Resolution(fields={"price": "[ PRICE ]"}),
+        research,
+    )
+
+    assert step.outcome is Outcome.BUILD
+    assert known["list_price"] == "$200,000"
+    assert calls == [], "a stated fact must not trigger a paid lookup"
+
+
+def test_a_later_lookup_cannot_overwrite_what_a_person_stated(tmp_path: Path) -> None:
+    """Research still runs for the other gaps; it must not rewrite the answer.
+
+    A missing square footage triggers a lookup even after the price is stated,
+    and the listing page's own price must not replace the one given in Slack.
+    """
+    connection = connect(tmp_path / "supplied-merge.db")
+    apply_migrations(connection)
+    item = submission()
+    store.remember_supplied_fact(connection, item.intake.address, "list_price", "$200,000")
+
+    def research(_address: str, _fields: frozenset[str]) -> Facts:
+        return Facts(
+            square_feet="3,332",
+            list_price="$975,000",
+            source_url="https://example.test/property",
+            confidence=0.9,
+            identity_verified=True,
+        )
+
+    _step, known = research_gate.resolve(
+        connection,
+        item.intake,
+        Resolution(fields={"price": "[ PRICE ]", "square_feet": "[ SQFT ]"}),
+        research,
+    )
+
+    assert known["list_price"] == "$200,000", "the person outranks the listing page"
+    assert known["square_feet"] == "3,332"
