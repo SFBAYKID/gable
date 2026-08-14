@@ -504,3 +504,30 @@ def test_secondary_property_image_away_from_contact_card_is_not_a_headshot() -> 
     )
 
     assert not any(issue.code == "missing_headshot" for issue in report.blockers)
+
+
+def test_releasing_blank_values_frees_only_the_missing_value_blockers() -> None:
+    """Chase's rule: a value nobody has is Carmen's decision, not a dead end.
+
+    She either supplies it or says to build and fills it in herself. That
+    release must not quietly wave through an unreadable type size or an unsafe
+    structure, which are not values and are not hers to accept.
+    """
+    report = preflight.Report(
+        issues=(
+            preflight.Issue("missing_value_price", "no price", blocking=True),
+            preflight.Issue("missing_value_square_feet", "no sqft", blocking=True),
+            preflight.Issue("unreadable_agent_name", "6pt type", blocking=True),
+            preflight.Issue("ambiguous_headshot_frame", "two wells", blocking=True),
+            preflight.Issue("photo_crop", "crops 31%", blocking=False),
+        )
+    )
+
+    assert len(preflight.blocking_after_release(report, allow_blank_fields=False)) == 4
+
+    released = preflight.blocking_after_release(report, allow_blank_fields=True)
+
+    assert [issue.code for issue in released] == [
+        "unreadable_agent_name",
+        "ambiguous_headshot_frame",
+    ]

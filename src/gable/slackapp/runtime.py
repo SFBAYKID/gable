@@ -47,6 +47,7 @@ from gable.slackapp.recovery import (
     notify_interrupted_runs,
     prepare_pending_notifications,
 )
+from gable.slackapp.resume import resume_with_current_sources
 from gable.slackapp.source_refresh import SourceRefreshError, refresh_submission_sources
 from gable.slides.library import list_files as list_template_files
 from gable.voice import is_clean, safe
@@ -258,84 +259,6 @@ def build_components(settings: Settings) -> RuntimeComponents:
         deliver_notification=deliver_photo_notification,
     )
 
-    def resume_with_current_sources(
-        action_connection: Connection,
-        action_drive: Any,  # noqa: ANN401 - googleapiclient resource, untyped upstream
-        action_slides: Any,  # noqa: ANN401 - googleapiclient resource, untyped upstream
-        stored: store.StoredSubmission,
-        run: store.RunRow,
-        thread_ts: str,
-        progress: Callable[[str], None],
-    ) -> str:
-        """Continue one paused run against sources already refreshed.
-
-        Shared by the two ways a person unblocks a listing in its own thread:
-        saying the source design was updated, and answering the question Gable
-        asked. Both end in the same place — resume this run and report whatever
-        it actually produced.
-
-        Args:
-            action_connection: Thread-owned database connection.
-            action_drive: Drive v3 resource for this action.
-            action_slides: Slides v1 resource for this action.
-            stored: The submission re-read from the current sheet.
-            run: The paused run being continued.
-            thread_ts: The owned Slack thread.
-            progress: Waiting-indicator seam.
-
-        Returns:
-            Plain words for Slack, or empty when a durable outbox item has
-            already said it and the listener must not repeat it.
-
-        Raises:
-            Nothing. The runner records its own failures.
-        """
-        captured: list[str] = []
-
-        def capture(text: str, _requested_thread: str | None) -> str:
-            captured.append(text)
-            return thread_ts
-
-        runner = build_runner(
-            settings,
-            action_connection,
-            action_drive,
-            action_slides,
-            capture,
-            post_once=slack_post_once,
-            reconcile=slack_reconcile,
-            hero_photo_url=run.photo_url,
-            origin_thread_ts=thread_ts,
-            progress=progress,
-        )
-        submission = repo.Submission(
-            response_row_id=stored.response_row_id,
-            sheet_row=stored.sheet_row,
-            submitted_at=stored.submitted_at,
-            intake=stored.intake,
-            content_hash=stored.content_hash,
-            source_tab=stored.source_tab,
-        )
-        result = runner.resume(submission, run.run_id)
-        if captured:
-            return captured[-1]
-        if result.said:
-            # Durable questions post through their idempotent outbox seam so
-            # SQLite can confirm the exact Slack timestamp. The outer listener
-            # must not post that same text again.
-            return ""
-        if store.has_pending_run_notification(action_connection, run.run_id):
-            # A verified rebuild whose Slack acknowledgement was lost owns an
-            # exact durable outcome. Never contradict it with the generic
-            # unchanged-flyer fallback below.
-            return ""
-        return (
-            "I picked this listing back up, but the run did not produce an outcome I "
-            "could report. I left the listing paused."
-            if result.needs_a_human
-            else "I could not finish the rebuild, so I left the current flyer unchanged."
-        )
-
     def execute_action(
         decision: Decision,
         thread_ts: str,
@@ -349,6 +272,46 @@ def build_components(settings: Settings) -> RuntimeComponents:
                 str(settings.google_service_account_file), scopes=list(GOOGLE_SCOPES)
             )
             action_slides = build_google_service("slides", "v1", action_credentials)
+            if decision.tool == "build_with_blank_fields":
+                run = store.run_for_thread(action_connection, thread_ts)
+                if run is None:
+                    return (
+                        "I could not match this thread to a listing, so I have not built anything."
+                    )
+                if _needs_fresh_photo_upload(action_connection, run):
+                    # The release covers values nobody has, never the photograph.
+                    # A flyer with no property photo is not a flyer.
+                    return "I still need the property image in this thread before I can build."
+                store.approve_blank_fields(action_connection, run.run_id)
+                action_drive = build_google_service("drive", "v3", action_credentials)
+                action_sheets = build_google_service("sheets", "v4", action_credentials)
+                try:
+                    released = refresh_submission_sources(
+                        action_connection,
+                        run,
+                        SheetClient(spreadsheet_id=settings.sheet_id, service=action_sheets),
+                        action_drive,
+                        settings.drive_id,
+                        settings.drive_templates_folder_id,
+                    )
+                except SourceRefreshError:
+                    logger.exception("a listing's current form or contact source could not be read")
+                    return (
+                        "I could not refresh this listing from its form and contact record, "
+                        "so I left the run paused."
+                    )
+                return resume_with_current_sources(
+                    settings=settings,
+                    connection=action_connection,
+                    drive=action_drive,
+                    slides=action_slides,
+                    stored=released,
+                    run=run,
+                    thread_ts=thread_ts,
+                    progress=progress,
+                    post_once=slack_post_once,
+                    reconcile=slack_reconcile,
+                )
             if decision.tool == "supply_listing_value":
                 # Answering the question Gable asked has to move the run, or the
                 # question is a dead end: Chase replied "List price is $200,000"
@@ -393,13 +356,16 @@ def build_components(settings: Settings) -> RuntimeComponents:
                         "have not recorded it."
                     )
                 return resume_with_current_sources(
-                    action_connection,
-                    action_drive,
-                    action_slides,
-                    refreshed_submission,
-                    run,
-                    thread_ts,
-                    progress,
+                    settings=settings,
+                    connection=action_connection,
+                    drive=action_drive,
+                    slides=action_slides,
+                    stored=refreshed_submission,
+                    run=run,
+                    thread_ts=thread_ts,
+                    progress=progress,
+                    post_once=slack_post_once,
+                    reconcile=slack_reconcile,
                 )
             if decision.tool == "rebuild_flyer":
                 run = store.run_for_thread(action_connection, thread_ts)
@@ -482,13 +448,16 @@ def build_components(settings: Settings) -> RuntimeComponents:
                     if refreshed is None or refreshed.status != "ready":
                         return verdict
                 return resume_with_current_sources(
-                    action_connection,
-                    action_drive,
-                    action_slides,
-                    stored,
-                    run,
-                    thread_ts,
-                    progress,
+                    settings=settings,
+                    connection=action_connection,
+                    drive=action_drive,
+                    slides=action_slides,
+                    stored=stored,
+                    run=run,
+                    thread_ts=thread_ts,
+                    progress=progress,
+                    post_once=slack_post_once,
+                    reconcile=slack_reconcile,
                 )
             run = store.run_for_thread(action_connection, thread_ts)
             if run is None:

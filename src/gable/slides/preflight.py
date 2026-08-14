@@ -494,6 +494,9 @@ def analyze(
     # not create a copy and hope the final vision pass notices its placeholder.
     # New-template certification deliberately supplies no listing values, so
     # this check applies only to an actual run.
+    # A person may release this exact block by answering that Gable should build
+    # anyway; the runner drops `missing_value_*` blockers in that case. The
+    # check still runs so the reason is recorded either way.
     if values:
         missing = next(
             (name for name in resolution.fields if not values.get(name, "").strip()),
@@ -575,3 +578,28 @@ def analyze(
             )
 
     return Report(tuple(issues), hero_width_px, hero_height_px)
+
+
+def blocking_after_release(report: Report, allow_blank_fields: bool) -> tuple[Issue, ...]:
+    """Blockers that still stand once a person has released the blank ones.
+
+    Chase's rule, 2026-08-13: the sheet is what there is, so a value nobody has
+    is Carmen's decision rather than a dead end — she supplies it or says to
+    build and fills it in herself. That release covers `missing_value_*` alone.
+    An unreadable type size, an unsafe structure, an ambiguous photo well and a
+    missing headshot are not waivable and are all still returned here.
+
+    Args:
+        report: The measured result for this template and listing.
+        allow_blank_fields: Whether a person approved building with unknown
+            values left blank.
+
+    Returns:
+        The blockers the run must still stop for, in report order.
+
+    Raises:
+        Nothing.
+    """
+    if not allow_blank_fields:
+        return report.blockers
+    return tuple(issue for issue in report.blockers if not issue.code.startswith("missing_value_"))

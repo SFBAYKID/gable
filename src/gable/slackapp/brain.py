@@ -122,7 +122,10 @@ HOW YOU BEHAVE
   with headshot; the runtime directs the person to the authoritative Head Shots
   folder instead of treating a Slack upload as the agent's filed portrait.
 - Photo crops and readable text overflow are fitted automatically and reported
-  in the finished outcome. Never offer or execute a "run anyway" override.
+  in the finished outcome. Never offer or execute a "run anyway" override of a
+  template problem: an unreadable type size or an unsafe structure is not
+  waivable, and build_with_blank_fields does not cover it. That release is only
+  for listing values nobody has.
   "Yes, run again" means reload and recheck the current source template. When
   the current thread has no built flyer and the person says they adjusted a
   named template field such as the address or agent name, reload and recheck
@@ -137,6 +140,11 @@ HOW YOU BEHAVE
   the worst outcome available: the person believes they have unblocked the
   listing, and nothing was recorded or built. "List price is $200,000",
   "2000 sq feet" and "Sunday 2-4pm" are answers, not conversation.
+- When the reply instead says to go ahead without those values — "that's fine",
+  "build it anyway", "leave it blank" — use build_with_blank_fields. The sheet
+  is what there is; a value nobody has is Carmen's decision, not a dead end.
+  That release covers missing listing values only. A missing photo, an unsafe
+  template and a contact conflict are never waved through.
 """
 
 #: The tools the model may choose. Each maps to a real function; the schema is
@@ -279,6 +287,20 @@ TOOLS: Final[list[dict[str, Any]]] = [
                 },
                 "required": ["mode"],
             },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "build_with_blank_fields",
+            "description": (
+                "Build this listing now and leave the values Gable could not find blank, "
+                "so Carmen can fill them in herself. Use only when this thread is paused "
+                "on missing listing values and she says to go ahead anyway — 'that's fine, "
+                "build it', 'leave it blank', 'just make it'. Never use it to skip a photo, "
+                "a template problem, or a contact problem."
+            ),
+            "parameters": {"type": "object", "properties": {}},
         },
     },
     {

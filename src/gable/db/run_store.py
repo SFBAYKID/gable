@@ -498,3 +498,56 @@ def _to_run(row: sqlite3.Row) -> RunRow:
         approved_warning_codes=str(row["approved_warning_codes"] or ""),
         pending_warning_code=str(row["pending_warning_code"] or ""),
     )
+
+
+#: Recorded in `runs.approved_warning_codes` when a person has said to build
+#: without the listing values Gable could not find. Chase's rule, 2026-08-13:
+#: the sheet is what there is, so a gap is Carmen's decision rather than a dead
+#: end — she either supplies the value or says build it and she will fill it in.
+BUILD_WITH_BLANKS: Final[str] = "build_with_blank_fields"
+
+
+def approve_blank_fields(connection: sqlite3.Connection, run_id: str) -> None:
+    """Record that a person accepted a flyer with its unknown values left blank.
+
+    Args:
+        connection: An open connection.
+        run_id: The paused run being released.
+
+    Raises:
+        sqlite3.Error: on a write failure.
+    """
+    row = connection.execute(
+        "SELECT approved_warning_codes FROM runs WHERE run_id = ?", (run_id,)
+    ).fetchone()
+    codes = {code for code in str(row["approved_warning_codes"] if row else "").split(",") if code}
+    codes.add(BUILD_WITH_BLANKS)
+    set_status(
+        connection,
+        run_id,
+        "pending",
+        "approved building with the unknown values left blank",
+        approved_warning_codes=",".join(sorted(codes)),
+    )
+
+
+def blanks_approved(connection: sqlite3.Connection, run_id: str) -> bool:
+    """Whether this run may build with its unknown values left blank.
+
+    Args:
+        connection: An open connection.
+        run_id: The run being built.
+
+    Returns:
+        True once a person has released it. Approval is per run, so the next
+        listing asks its own question rather than inheriting this decision.
+
+    Raises:
+        sqlite3.Error: on a query failure.
+    """
+    row = connection.execute(
+        "SELECT approved_warning_codes FROM runs WHERE run_id = ?", (run_id,)
+    ).fetchone()
+    if not row:
+        return False
+    return BUILD_WITH_BLANKS in str(row["approved_warning_codes"] or "").split(",")

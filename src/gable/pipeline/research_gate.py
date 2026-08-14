@@ -30,8 +30,14 @@ def resolve(
     resolution: Resolution,
     research: Callable[[str, frozenset[str]], Facts],
     progress: Callable[[], None] = lambda: None,
+    allow_blank_fields: bool = False,
 ) -> tuple[Step, dict[str, str]]:
-    """Research only missing public fields displayed by this exact source."""
+    """Research only missing public fields displayed by this exact source.
+
+    `allow_blank_fields` is set once a person has said to build without the
+    values Gable could not find. Research still runs — a fact that can be found
+    is better than a blank — but a remaining gap no longer stops the run.
+    """
     required = required_public_facts(resolution, intake)
     # Existing rows predate address-identity proof and carry no durable marker
     # that distinguishes a matching property page from a plausible wrong search
@@ -66,4 +72,9 @@ def resolve(
         # missing, so a lookup triggered by an absent square footage must not
         # replace the price a person just gave with whatever a listing page says.
         known = {**found.as_dict(), **known}
-    return after_research(intake, found, known, required), known
+    step = after_research(intake, found, known, required)
+    if allow_blank_fields and step.outcome is Outcome.ASK:
+        # The gap was already put to a person and they chose to proceed. Asking
+        # again with the same words is how a question becomes a dead end.
+        return Step(outcome=Outcome.BUILD), known
+    return step, known

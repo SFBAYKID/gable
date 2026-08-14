@@ -356,12 +356,15 @@ class Runner:
                 result,
                 status="needs_template",
             )
+        # Released by a person for this run only. See preflight.blocking_after_release.
+        allow_blank = store.blanks_approved(self.connection, run_id)
         step, known = research_gate.resolve(
             self.connection,
             intake,
             resolution,
             self.research,
             lambda: self.progress("is looking up the property..."),
+            allow_blank_fields=allow_blank,
         )
         if step.outcome is Outcome.ASK:
             return self._ask(run_id, intake, step.say, step.questions, result)
@@ -387,8 +390,9 @@ class Runner:
             resolution,
             values,
         )
-        if measured.blockers:
-            issue = measured.blockers[0]
+        blockers = preflight.blocking_after_release(measured, allow_blank)
+        if blockers:
+            issue = blockers[0]
             return self._ask(run_id, intake, issue.say, [], result, status=issue.status)
         # Correctable layout work is Gable's job. Text is fitted to the largest
         # readable size and a supplied photo is center-cropped to the measured

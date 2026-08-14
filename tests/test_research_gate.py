@@ -320,3 +320,33 @@ def test_a_later_lookup_cannot_overwrite_what_a_person_stated(tmp_path: Path) ->
 
     assert known["list_price"] == "$200,000", "the person outranks the listing page"
     assert known["square_feet"] == "3,332"
+
+
+def test_an_approved_blank_stops_the_gate_asking_the_same_question_again(
+    tmp_path: Path,
+) -> None:
+    """Once a person says to build anyway, the gap is a blank, not a question."""
+    connection = connect(tmp_path / "released.db")
+    apply_migrations(connection)
+    item = submission()
+
+    def research(_address: str, _fields: frozenset[str]) -> Facts:
+        return Facts()
+
+    asked, _known = research_gate.resolve(
+        connection,
+        item.intake,
+        Resolution(fields={"price": "[ PRICE ]"}),
+        research,
+    )
+    released, known = research_gate.resolve(
+        connection,
+        item.intake,
+        Resolution(fields={"price": "[ PRICE ]"}),
+        research,
+        allow_blank_fields=True,
+    )
+
+    assert asked.outcome is Outcome.ASK
+    assert released.outcome is Outcome.BUILD
+    assert known.get("list_price", "") == "", "released means blank, never invented"
