@@ -24,7 +24,7 @@ from typing import Any, Final
 from gable.photos.fit import assess
 from gable.slides import fields, fitting
 from gable.slides.elements import descendants, font_size_pt, font_weight, text_content
-from gable.slides.hero import find_hero_frame, headshot_frames
+from gable.slides.hero import absolute_boxes, find_hero_frame, headshot_frames
 
 PHOTO_CROP_WARNING: Final[float] = 0.30
 _TOKEN_MARKS: Final[re.Pattern[str]] = re.compile(r"[\[\]{}<>]")
@@ -137,15 +137,22 @@ def text_boxes(presentation: dict[str, Any]) -> list[fitting.TextBox]:
     """
     boxes: list[fitting.TextBox] = []
     for page in presentation.get("slides", []):
-        for element in descendants(page.get("pageElements", [])):
+        # Absolute bounds, so a field inside grouped artwork is measured as it
+        # actually renders. A child's own transform is relative to its group:
+        # New Listing with Open House scales its REALTOR box to 0.75, so its
+        # own numbers overstated the usable width by a third and the design was
+        # refused outright rather than measured.
+        for element, _x, _y, width, height in absolute_boxes(page.get("pageElements", [])):
             text = text_content(element)
             if not text:
                 continue
-            transform = element.get("transform", {})
             size = element.get("size", {})
-            width = float(size.get("width", {}).get("magnitude", 0) * transform.get("scaleX", 1))
-            height = float(size.get("height", {}).get("magnitude", 0) * transform.get("scaleY", 1))
-            size_pt = font_size_pt(element) or _implied_font_size_pt(height)
+            intrinsic_height = float(size.get("height", {}).get("magnitude", 0))
+            # The group scales the type along with the box, so the rendered
+            # point size is the declared one times that same factor.
+            scale = height / intrinsic_height if intrinsic_height > 0 else 1.0
+            declared = font_size_pt(element)
+            size_pt = declared * scale if declared else _implied_font_size_pt(height)
             lines = 1
             if size_pt > 0 and height > 0:
                 lines = max(1, int((height / fitting.EMU_PER_POINT) // (size_pt * 1.2)))
@@ -434,38 +441,17 @@ def analyze(
             )
         )
 
-    top_level_ids = {
-        str(element.get("objectId") or "")
-        for page in pages
-        for element in page.get("pageElements", [])
-    }
     literals_by_field = {
         name: (primary, *resolution.also.get(name, ()))
         for name, primary in resolution.fields.items()
     }
-    grouped_field = next(
-        (
-            name
-            for page in pages
-            for element in descendants(page.get("pageElements", []))
-            for name, literals in literals_by_field.items()
-            if str(element.get("objectId") or "") not in top_level_ids
-            and text_content(element).strip() in {literal.strip() for literal in literals}
-        ),
-        "",
-    )
-    if grouped_field:
-        readable = grouped_field.replace("_", " ")
-        issues.append(
-            Issue(
-                f"grouped_{grouped_field}",
-                f"I checked the {template_label} design before building. Its {readable} "
-                "field is inside grouped artwork, so I cannot measure its final text "
-                "capacity reliably. Ungroup that field into its own text box, then tell "
-                "me to check it again.",
-                blocking=True,
-            )
-        )
+    # A field inside grouped artwork used to be refused outright, because a
+    # child's transform is relative to its group and the measurement was
+    # therefore unreliable — New Listing with Open House scales its REALTOR box
+    # to 0.75 and was rejected every time. `text_boxes` now composes the parent
+    # transforms, so the box is measured as it renders and there is nothing left
+    # to refuse. Rotation and shear are a different question and still stop
+    # below: those change what "fits" means rather than merely scaling it.
 
     transformed_field = next(
         (

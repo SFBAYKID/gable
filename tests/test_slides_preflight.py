@@ -365,7 +365,13 @@ def test_new_template_capacity_that_can_autofit_is_not_a_warning() -> None:
     assert not any(issue.code == "capacity_agent_email" for issue in report.issues)
 
 
-def test_a_grouped_fillable_field_is_refused_instead_of_mismeasured() -> None:
+def test_a_grouped_fillable_field_is_measured_at_its_rendered_width() -> None:
+    """A child's transform is relative to its group, so composing matters.
+
+    This used to be refused outright rather than measured, which rejected New
+    Listing with Open House every time: it scales its REALTOR box to 0.75, so
+    its own numbers overstated the usable width by a third.
+    """
     child = _text("email", "Email", 200)
     presentation = _presentation(
         _text("address", "[PROPERTY ADDRESS]", 900),
@@ -377,10 +383,11 @@ def test_a_grouped_fillable_field_is_refused_instead_of_mismeasured() -> None:
     )
 
     report = preflight.certify(presentation, "New Listing", "Just Listed")
+    boxes = {box.object_id: box for box in preflight.text_boxes(presentation)}
 
-    issue = next(item for item in report.blockers if item.code == "grouped_agent_email")
-    assert "inside grouped artwork" in issue.say
-    assert "own text box" in issue.say
+    assert not any(item.code.startswith("grouped_") for item in report.blockers)
+    own_width = child["size"]["width"]["magnitude"] * child["transform"]["scaleX"]
+    assert boxes["email"].width_emu == own_width * 0.5, "the group's scale must apply"
 
 
 def test_a_rotated_fillable_field_is_refused_instead_of_measured_as_flat() -> None:
