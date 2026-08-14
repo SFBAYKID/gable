@@ -418,6 +418,42 @@ def resolve(texts: list[str], wanted: list[str] | None = None) -> Resolution:
     )
 
 
+#: Fields whose value is a fixed word the design typesets itself, rather than
+#: something a person wrote. Only these follow the placeholder's capitalisation:
+#: an address or a name must appear exactly as it was given, and upper-casing
+#: those would rewrite what somebody typed.
+_MATCH_PLACEHOLDER_CASE: Final[frozenset[str]] = frozenset({"agent_title"})
+
+
+def _as_written(name: str, literal: str, value: str) -> str:
+    """Fill a fixed credential the way the design already writes it.
+
+    New Listing sets REALTOR in capitals with a separately positioned
+    superscript ® immediately after it. Filling "Realtor" left that mark
+    stranded in open space, because the lower-case word is narrower than the
+    placeholder it replaced. The design chose the capitals; Gable supplies the
+    word and keeps its presentation.
+
+    Args:
+        name: The field being filled.
+        literal: The design's own placeholder text.
+        value: What Gable would otherwise write.
+
+    Returns:
+        The value, upper-cased when this is a design-typeset credential and the
+        placeholder is upper-case. Everything else is returned untouched.
+
+    Raises:
+        Nothing.
+    """
+    if name not in _MATCH_PLACEHOLDER_CASE:
+        return value
+    stripped = literal.strip()
+    if stripped and stripped.isupper() and not value.isupper():
+        return value.upper()
+    return value
+
+
 def replacements(resolution: Resolution, values: dict[str, str]) -> dict[str, str]:
     """Turn resolved fields plus data into literal find/replace pairs.
 
@@ -436,7 +472,7 @@ def replacements(resolution: Resolution, values: dict[str, str]) -> dict[str, st
         Nothing.
     """
     pairs = {
-        literal: values[name]
+        literal: _as_written(name, literal, values[name])
         for name, literal in resolution.fields.items()
         if values.get(name, "").strip()
     }
@@ -447,5 +483,5 @@ def replacements(resolution: Resolution, values: dict[str, str]) -> dict[str, st
         if not value:
             continue
         for literal in extras:
-            pairs[literal] = value
+            pairs[literal] = _as_written(name, literal, value)
     return pairs

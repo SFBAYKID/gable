@@ -168,3 +168,19 @@ def test_the_agent_title_carries_no_credential_mark() -> None:
     assert _title_word("REALTOR®") == "REALTOR"
     assert _title_word("Realtor ®") == "Realtor"
     assert _title_word("Associate Broker") == "Associate Broker"
+
+
+def test_a_design_that_sets_its_credential_in_capitals_keeps_them() -> None:
+    """New Listing writes REALTOR with a superscript mark positioned after it."""
+    from gable.slides.fields import _as_written
+
+    assert _as_written("agent_title", "REALTOR", "Realtor") == "REALTOR"
+    assert _as_written("agent_title", "Realtor", "Realtor") == "Realtor"
+
+
+def test_nothing_a_person_typed_is_recased() -> None:
+    """An address or a name appears exactly as it was given."""
+    from gable.slides.fields import _as_written
+
+    assert _as_written("address", "PROPERTY ADDRESS", "103 Doyle Place") == "103 Doyle Place"
+    assert _as_written("agent_name", "AGENT NAME", "Andy Jang") == "Andy Jang"
