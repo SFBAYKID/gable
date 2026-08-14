@@ -139,14 +139,17 @@ def test_a_value_supplied_after_delivery_reopens_the_finished_run(
     run = store.start_run(connection, item.response_row_id)
     store.set_status(connection, run.run_id, "delivered", "built", slack_thread_ts="111.1")
 
-    reopened = may_rebuild(connection, store.run_by_id(connection, run.run_id), "act-1", "111.1")
+    current = store.run_by_id(connection, run.run_id)
+    assert current is not None
 
-    assert reopened
-    assert store.run_by_id(connection, run.run_id).status not in store.TERMINAL
+    assert may_rebuild(connection, current, "act-1", "111.1")
+    after = store.run_by_id(connection, run.run_id)
+    assert after is not None
+    assert after.status not in store.TERMINAL
 
 
-def test_the_same_request_delivered_twice_rebuilds_once(tmp_path: Path) -> None:
-    """Slack redelivers; only one of them may reopen the flyer."""
+def test_the_same_supplied_value_delivered_twice_rebuilds_once(tmp_path: Path) -> None:
+    """Slack redelivers the reply too; only one delivery may reopen the flyer."""
     from gable.slackapp.resume import may_rebuild
 
     connection = connect(tmp_path / "g.db")
@@ -156,8 +159,12 @@ def test_the_same_request_delivered_twice_rebuilds_once(tmp_path: Path) -> None:
     run = store.start_run(connection, item.response_row_id)
     store.set_status(connection, run.run_id, "delivered", "built", slack_thread_ts="222.2")
 
-    first = may_rebuild(connection, store.run_by_id(connection, run.run_id), "act-2", "222.2")
-    second = may_rebuild(connection, store.run_by_id(connection, run.run_id), "act-2", "222.2")
+    current = store.run_by_id(connection, run.run_id)
+    assert current is not None
+    first = may_rebuild(connection, current, "act-2", "222.2")
+    reopened = store.run_by_id(connection, run.run_id)
+    assert reopened is not None
+    second = may_rebuild(connection, reopened, "act-2", "222.2")
 
     assert first
     assert not second
@@ -174,4 +181,6 @@ def test_a_run_still_waiting_needs_no_reopening(tmp_path: Path) -> None:
     run = store.start_run(connection, item.response_row_id)
     store.set_status(connection, run.run_id, "needs_info", "asked", slack_thread_ts="333.3")
 
-    assert may_rebuild(connection, store.run_by_id(connection, run.run_id), "act-3", "333.3")
+    current = store.run_by_id(connection, run.run_id)
+    assert current is not None
+    assert may_rebuild(connection, current, "act-3", "333.3")
