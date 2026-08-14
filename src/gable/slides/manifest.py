@@ -103,6 +103,15 @@ MANIFESTS: Final[dict[str, Manifest]] = {
         "Just Sold — With Beds, Baths and SqFt",
         (_ADDRESS, _PRICE, _BEDS, _BATHS, _SQFT, _AGENT, _PHONE, _EMAIL, _HERO, _HEADSHOT),
     ),
+    # A testimonial has no property, so no address and no price. Without its own
+    # entry it fell to DEFAULT_LISTING, which requires an address, and row 5 was
+    # asked to separate the street, city, state and ZIP of "Google Review, SRES
+    # Listing 29 Maple". What it must not ship without is the agent it belongs
+    # to and the photograph its layout is built around.
+    "Client Review Post": Manifest(
+        "Client Review Post",
+        (_AGENT, _PHONE, _EMAIL, _HERO, _HEADSHOT),
+    ),
 }
 
 #: What an unlisted template is assumed to need. Conservative on purpose: it is

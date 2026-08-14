@@ -120,3 +120,51 @@ def test_the_name_on_its_own_line_still_works() -> None:
 
     assert found.client_name == "Rob Morgan"
     assert found.quote.startswith("In a simple word")
+
+
+def test_a_client_review_manifest_asks_for_no_property_address() -> None:
+    """Row 5 was asked to separate the ZIP of "Google Review, SRES Listing 29 Maple"."""
+    from gable.slides import manifest as template_manifest
+
+    found = template_manifest.manifest_for("Client Review Post")
+
+    assert found.find("address") is None
+    assert found.find("price") is None
+    agent = found.find("agent_name")
+    assert agent is not None and agent.required
+
+
+def test_a_client_review_with_no_address_validates_clean() -> None:
+    from gable.slides import manifest as template_manifest
+
+    found = template_manifest.manifest_for("Client Review Post")
+
+    problems = template_manifest.validate(
+        found,
+        {
+            "agent_name": "Gina Moore",
+            "agent_phone": "410.299.6536",
+            "agent_email": "gina@cornerhouserealty.com",
+            "hero_photo": "http://photos.example/house.jpg",
+        },
+    )
+
+    assert problems == []
+
+
+def test_a_listing_design_still_demands_a_whole_address() -> None:
+    from gable.slides import manifest as template_manifest
+
+    found = template_manifest.manifest_for("Open House")
+
+    problems = template_manifest.validate(
+        found,
+        {
+            "address": "1011 Winged Foot Drive",
+            "agent_name": "Tambria Eaton",
+            "agent_phone": "443.739.7534",
+            "hero_photo": "http://photos.example/house.jpg",
+        },
+    )
+
+    assert [item.field_name for item in problems] == ["address"]
