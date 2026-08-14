@@ -604,3 +604,49 @@ priority order is:
    and enable polling only after both the zero-work preview and watched flyer
    test pass. Firecrawl, conversation, and vision calls remain under the shared
    $50 spend guard.
+
+---
+
+## 7. Overnight matrix test — 13–14 August 2026
+
+Every person on the roster against every design, driven from `Testing_1` into
+`#monarch-bot-playground`. 263 runs opened, 68 flyers delivered, $17.32 spent
+against the $500 campaign ceiling. `#calvo` received nothing.
+
+### Fixed and deployed
+
+| What | Commit |
+|---|---|
+| Text width measured from the designs' own faces instead of a five-class estimate. A name wrapped onto the Realtor title beneath it because the estimate was 14 percent low. | `c1e29c3` |
+| Every field filled through a sentinel, so a value Gable writes cannot be caught by a later replacement. A brokerage name ending in "Realtor" had that word rewritten. | `8d4b4eb` |
+| The sentinel made plain ASCII, because Slides silently strips U+E000 and the second pass then matched nothing. | `c76c8b9` |
+| The visual gate told which sample text was deliberately left, so a correct flyer is not held for showing the design's own price. | `86551d6` |
+| A failed run records the kind of error, not just that one happened. | `7abfc8a` |
+
+### Waiting on Chase
+
+- **Sold cannot deliver.** "Reach Out Today." overflows its own callout in the
+  source design and the second line prints onto the white band below. Every Sold
+  run stops for review and is right to. Open House loses the last line of its
+  footer the same way.
+- **Two job titles fit no design.** Sara Wolz's
+  "Listing Manager, Transaction Coordinator & Realtor®" needs about 627 percent
+  more room than the title slot; Gina Moore's "REALTOR®, The Kulnich Home Team"
+  about 391 percent. Either the designs get a wider title line, or Gable falls
+  back to the plain credential and says so — the second changes what an agent's
+  flyer says about them, so it was not decided here.
+- **Five roster records stop every request from those people:** Erica Pfeiffer
+  (workbook email and phone absent from the official profile), Tracy Edwards
+  (phone disagrees), Lolo Simmons (no exact profile), Sam Johnson (no title on
+  the profile), Kelsey Mahon (no headshot, and listed twice under two emails).
+- **Bobby Carr The Dog Walking Realtor** does not fit Open House at 34
+  characters, and renders at roughly half the design's type size on the others.
+
+### Known limits of the test itself
+
+Three runs of about 210 failed transiently just after preflight and all three
+delivered on a rerun. Driving photo uploads through the Slack web client proved
+unreliable partway through the night, so the sweep used
+`run_row --hero-photo-url`; that flag carries a photo for one run only, which is
+why the three designs showing beds, baths and square footage stop at the ask
+rather than producing a flyer.
