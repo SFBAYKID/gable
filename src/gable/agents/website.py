@@ -38,6 +38,10 @@ OFFICIAL_PAGES_API: Final[str] = f"https://{OFFICIAL_HOST}/wp-json/wp/v2/pages"
 WORKBOOK_SOURCE: Final[str] = "contact_workbook"
 WEBSITE_SOURCE: Final[str] = "official_website"
 _TIMEOUT_SECONDS: Final[int] = 20
+#: How many same-named candidate pages are worth reading before giving up. Two
+#: is the real case — a profile and its open-houses twin — and the cap bounds a
+#: pathological search result rather than fetching the whole site.
+_MAX_CANDIDATE_PROFILES: Final[int] = 3
 _MAX_RESPONSE_BYTES: Final[int] = 2 * 1024 * 1024
 _TITLE_TAG: Final[re.Pattern[str]] = re.compile(r"<[^>]+>")
 
@@ -585,52 +589,70 @@ def lookup_official_profile(
         # form is only ever a fallback for finding a candidate; identity is
         # still proven below by a contact detail, never by the name.
         candidates = list(dict.fromkeys(exact or branded))
-        if len(candidates) != 1:
+        if not candidates:
             return ProfileLookup(
                 problem=(
                     "the official Corner House Realty website has no exact profile for this agent"
-                    if not candidates
-                    else "the official Corner House Realty website has more than one exact profile "
-                    "for this agent"
                 )
             )
-        profile_url, profile_name = candidates[0]
-        profile_html, final_profile_url = fetch(profile_url)
-        if not _official_url(final_profile_url):
-            raise ValueError("the profile left the official domain")
-        parser = _ProfileParser()
-        parser.feed(profile_html.decode("utf-8", errors="replace"))
-        emails = _unique([value.lower() for value in parser.emails])
-        phones = _unique(parser.phones)
-        titles = _unique([_clean_name(value) for value in parser.title_parts])
-        if len(phones) != 1 or not _phone_is_usable(phones[0]):
-            return ProfileLookup(
-                problem="the exact official profile does not show one usable direct phone number"
+
+        # One agent can hold several pages under the identical title: Melanie
+        # Humeniuk's profile and her open-houses page are both called exactly
+        # "Melanie Humeniuk", and refusing on the count alone denied her every
+        # design that prints a credential. The name nominates here too, and the
+        # contact detail decides — read each candidate and keep the ones that
+        # actually carry this agent's email or filed direct phone.
+        proven: list[OfficialProfile] = []
+        for profile_url, profile_name in candidates[:_MAX_CANDIDATE_PROFILES]:
+            profile_html, final_profile_url = fetch(profile_url)
+            if not _official_url(final_profile_url):
+                raise ValueError("the profile left the official domain")
+            parser = _ProfileParser()
+            parser.feed(profile_html.decode("utf-8", errors="replace"))
+            emails = _unique([value.lower() for value in parser.emails])
+            phones = _unique(parser.phones)
+            titles = _unique([_clean_name(value) for value in parser.title_parts])
+            if len(phones) != 1 or not _phone_is_usable(phones[0]):
+                continue
+            # The email is the usual proof; the filed direct phone is the
+            # fallback for an agent who submits from a personal address the
+            # brokerage page does not list, which is how Bobby Carr's gmail
+            # failed against his official profile. A page matching on neither is
+            # somebody else, whatever it is called.
+            if email_address not in emails and (
+                not known_phone or _phone_key(known_phone) != _phone_key(phones[0])
+            ):
+                continue
+            proven.append(
+                OfficialProfile(
+                    name=profile_name,
+                    email=email_address,
+                    phone=phones[0],
+                    title=titles[0] if len(titles) == 1 else "",
+                    source_url=final_profile_url,
+                )
             )
-        # Identity is proven by a contact detail, not by the name. The email is
-        # the usual proof; the filed direct phone is the fallback for an agent
-        # who submits from a personal address the brokerage page does not list,
-        # which is how Bobby Carr's gmail failed against his official profile.
-        # One of the two must hold — a profile matching on neither is somebody
-        # else, whatever the page is called.
-        if email_address not in emails and (
-            not known_phone or _phone_key(known_phone) != _phone_key(phones[0])
-        ):
+        if not proven:
             return ProfileLookup(
                 problem=(
                     "the official profile does not show the submitted email address "
                     "or the filed direct phone"
                 )
             )
-        return ProfileLookup(
-            profile=OfficialProfile(
-                name=profile_name,
-                email=email_address,
-                phone=phones[0],
-                title=titles[0] if len(titles) == 1 else "",
-                source_url=final_profile_url,
+        # Duplicate pages for one person agree with each other. Pages that
+        # disagree on the direct line are not one person, and choosing between
+        # them is the guess this module exists to refuse.
+        if len({_phone_key(found.phone) for found in proven}) > 1:
+            return ProfileLookup(
+                problem=(
+                    "the official Corner House Realty website shows more than one direct "
+                    "phone number for this agent"
+                )
             )
-        )
+        # Prefer a page carrying a credential: the open-houses twin usually has
+        # none, and an empty title would be reported as a missing credential.
+        titled = next((found for found in proven if found.title), None)
+        return ProfileLookup(profile=titled or proven[0])
     except Exception:
         return ProfileLookup(
             problem=(

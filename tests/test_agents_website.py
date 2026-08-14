@@ -397,7 +397,9 @@ def test_official_lookup_refuses_two_exact_profiles_instead_of_picking_one() -> 
     )
 
     assert found.profile is None
-    assert "more than one exact profile" in found.problem
+    # Counting is no longer the reason: neither page carries her contact detail,
+    # which is what now decides between same-named pages.
+    assert "does not show the submitted email address" in found.problem
 
 
 def test_a_branded_name_still_takes_its_title_from_the_official_profile() -> None:
@@ -446,3 +448,75 @@ def test_a_genuinely_different_official_name_is_still_refused() -> None:
 
     assert checked.ready is False
     assert "does not match the submitted name" in checked.problem
+
+
+def _page(title: str, email: str, phone: str) -> bytes:
+    """One official profile in the markup shape the parser actually reads."""
+    credential = (
+        f'<div class="cbl__widget cbl__widget--job_title"><div class="cb-title">{title}</div></div>'
+        if title
+        else ""
+    )
+    return (
+        credential
+        + '<div class="contact-button__dropdown">'
+        + f'<div><a href="mailto:{email.replace("@", "%40")}">email</a></div>'
+        + f'<div><a href="tel:{phone}">phone</a></div>'
+        + "</div>"
+    ).encode()
+
+
+def test_two_pages_under_one_name_are_resolved_by_the_contact_detail() -> None:
+    """Melanie Humeniuk's profile and her open-houses page share an exact title.
+
+    Refusing on the count alone denied her every design that prints a
+    credential. The name nominates; the page carrying her contact detail wins,
+    and a credentialled page is preferred over its untitled twin.
+    """
+    twin = "https://cornerhouserealty.com/melanie-humeniuk-open-houses/"
+    real = "https://cornerhouserealty.com/melanie-humeniuk/"
+    payload = json.dumps(
+        [
+            {"link": twin, "title": {"rendered": "Melanie Humeniuk"}},
+            {"link": real, "title": {"rendered": "Melanie Humeniuk"}},
+        ]
+    ).encode()
+    pages = {
+        twin: _page("", "melanie@cornerhouserealty.com", "443.986.0789"),
+        real: _page("REALTOR&#174;", "melanie@cornerhouserealty.com", "443.986.0789"),
+    }
+
+    def fetch(url: str) -> tuple[bytes, str]:
+        return (pages[url], url) if url in pages else (payload, url)
+
+    found = lookup_official_profile(
+        "Melanie Humeniuk", "melanie@cornerhouserealty.com", fetch=fetch
+    )
+
+    assert found.profile is not None
+    assert found.profile.source_url == real, "the credentialled page wins over its twin"
+    assert found.profile.title == "REALTOR\u00ae"
+
+
+def test_two_pages_giving_different_direct_lines_are_still_refused() -> None:
+    """Same name, two numbers, is not one person — and choosing is the guess."""
+    one = "https://cornerhouserealty.com/one/"
+    two = "https://cornerhouserealty.com/two/"
+    payload = json.dumps(
+        [
+            {"link": one, "title": {"rendered": "Pat Jones"}},
+            {"link": two, "title": {"rendered": "Pat Jones"}},
+        ]
+    ).encode()
+    pages = {
+        one: _page("REALTOR&#174;", "pat@cornerhouserealty.com", "410.111.2222"),
+        two: _page("REALTOR&#174;", "pat@cornerhouserealty.com", "410.333.4444"),
+    }
+
+    def fetch(url: str) -> tuple[bytes, str]:
+        return (pages[url], url) if url in pages else (payload, url)
+
+    found = lookup_official_profile("Pat Jones", "pat@cornerhouserealty.com", fetch=fetch)
+
+    assert found.profile is None
+    assert "more than one direct phone number" in found.problem
