@@ -95,7 +95,8 @@ def test_a_literal_missing_from_the_design_is_still_refused() -> None:
 
 def test_a_value_carrying_the_sentinel_mark_is_refused() -> None:
     """Nothing that could survive as a sentinel is ever written to a flyer."""
-    assert safe_replacement_requests(slide("Realtor"), {"Realtor": "REALTOR"}) == []
+    marked = f"REAL{SENTINEL_MARK}TOR"
+    assert safe_replacement_requests(slide("Realtor"), {"Realtor": marked}) == []
 
 
 def test_a_design_carrying_the_sentinel_mark_is_refused() -> None:
@@ -112,3 +113,19 @@ def test_no_sentinel_is_a_substring_of_another() -> None:
 
     assert len(set(sentinels)) == len(pairs)
     assert not any(a != b and a in b for a in sentinels for b in sentinels)
+
+
+def test_the_sentinel_is_plain_ascii_because_slides_strips_private_use() -> None:
+    """Slides dropped U+E000 from the document while reporting success.
+
+    The first pass wrote the marks, the document stored the bare index, and the
+    second pass then matched nothing. Any codepoint Slides may normalise away is
+    unusable here, so the sentinel is ordinary characters that no design and no
+    listing field contains.
+    """
+    from gable.slides.replacement import _sentinel
+
+    assert SENTINEL_MARK.isascii()
+    assert all(_sentinel(index).isascii() for index in range(5))
+    assert all(_sentinel(index).isprintable() for index in range(5))
+    assert len({len(_sentinel(index)) for index in range(200)}) == 1

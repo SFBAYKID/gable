@@ -274,6 +274,12 @@ call on 2026-08-12:
    carry no text inset. The table lives in `slides/typemetrics.py` and covers
    Open Sans, EB Garamond and Raleway at both weights — every face the six
    designs set text in.
+10. **Slides silently strips U+E000 from replacement text.** `replaceAllText`
+    reported success and the document stored the surrounding characters without
+    it, so a second pass searching for the full token matched nothing. Any
+    private-use or otherwise normalisable codepoint is unusable as a marker;
+    `slides/replacement.py` uses plain ASCII. Observed on a real render
+    2026-08-14, and caught by the occurrence check rather than delivered.
 
 Each of these cost a real failure to learn. They are in the decision log with
 their evidence.

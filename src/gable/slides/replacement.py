@@ -14,11 +14,15 @@ flyer read "Bobby Carr The Dog Walking REALTOR". Every literal was standalone in
 the source. The collision only existed once the name was on the slide.
 
 So the fills are done in two passes. Every literal is first replaced with a
-private-use sentinel that cannot occur in a design or in a listing, and the
-sentinels are then replaced with the values. No pass ever searches for a word,
-which means no value can be caught by a later replacement no matter what it
-contains. Slides applies a batch atomically, so a sentinel can never survive
-onto a rendered flyer.
+unique sentinel, and the sentinels are then replaced with the values. No pass
+ever searches for a word, which means no value can be caught by a later
+replacement no matter what it contains, and no ordering of the fields can
+matter.
+
+The sentinel is plain ASCII on purpose — see `SENTINEL_MARK`. A design or a
+value already carrying it refuses the whole fill, and if a sentinel ever did
+survive a pass, the occurrence check below reports it and the run stops rather
+than delivering a flyer with a token on it.
 """
 
 from __future__ import annotations
@@ -31,10 +35,16 @@ from gable.slides.elements import descendants, text_content
 
 logger = logging.getLogger("gable.slides.replacement")
 
-#: Wraps each sentinel. U+E000 is in the Unicode private use area: it has no
-#: assigned meaning, no font draws it deliberately, and it cannot arrive from a
-#: form submission, a roster, or a design Carmen drew.
-SENTINEL_MARK: Final[str] = ""
+#: Opens each sentinel. Deliberately plain ASCII: **Slides silently strips
+#: U+E000**, the private-use codepoint this first used. `replaceAllText` reported
+#: success, the document stored `G0000` without the marks, and the second pass
+#: then matched nothing — caught by the occurrence check rather than delivered,
+#: but only because that check exists. Verified on a real render 2026-08-14.
+#:
+#: A design or a value carrying this string is refused rather than filled, so
+#: the only cost of an ordinary-looking mark is a refusal that cannot happen in
+#: practice: no Corner House design and no listing field contains it.
+SENTINEL_MARK: Final[str] = "{{GABLE-"
 
 
 def _sentinel(index: int) -> str:
@@ -43,7 +53,7 @@ def _sentinel(index: int) -> str:
     Fixed width and zero-padded so no sentinel is a substring of another, which
     would reintroduce exactly the collision this exists to prevent.
     """
-    return f"{SENTINEL_MARK}G{index:04d}{SENTINEL_MARK}"
+    return f"{SENTINEL_MARK}{index:04d}}}}}"
 
 
 def safe_replacement_requests(
