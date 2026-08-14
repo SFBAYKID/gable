@@ -83,7 +83,7 @@ def test_every_real_person_on_the_design_is_replaced() -> None:
 
 
 def test_a_named_attribution_is_read_rather_than_asked_about() -> None:
-    """"Sarah Whitfield said: ..." says whose words follow. That is not a guess."""
+    """An attribution line says whose words follow, so reading it is not a guess."""
     from gable.listings.review import parse_review
 
     found = parse_review(
@@ -97,7 +97,7 @@ def test_a_named_attribution_is_read_rather_than_asked_about() -> None:
 
 
 def test_the_agent_being_praised_is_never_taken_as_the_reviewer() -> None:
-    """"Gina was outstanding" names the agent, not the person reviewing her."""
+    """Praise in the body names the agent, never the person reviewing her."""
     from gable.listings.review import parse_review
 
     found = parse_review(

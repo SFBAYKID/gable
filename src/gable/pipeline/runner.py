@@ -708,9 +708,7 @@ class Runner:
         # A value nobody supplied kept the design's placeholder rather than
         # stopping the flyer, so the delivery message says which ones.
         left_blank = [
-            needs.readable(name)
-            for name in resolution.fields
-            if not values.get(name, "").strip()
+            needs.readable(name) for name in resolution.fields if not values.get(name, "").strip()
         ]
         message = run_reporting.delivery_message(
             self.connection,

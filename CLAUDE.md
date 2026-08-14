@@ -264,6 +264,16 @@ call on 2026-08-12:
    source-only; it does not call an image model. Sources:
    https://developers.google.com/workspace/slides/api/concepts/transforms
    https://developers.openai.com/api/docs/models
+9. **Where Slides breaks a line is the sum of the characters' advance widths,
+   and the usable width is the box width.** Measured 2026-08-14 by writing each
+   character 12 and 24 times into a real text box and subtracting the rendered
+   ink widths, which cancels side bearings exactly. Confirmed three ways against
+   the Open House design's 129.07pt name box: "Louis Smith" at 22.12pt sums to
+   128.99pt and renders on one line, "Annie Nowicki" at 18.78pt sums to 135.16pt
+   and wraps, and at 17.50pt it sums to 125.95pt and does not. These designs
+   carry no text inset. The table lives in `slides/typemetrics.py` and covers
+   Open Sans, EB Garamond and Raleway at both weights — every face the six
+   designs set text in.
 
 Each of these cost a real failure to learn. They are in the decision log with
 their evidence.
@@ -384,6 +394,7 @@ gable/
 │   │   ├── selection.py         # the design named for the form's request type
 │   │   ├── fields.py            # what a design's text means
 │   │   ├── fitting.py           # shrink text that does not fit its box
+│   │   ├── typemetrics.py       # measured advance widths for the designs' faces
 │   │   ├── manifest.py          # what a design needs before it renders
 │   │   ├── hero.py              # measure the photo and headshot frames
 │   │   ├── preflight.py         # source structure, exact fit and crop checks

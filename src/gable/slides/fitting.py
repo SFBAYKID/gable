@@ -10,12 +10,18 @@ The failure this prevents was observed on a delivered flyer: a price reading
 was present and correct, the API returned 200, and the flyer was wrong in the
 one way a text-based check cannot see.
 
-**How the estimate works.** Character width scales with font size, but not
-uniformly by character: a capital W is roughly three times an l. A single average
-is wrong often enough to matter at flyer sizes, so this uses a small width table
-by character class. It is an estimate — the honest test is the rendered
-thumbnail, which is what `pipeline/vision.py` is for — but it is a good enough
-estimate to stop the clipping, and it costs nothing.
+**How the width is worked out.** For the faces Carmen's designs actually draw
+text in, `typemetrics.py` holds each character's measured advance width and the
+answer is a sum rather than an estimate — accurate to a fraction of a point, so
+`MEASURED_SAFETY` leaves only a token margin. Any other face falls back to the
+five-class table below with the wider `SAFETY` margin: character width scales
+with font size but not uniformly by character, and a single average is wrong
+often enough to matter at flyer sizes.
+
+The class table is a fallback, not a second opinion. It cannot separate a name
+full of `w` and `k` from one full of `i` and `t`, and a flyer was delivered with
+"Annie Nowicki" wrapped onto the Realtor title because of exactly that. The
+rendered thumbnail in `pipeline/vision.py` remains the final gate either way.
 """
 
 from __future__ import annotations
@@ -25,6 +31,7 @@ from collections.abc import Collection
 from dataclasses import dataclass
 from typing import Final
 
+from gable.slides import typemetrics
 from gable.slides.edit_common import MAX_FONT_PT, Request
 from gable.slides.edits import set_font_size
 
@@ -57,6 +64,17 @@ MIN_READABLE_PT: Final[float] = 8.0
 #: Leave a little room rather than filling the box exactly to the pixel.
 SAFETY: Final[float] = 0.90
 
+#: The margin to leave when the face's real advance widths are known. Almost
+#: none is needed: the design's own sample name measures 128.99pt in a 129.07pt
+#: box and renders on one line, so the sum of advances is the wrap point to
+#: within a rounding error. The 2% absorbs the pixel resolution the advances
+#: were measured at, and kerning only ever makes a real line narrower.
+#:
+#: Keeping this separate from SAFETY matters: a 10% margin on a measured face
+#: would shrink every name that fits perfectly well, and Carmen would see type
+#: smaller than the design she drew.
+MEASURED_SAFETY: Final[float] = 0.98
+
 
 def _class_of(character: str) -> str:
     """Which width class a character belongs to."""
@@ -85,23 +103,39 @@ BOLD_MULTIPLIER: Final[float] = 1.07
 BOLD_WEIGHT: Final[int] = 600
 
 
-def estimate_width_pt(text: str, font_size_pt: float, weight: int = 400) -> float:
-    """Estimate how wide a line of text renders.
+def estimate_width_pt(
+    text: str,
+    font_size_pt: float,
+    weight: int = 400,
+    family: str = "",
+) -> float:
+    """Work out how wide a line of text renders.
 
     Args:
-        text: The text. Only the longest line matters for overflow.
+        text: The text. Only the widest line matters for overflow.
         font_size_pt: The font size in points.
         weight: Font weight, 400 regular and 700 bold. Bold renders wider.
+        family: The font family. When it is one `typemetrics` has measured, the
+            answer is a sum of real advance widths rather than an estimate.
 
     Returns:
-        Estimated width in points.
+        Width in points.
 
     Raises:
         Nothing.
+
+    Note:
+        The longest line is not the widest one — "Annie Nowicki" is shorter than
+        "Louis Smith" is wide. Every line is measured and the widest returned.
     """
-    longest = max(text.splitlines() or [""], key=len, default="")
+    lines = text.splitlines() or [""]
+    exact = [typemetrics.advance_factor(line, family, weight) for line in lines]
+    if family and all(factor is not None for factor in exact):
+        return max(factor for factor in exact if factor is not None) * font_size_pt
     bold = BOLD_MULTIPLIER if weight >= BOLD_WEIGHT else 1.0
-    return sum(WIDTH_FACTORS[_class_of(c)] for c in longest) * font_size_pt * bold
+    return (
+        max(sum(WIDTH_FACTORS[_class_of(c)] for c in line) for line in lines) * font_size_pt * bold
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -116,6 +150,8 @@ class TextBox:
     lines: int = 1
     #: Font weight, 400 regular and 700 bold. Bold renders wider.
     weight: int = 400
+    #: Font family, so a measured face is measured rather than estimated.
+    family: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -159,6 +195,7 @@ def fit_for(
     box_width_emu: float,
     lines: int = 1,
     weight: int = 400,
+    family: str = "",
 ) -> Fit:
     """Work out the largest font size at which text fits its box.
 
@@ -170,6 +207,8 @@ def fit_for(
         lines: How many lines the box can hold. A two-line box fits roughly
             twice the text at the same size.
         weight: Font weight, 400 regular and 700 bold.
+        family: Font family. A measured face gets a tight margin; an unmeasured
+            one keeps the wider estimate margin.
 
     Returns:
         A `Fit`. `fitted_pt` equals `current_pt` when nothing needs to change.
@@ -182,8 +221,9 @@ def fit_for(
         msg = f"box width must be positive, got {box_width_emu}"
         raise ValueError(msg)
 
-    box_width_pt = (box_width_emu / EMU_PER_POINT) * max(1, lines) * SAFETY
-    needed = estimate_width_pt(text, current_pt, weight)
+    margin = MEASURED_SAFETY if typemetrics.measured(family, weight) else SAFETY
+    box_width_pt = (box_width_emu / EMU_PER_POINT) * max(1, lines) * margin
+    needed = estimate_width_pt(text, current_pt, weight, family)
     if needed <= box_width_pt:
         return Fit(
             object_id,
@@ -287,6 +327,7 @@ def plan_fits(
                 box.width_emu,
                 1 if box.text.strip() in one_line else box.lines,
                 box.weight,
+                box.family,
             )
         )
     return fits

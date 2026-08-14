@@ -597,9 +597,7 @@ def test_a_caption_with_no_number_costs_no_paid_call(tmp_path: Path) -> None:
         calls.append(text)
         return 0
 
-    _handoff(path, [], record_caption=record).handle(
-        _event(text="here you go"), FakeSlackClient()
-    )
+    _handoff(path, [], record_caption=record).handle(_event(text="here you go"), FakeSlackClient())
 
     assert calls == []
 

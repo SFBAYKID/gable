@@ -23,7 +23,13 @@ from typing import Any, Final
 
 from gable.photos.fit import assess
 from gable.slides import fields, fitting
-from gable.slides.elements import descendants, font_size_pt, font_weight, text_content
+from gable.slides.elements import (
+    descendants,
+    font_family,
+    font_size_pt,
+    font_weight,
+    text_content,
+)
 from gable.slides.hero import find_hero_frame, headshot_frames
 
 PHOTO_CROP_WARNING: Final[float] = 0.30
@@ -208,6 +214,7 @@ def text_boxes(presentation: dict[str, Any]) -> list[fitting.TextBox]:
                     width_emu=width,
                     lines=lines,
                     weight=font_weight(element),
+                    family=font_family(element),
                 )
             )
     return boxes
@@ -258,13 +265,14 @@ def _replacement_issue(
         box.width_emu,
         1 if field_name in SINGLE_LINE_FIELDS else box.lines,
         box.weight,
+        box.family,
     )
 
     if not fit.overflows or not fit.too_small_to_read:
         return None
 
     current_width = max(1.0, fit.box_width_pt)
-    needed_width = fitting.estimate_width_pt(replacement, fit.current_pt, fit.weight)
+    needed_width = fitting.estimate_width_pt(replacement, fit.current_pt, fit.weight, box.family)
     extra = max(1, round(((needed_width / current_width) - 1) * 100))
     return Issue(
         code=f"unreadable_{field_name}",

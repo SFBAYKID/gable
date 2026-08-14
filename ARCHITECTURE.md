@@ -124,9 +124,12 @@ surface at runtime, on the first real listing, as an opaque Google error.
 
 ### 2.5 Why request building is pure and the client is not
 
-`slides/edits.py`, `fields.py`, `fitting.py` and `manifest.py` take values and
-return JSON-serializable Slides requests. No network, no credentials, no Google
-client. `pipeline/live.py` is the only module holding both the settings and the
+`slides/edits.py`, `fields.py`, `fitting.py`, `typemetrics.py` and `manifest.py`
+take values and return JSON-serializable Slides requests. No network, no
+credentials, no Google client. `typemetrics.py` is why `fitting.py` can stay
+pure and still be exact: it holds the measured advance width of every character
+in the faces these designs use, so where a line breaks is arithmetic rather than
+a call. `pipeline/live.py` is the only module holding both the settings and the
 concrete clients, which keeps every decision unit-testable without a service
 account existing and puts the I/O in one reviewable place.
 

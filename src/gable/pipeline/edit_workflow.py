@@ -218,6 +218,7 @@ class EditWorkflow:
             boxes[0].width_emu,
             boxes[0].lines,
             boxes[0].weight,
+            boxes[0].family,
         )
         if fit.too_small_to_read:
             return presentation, (

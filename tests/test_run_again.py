@@ -105,7 +105,7 @@ def test_reopening_is_recorded_as_an_event(db: sqlite3.Connection) -> None:
     ["run it again", "Run it again.", "can you run it again?", "hey Gable, run it again"],
 )
 def test_the_words_chase_actually_uses_are_recognised(said: str) -> None:
-    """"run it again" was not in the older phrase set, so nothing happened."""
+    """Asking to run it again was not in the older phrase set, so nothing happened."""
     assert asks_to_run_again(said) is True
 
 

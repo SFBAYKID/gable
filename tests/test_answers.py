@@ -22,7 +22,7 @@ def db(tmp_path: Path) -> sqlite3.Connection:
 
 
 def test_one_call_carries_every_value_the_person_stated() -> None:
-    """"3 beds, 2 baths, $600,000" is one answer, not three conversations."""
+    """A reply of 3 beds, 2 baths and $600,000 is one answer, not three."""
     arguments: dict[str, Any] = {
         "values": [
             {"field": "beds", "value": "3"},

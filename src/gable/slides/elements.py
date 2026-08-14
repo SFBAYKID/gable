@@ -68,7 +68,7 @@ def font_size_pt(element: dict[str, Any]) -> float:
 
 
 def font_weight(element: dict[str, Any]) -> int:
-    """Return the first explicit text-run font weight, or 400 if unstated.
+    """Return the first visible text-run's font weight, or 400 if unstated.
 
     Args:
         element: A `pageElements` entry.
@@ -80,13 +80,48 @@ def font_weight(element: dict[str, Any]) -> int:
 
     Raises:
         Nothing.
+
+    Note:
+        Runs holding only the paragraph's trailing newline are skipped. Slides
+        leaves that run at the imported default — Arial 400 in these designs,
+        whatever the visible words are set in — so reading it would call every
+        bold field regular.
     """
-    runs = element.get("shape", {}).get("text", {}).get("textElements", [])
-    for run in runs:
-        style = run.get("textRun", {}).get("style", {})
+    for run in _visible_runs(element):
+        style = run.get("style", {})
         weight = style.get("weightedFontFamily", {}).get("weight")
         if weight:
             return int(weight)
         if style.get("bold"):
             return 700
     return 400
+
+
+def font_family(element: dict[str, Any]) -> str:
+    """Return the first visible text-run's font family, or an empty string.
+
+    Args:
+        element: A `pageElements` entry.
+
+    Returns:
+        The family name as Slides reports it, e.g. ``Open Sans``. Empty when the
+        shape inherits its face from the theme, which `typemetrics` treats as
+        unmeasured rather than guessing at.
+
+    Raises:
+        Nothing.
+    """
+    for run in _visible_runs(element):
+        style = run.get("style", {})
+        family = style.get("weightedFontFamily", {}).get("fontFamily") or style.get("fontFamily")
+        if family:
+            return str(family)
+    return ""
+
+
+def _visible_runs(element: dict[str, Any]) -> Iterator[dict[str, Any]]:
+    """Yield the text runs that actually draw glyphs, in document order."""
+    for run in element.get("shape", {}).get("text", {}).get("textElements", []):
+        text_run = run.get("textRun")
+        if text_run and text_run.get("content", "").strip():
+            yield text_run

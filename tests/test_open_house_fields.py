@@ -29,7 +29,7 @@ OPEN_HOUSE_TEXT: list[str] = [
 
 
 def test_the_live_sample_beds_and_baths_are_recognised() -> None:
-    """"5 BEDS" with no bracket stopped the run at needs_template."""
+    """An unbracketed 5 BEDS literal used to stop the run at needs_template."""
     resolved = fields.resolve(OPEN_HOUSE_TEXT)
 
     assert resolved.fields["beds"] == "5 BEDS"

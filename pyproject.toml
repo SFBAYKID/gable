@@ -85,6 +85,11 @@ ban-relative-imports = "all"
 # Tests are self-describing; docstrings on every assertion helper are noise.
 "tests/*" = ["D103", "D100"]
 
+# The measured type table has to name the exact characters it measured, curly
+# quotes and en dashes among them. Substituting the ASCII lookalikes ruff
+# suggests would silently record the wrong glyph's width.
+"src/gable/slides/typemetrics.py" = ["RUF001"]
+
 # ---------------------------------------------------------------------------
 # mypy
 # ---------------------------------------------------------------------------
