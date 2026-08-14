@@ -209,3 +209,23 @@ def test_new_listing_with_open_house_removes_its_sample_house_layer() -> None:
     }
 
     assert extra_deletions(page, "New Listing with Open House", "p1_i92") == ("p1_i93",)
+
+
+def test_a_layer_this_batch_deletes_is_not_named_in_the_reorder() -> None:
+    """Slides failed the whole update, and the flyer built with no photo on it."""
+    from gable.pipeline.live import _restore_replacement_z_order
+
+    page: dict[str, Any] = {
+        "pageElements": [
+            _shape("backdrop", 0, 1575881, 10287000, 4853494),
+            _shape("sample", 0, 806735, 10287000, 6515788),
+            _shape("title", 0, 8000000, 5000000, 500000),
+        ]
+    }
+
+    requests = _restore_replacement_z_order(page, "backdrop", "newImage", ("sample",))
+
+    assert requests is not None
+    moved = requests[0]["updatePageElementsZOrder"]["pageElementObjectIds"]
+    assert "sample" not in moved, "a deleted shape cannot be reordered"
+    assert moved == ["title"], "everything else above the well still comes forward"

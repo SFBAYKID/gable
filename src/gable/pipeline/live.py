@@ -50,7 +50,10 @@ logger = logging.getLogger("gable.live")
 
 
 def _restore_replacement_z_order(
-    page: dict[str, Any], target_id: str, replacement_id: str
+    page: dict[str, Any],
+    target_id: str,
+    replacement_id: str,
+    also_deleted: tuple[str, ...] = (),
 ) -> list[dict[str, Any]] | None:
     """Keep a newly created element at the deleted target's original depth.
 
@@ -60,6 +63,16 @@ def _restore_replacement_z_order(
     and a multi-element z-order request preserves the moved elements' relative
     order, so bringing only the elements that were above the target back to the
     front recreates the target's exact layer boundary in one request.
+
+    Args:
+        page: The copied slide, as read before any edit.
+        target_id: The shape being replaced.
+        replacement_id: The new image's id.
+        also_deleted: Other shapes this same batch removes. They must not be
+            named in the z-order request: New Listing with Open House deletes a
+            sample-photo layer that sits ABOVE its well, and asking Slides to
+            reorder an object the same batch deleted failed the whole update —
+            the flyer built with no photograph on it.
 
     Returns:
         The optional z-order request, an empty list when the target was already
@@ -74,7 +87,10 @@ def _restore_replacement_z_order(
     if len(target_indexes) != 1:
         return None
     above = elements[target_indexes[0] + 1 :]
-    above_ids = [element.get("objectId") for element in above]
+    removed = set(also_deleted)
+    above_ids = [
+        element.get("objectId") for element in above if element.get("objectId") not in removed
+    ]
     if any(not isinstance(object_id, str) or not object_id for object_id in above_ids):
         return None
     if not above_ids:
@@ -218,17 +234,19 @@ def place_hero_photo(
             return False
 
         hero_id = f"gableHero_{uuid.uuid4().hex}"
-        z_order = _restore_replacement_z_order(page, target_id, hero_id)
-        if z_order is None:
-            logger.error("hero photo placement could not preserve the measured layer order")
-            return False
         # A design whose sample photograph is split across more than one shape
-        # keeps showing the rest of it when only the well is replaced.
+        # keeps showing the rest of it when only the well is replaced. Worked
+        # out before the layer order, because a shape this batch deletes must
+        # not then be named in the reorder.
         also_delete = extra_deletions(page, template_label, target_id)
         if also_delete:
             logger.info(
                 "removing %d extra sample photo layer(s) from %s", len(also_delete), template_label
             )
+        z_order = _restore_replacement_z_order(page, target_id, hero_id, also_delete)
+        if z_order is None:
+            logger.error("hero photo placement could not preserve the measured layer order")
+            return False
         requests: list[dict[str, Any]] = [
             {"deleteObject": {"objectId": target_id}},
             *({"deleteObject": {"objectId": extra}} for extra in also_delete),
