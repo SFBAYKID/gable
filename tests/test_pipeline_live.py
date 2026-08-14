@@ -7,7 +7,11 @@ from typing import Any
 
 from gable.db import store
 from gable.db.schema import apply_migrations, connect
-from gable.pipeline.live import place_headshot, place_hero_photo, template_clearance
+from gable.pipeline.placement import (
+    place_headshot,
+    place_hero_photo,
+    template_clearance,
+)
 from gable.slides.replacement import confirmed_replacement_count, safe_replacement_requests
 
 
@@ -577,23 +581,39 @@ def test_replacement_counts_text_inside_imported_groups() -> None:
 
     requests = safe_replacement_requests(presentation, {"[PRICE]": "$525,000"})
 
-    assert len(requests) == 1
-    assert requests[0]["replaceAllText"]["pageObjectIds"] == ["page-1"]
+    # One field, two requests: the literal becomes a sentinel, then the sentinel
+    # becomes the value, so nothing already written can be matched again.
+    assert len(requests) == 2
+    assert [r["replaceAllText"]["pageObjectIds"] for r in requests] == [["page-1"], ["page-1"]]
+    assert requests[0]["replaceAllText"]["containsText"]["text"] == "[PRICE]"
+    assert requests[1]["replaceAllText"]["replaceText"] == "$525,000"
+    assert (
+        requests[0]["replaceAllText"]["replaceText"]
+        == (requests[1]["replaceAllText"]["containsText"]["text"])
+    )
 
 
 def test_repeated_standalone_fields_count_as_one_successful_request() -> None:
+    # Two fields means four requests, because each field is filled in two passes.
     response = {
         "replies": [
+            {"replaceAllText": {"occurrencesChanged": 2}},
+            {"replaceAllText": {"occurrencesChanged": 1}},
             {"replaceAllText": {"occurrencesChanged": 2}},
             {"replaceAllText": {"occurrencesChanged": 1}},
         ]
     }
 
     assert confirmed_replacement_count(response, 2) == 2
-    assert confirmed_replacement_count({"replies": response["replies"][:1]}, 2) == -1
+    assert confirmed_replacement_count({"replies": response["replies"][:3]}, 2) == -1
     assert (
         confirmed_replacement_count(
-            {"replies": [{"replaceAllText": {"occurrencesChanged": 0}}]},
+            {
+                "replies": [
+                    {"replaceAllText": {"occurrencesChanged": 1}},
+                    {"replaceAllText": {"occurrencesChanged": 0}},
+                ]
+            },
             1,
         )
         == -1

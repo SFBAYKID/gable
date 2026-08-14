@@ -213,7 +213,7 @@ def test_new_listing_with_open_house_removes_its_sample_house_layer() -> None:
 
 def test_a_layer_this_batch_deletes_is_not_named_in_the_reorder() -> None:
     """Slides failed the whole update, and the flyer built with no photo on it."""
-    from gable.pipeline.live import _restore_replacement_z_order
+    from gable.pipeline.placement import _restore_replacement_z_order
 
     page: dict[str, Any] = {
         "pageElements": [

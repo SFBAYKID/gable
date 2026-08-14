@@ -490,13 +490,26 @@ catalogue is adopted; an unresolved new-file audit cannot be bypassed by selecti
 Two-agent roles parse, but without a per-role object contract they stop at
 `needs_template` rather than filling by page order.
 
-### 4.7 Render (`pipeline/live.py`)
+### 4.7 Render (`pipeline/live.py`, `pipeline/placement.py`)
 
 Templates may use bracketed labels, bare labels, or known sample values. The
 resolver maps the source's literal text to semantic fields. Every replaced
 literal must occupy its own text element because Slides replacement is substring
 based; repeated standalone fields are valid and each request must report at
 least one changed occurrence.
+
+That proof covers the design as it arrives, not what Gable writes onto it, and
+the difference cost a wrong word on a real flyer: an agent whose brokerage name
+ends in "Realtor" had that word rewritten by the title fill, because Under
+Contract's title placeholder is the same word. So each field is filled in two
+passes — literal to a private-use sentinel, then sentinel to the value — in one
+atomic batch. No pass ever searches for a word, so nothing already written can
+be matched again, whatever it contains.
+
+`placement.py` holds the photo side: proving the source template is still the
+audited one, deleting the sample photograph and any second layer carrying part
+of it, creating the replacement at the frame's exact size and transform, and
+restoring the depth the original sat at.
 
 The live sequence is: copy inside the shared drive, replace text, read every
 supplied value back verbatim, reject foreign sample contact details, replace the
