@@ -524,7 +524,13 @@ def record_spend(
 #: what a design displays and research can fail to find; a price that is not a
 #: public list price still comes only from its own form column.
 SUPPLIABLE_FIELDS: Final[frozenset[str]] = frozenset(
-    {"beds", "baths", "square_feet", "list_price", "open_house"}
+    # `review_quote` is here for the same reason the others are: Gable stops,
+    # a person answers, and the answer has to be usable. Every real client
+    # review on the form is 400-1000 characters and the design's quote panel is
+    # drawn for about 280, so the fitter shrank Rob Morgan's below the
+    # readability floor and the rendered inspection correctly refused it. The
+    # shorter pull-quote a person sends back is what gets set.
+    {"beds", "baths", "square_feet", "list_price", "open_house", "review_quote"}
 )
 
 

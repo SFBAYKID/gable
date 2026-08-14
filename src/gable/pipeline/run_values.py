@@ -11,6 +11,7 @@ from collections.abc import Callable
 from sqlite3 import Connection
 from typing import Final
 
+from gable.db import store
 from gable.listings.intake import Intake
 from gable.listings.review import review_values
 from gable.sheets import repository as repo
@@ -123,7 +124,7 @@ def for_intake(
     name = " ".join(
         part for part in (person.get("first_name", ""), person.get("last_name", "")) if part
     )
-    return {
+    values = {
         "address": intake.address,
         # A public list price is not a Sold closing price or a Price Reduction's
         # new price.  Those request types may use only the form-owned value.
@@ -150,6 +151,15 @@ def for_intake(
         "listing_note": _listing_note(intake),
         **review_values(intake.request_type, intake.post_details or intake.extra_notes),
     }
+    # A pull-quote a person sent back after Gable said the review would not be
+    # readable at that length. Every real review on the form runs 400 to 1000
+    # characters against a panel drawn for about 280, so the shorter version
+    # somebody actually chose outranks the pasted one. Only the quote: the
+    # reviewer's name is not theirs to change here.
+    shorter = store.recall_supplied_facts(connection, intake.address).get("review_quote", "")
+    if shorter.strip() and values.get("client_name", "").strip():
+        values["review_quote"] = shorter.strip()
+    return values
 
 
 def output_name(intake: Intake) -> str:

@@ -175,3 +175,37 @@ def test_square_footage_is_grouped_the_way_every_design_writes_it(tmp_path: Path
     assert for_intake(connection, intake, {"square_feet": "980 sq ft"})["square_feet"] == "980"
     assert for_intake(connection, intake, {"square_feet": "Studio"})["square_feet"] == "Studio"
     connection.close()
+
+
+def test_a_shorter_review_someone_sent_back_outranks_the_pasted_one(tmp_path: Path) -> None:
+    """Rob Morgan's review is 1,028 characters against a panel drawn for 280."""
+    connection = connect(tmp_path / "gable.db")
+    apply_migrations(connection)
+    intake = _note_intake(
+        "Client Review Post",
+        "Rob Morgan\n\nIn a simple word, Gina was outstanding from the first showing onward.",
+    )
+    store.remember_supplied_fact(
+        connection, intake.address, "review_quote", "Gina was outstanding. She is the BEST!"
+    )
+
+    values = for_intake(connection, intake, {})
+
+    assert values["review_quote"] == "Gina was outstanding. She is the BEST!"
+    assert values["client_name"] == "Rob Morgan"
+    connection.close()
+
+
+def test_a_shorter_review_is_ignored_when_no_reviewer_could_be_read(tmp_path: Path) -> None:
+    """A quote with nobody's name under it is not a testimonial."""
+    connection = connect(tmp_path / "gable.db")
+    apply_migrations(connection)
+    intake = _note_intake("Client Review Post", "great agent")
+    store.remember_supplied_fact(
+        connection, intake.address, "review_quote", "Gina was outstanding. She is the BEST!"
+    )
+
+    values = for_intake(connection, intake, {})
+
+    assert "review_quote" not in values
+    connection.close()
