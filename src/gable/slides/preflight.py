@@ -43,6 +43,14 @@ _FIELDISH_UNKNOWN: Final[re.Pattern[str]] = re.compile(
 # A new design is checked with realistic upper-bound content before any listing
 # depends on it. These are capacities, not values Gable will ever print. They
 # deliberately cover the long-but-normal end of the current roster and form.
+#
+# `agent_title` is deliberately absent. Every other entry stands in for a value
+# nobody knows yet, so an average-width estimate is the best available test. The
+# title is the one field whose value IS known — a title too long for its slot is
+# cut back to the credential before anything is written — and that exact word is
+# measured against the box's real advance widths by `_title_that_fits`. Keeping
+# an estimate here as well blocked every Under Contract run the moment Carmen
+# edited that design, on a slot that renders "Realtor" perfectly well.
 TEMPLATE_CAPACITY_CHARS: Final[dict[str, int]] = {
     "address": 52,
     "price": 14,
@@ -54,12 +62,6 @@ TEMPLATE_CAPACITY_CHARS: Final[dict[str, int]] = {
     "agent_email": 42,
     "client_name": 28,
     "review_quote": 280,
-    # The credential and nothing longer. A title that will not fit is cut back
-    # to the word the slot was drawn for before anything is written, so a design
-    # holding "REALTOR" holds everything Gable can put there. Demanding 24
-    # characters measured the old behaviour and blocked every Under Contract
-    # run the moment Carmen edited that design.
-    "agent_title": len("REALTOR"),
     "social_handle": 28,
     "neighborhood": 32,
     "website": 36,
