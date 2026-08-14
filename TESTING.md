@@ -130,12 +130,15 @@ Run these only in monarch-bot-playground.
 Every visible reply must contain no emoji, raw errors, pasted URL, placeholder,
 or machine-facing field name.
 
-Before enabling automatic form watching, deploy once with polling disabled and
-run `.venv/bin/python -m tools.preview_poll --expect-none` on the droplet. It is
+Polling was enabled on 2026-08-14 and the droplet now runs with
+`GABLE_POLL_ENABLED=true`. The gate that let it be switched on is the one to
+repeat after any identity change or database restore: run
+`.venv/bin/python -m tools.preview_poll --expect-none` on the droplet, which is
 read-only and must report zero unhandled rows. If it does not, review and
 explicitly adopt only confirmed historical `ROW:CONTENT_HASH` pairs with
 `tools.adopt_rows`; preview first, commit the same assertions, and repeat the
-zero-candidate gate. Do not enable polling on a nonempty or failed preview.
+zero-candidate gate. Never leave polling on over a nonempty preview — twelve
+historical rows would have become twelve flyers.
 
 ## 6. Full form-to-Slides test
 

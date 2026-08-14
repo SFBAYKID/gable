@@ -2,6 +2,48 @@
 
 Last updated 2026-08-14 by the building agent.
 
+## 2026-08-14 every design run once, and polling is on
+
+All six designs were run end to end against real `Form Responses 1` rows, each
+in its own Slack thread with the photograph uploaded as a reply. Every output
+matches its source design's file size exactly, so nothing is lost in the copy —
+Under Contract is 3.57 MB.
+
+| Design | Row | Agent | Size |
+|---|---|---|---|
+| Under Contract | 79 | Sara Wolz | 3.57 MB |
+| Open House | 81 | Tambria Eaton | 3.45 MB |
+| Sold | 90 | Deborah Manarin | 1.21 MB |
+| New Listing with Open House | 98 | Kirby-Jay John | 2.06 MB |
+| New Listing | 92 | Piet de Dreu | 3.45 MB |
+| Client Review Post | 5 | Gina Moore | 0.54 MB |
+
+Twelve defects were found and fixed on the way, each with its own row in
+`DECISIONS.md`. The ones that would have stopped live work: an answer to Gable's
+own question about the address was unrecordable, so the run sat forever; a job
+title too long for its slot was a hard stop no one in Slack could clear; a
+client review was asked for a property address it does not have; and a cut-out
+portrait was cover-cropped into a square well, taking the top off Kirby-Jay
+John's head.
+
+**Polling is enabled.** `GABLE_POLL_ENABLED=true`, watching every 2 minutes in
+business hours. Before the switch: the twelve unhandled historical rows — 12,
+13, 46, 64, 66, 71, 72, 104, 106, 107, 109 and 110 — were adopted by exact
+row/hash assertion, `tools.preview_poll --expect-none` returned zero, and the
+first enabled scan baselined all six designs silently. No flyer and no Slack
+message came out of any of it. The next live submission is row 111.
+
+Two things are Carmen's rather than Gable's:
+
+- **Piet de Dreu's headshot is the only one of 41 that is not a cut-out.** It is
+  a photograph matted onto an opaque white rectangle with a transparent strip
+  across the top, which is why his flyer shows a white block behind him. Every
+  other portrait in Head Shots has proper alpha.
+- **Every client review on the form is longer than its panel.** They run 400 to
+  1,000 characters against a quote box drawn for about 280. Gable now accepts a
+  shorter pull-quote as a reply and sets that; it will not trim a client's words
+  itself, and that stays a person's decision.
+
 ## 2026-08-14 every design driven end to end, four of six deliver
 
 Chase asked for one systematic campaign: every design against every
@@ -631,18 +673,10 @@ against the $500 campaign ceiling. `#calvo` received nothing.
   source design and the second line prints onto the white band below. Every Sold
   run stops for review and is right to. Open House loses the last line of its
   footer the same way.
-- **Two job titles fit no design.** Sara Wolz's
-  "Listing Manager, Transaction Coordinator & Realtor®" needs about 627 percent
-  more room than the title slot; Gina Moore's "REALTOR®, The Kulnich Home Team"
-  about 391 percent. Either the designs get a wider title line, or Gable falls
-  back to the plain credential and says so — the second changes what an agent's
-  flyer says about them, so it was not decided here.
-- **Five roster records stop every request from those people:** Erica Pfeiffer
-  (workbook email and phone absent from the official profile), Tracy Edwards
-  (phone disagrees), Lolo Simmons (no exact profile), Sam Johnson (no title on
-  the profile), Kelsey Mahon (no headshot, and listed twice under two emails).
-- **Bobby Carr The Dog Walking Realtor** does not fit Open House at 34
-  characters, and renders at roughly half the design's type size on the others.
+- ~~**Two job titles fit no design.**~~ Closed 2026-08-14: a title that cannot
+  be set at a readable size now falls back to the credential inside the agent's
+  own proven title, and the closing message says the longer title was dropped.
+  See `DECISIONS.md`.
 
 ### Re-tested depth-first afterwards
 
