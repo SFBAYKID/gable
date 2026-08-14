@@ -209,3 +209,20 @@ def test_a_shorter_review_is_ignored_when_no_reviewer_could_be_read(tmp_path: Pa
 
     assert "review_quote" not in values
     connection.close()
+
+
+def test_a_reviewer_named_in_a_reply_is_the_one_the_design_prints(tmp_path: Path) -> None:
+    """A Zillow export writes "7/20/2026 - j E", which is not a name line."""
+    connection = connect(tmp_path / "gable.db")
+    apply_migrations(connection)
+    intake = _note_intake("Client Review Post", "My wife and I had the best experience looking.")
+    store.remember_supplied_fact(connection, intake.address, "client_name", "Jenna Ellis")
+    store.remember_supplied_fact(
+        connection, intake.address, "review_quote", "Ian is professional and experienced."
+    )
+
+    values = for_intake(connection, intake, {})
+
+    assert values["client_name"] == "Jenna Ellis"
+    assert values["review_quote"] == "Ian is professional and experienced."
+    connection.close()

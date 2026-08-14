@@ -311,7 +311,8 @@ TOOLS: Final[list[dict[str, Any]]] = [
                 "Record the listing details the person states in answer to Gable's one "
                 "question, then continue the paused run. Use this whenever they give a "
                 "property address, price, square footage, bed or bath count, "
-                "open-house date and time, or a shorter version of a client's review "
+                "open-house date and time, a client's name, or a shorter version of "
+                "their review "
                 "— 'It is 12 Main St, Bowie, MD 20721', "
                 "'List price is $200,000', '2000 sq feet', 'Sunday 2-4pm'. Gable asks "
                 "for everything at once, so ONE reply usually carries several answers: "
@@ -333,6 +334,7 @@ TOOLS: Final[list[dict[str, Any]]] = [
                                     "enum": [
                                         "address",
                                         "review_quote",
+                                        "client_name",
                                         "list_price",
                                         "square_feet",
                                         "beds",

@@ -530,7 +530,11 @@ SUPPLIABLE_FIELDS: Final[frozenset[str]] = frozenset(
     # drawn for about 280, so the fitter shrank Rob Morgan's below the
     # readability floor and the rendered inspection correctly refused it. The
     # shorter pull-quote a person sends back is what gets set.
-    {"beds", "baths", "square_feet", "list_price", "open_house", "review_quote"}
+    # `client_name` for the same reason: the design sets the reviewer's name
+    # under the quote, the parser only reads a name written on its own line,
+    # and a Zillow export writes "7/20/2026 • j E". Gable asks who said it; the
+    # answer has to be recordable or the question is another dead end.
+    {"beds", "baths", "square_feet", "list_price", "open_house", "review_quote", "client_name"}
 )
 
 

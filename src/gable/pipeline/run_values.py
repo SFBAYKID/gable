@@ -156,9 +156,13 @@ def for_intake(
     # characters against a panel drawn for about 280, so the shorter version
     # somebody actually chose outranks the pasted one. Only the quote: the
     # reviewer's name is not theirs to change here.
-    shorter = store.recall_supplied_facts(connection, intake.address).get("review_quote", "")
-    if shorter.strip() and values.get("client_name", "").strip():
-        values["review_quote"] = shorter.strip()
+    stated = store.recall_supplied_facts(connection, intake.address)
+    named = stated.get("client_name", "").strip()
+    if named:
+        values["client_name"] = named
+    shorter = stated.get("review_quote", "").strip()
+    if shorter and values.get("client_name", "").strip():
+        values["review_quote"] = shorter
     return values
 
 
