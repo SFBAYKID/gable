@@ -354,3 +354,40 @@ def test_a_non_address_is_not_sent_to_a_lookup(bad: str) -> None:
 def test_every_real_address_on_the_sheet_is_usable(good: str) -> None:
     """Tightening the check must not start rejecting genuine addresses."""
     assert address_looks_usable(good) is True
+
+
+def test_a_client_review_is_never_asked_for_a_property_address() -> None:
+    """Row 5's address column reads "Google Review, SRES Listing 29 Maple"."""
+    review = Intake(
+        agent_email="gina@cornerhouserealty.com",
+        agent_name="Gina Moore",
+        request_type="Client Review Post",
+        address="Google Review, SRES Listing 29 Maple",
+        post_details="Rob Morgan\n\nIn a simple word, Gina was outstanding from start to finish.",
+        open_house="",
+        new_price="",
+        closing_price="",
+        extra_notes="",
+        side="",
+        notes="",
+    )
+
+    assert [ask.field_name for ask in incoherences(review)] == []
+
+
+def test_a_listing_with_an_unreadable_address_is_still_asked_about() -> None:
+    listing = Intake(
+        agent_email="gina@cornerhouserealty.com",
+        agent_name="Gina Moore",
+        request_type="Open House",
+        address="1011 Winged Foot Drive",
+        post_details="",
+        open_house="Sunday 2-4pm",
+        new_price="",
+        closing_price="",
+        extra_notes="",
+        side="",
+        notes="",
+    )
+
+    assert [ask.field_name for ask in incoherences(listing)] == ["address"]

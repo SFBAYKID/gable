@@ -180,6 +180,13 @@ REQUEST_TYPE_TO_CATEGORY: Final[dict[str, str]] = {
     "end of year brag post": "",  # no design exists for this yet
 }
 
+#: Categories whose designs legitimately carry no property address. A client
+#: review is a testimonial, a meet-the-agent is a profile and a neighborhood
+#: post is about an area — none of them is about one house.
+ADDRESSLESS_CATEGORIES: Final[frozenset[str]] = frozenset(
+    {"Client Review", "Meet the Agent", "Neighborhood"}
+)
+
 #: Facts that are a matter of public record for any address, and so must be
 #: looked up rather than asked about.
 #: Keys match `enrich.Facts.as_dict()` exactly. They disagreed once — this said
@@ -458,24 +465,30 @@ def incoherences(intake: Intake) -> list[Question]:
     """
     asks: list[Question] = []
 
-    if not intake.address:
-        asks.append(
-            Question(
-                "address",
-                "This request came through without a property address, so I cannot "
-                "look anything up or build the flyer. What is the address?",
-                absent=True,
+    # A client review is a testimonial, not a listing. Its design carries no
+    # address, nothing is researched for it, and row 5's address column reads
+    # "Google Review, SRES Listing 29 Maple" — which is where the review came
+    # from, not a house. Asking Chase for a property address there is asking for
+    # something that does not exist.
+    if intake.category not in ADDRESSLESS_CATEGORIES:
+        if not intake.address:
+            asks.append(
+                Question(
+                    "address",
+                    "This request came through without a property address, so I cannot "
+                    "look anything up or build the flyer. What is the address?",
+                    absent=True,
+                )
             )
-        )
 
-    elif not address_looks_usable(intake.address):
-        asks.append(
-            Question(
-                "address",
-                f"I cannot make sense of the address on this one — it reads "
-                f"{intake.address.strip()!r}. What is the property address?",
+        elif not address_looks_usable(intake.address):
+            asks.append(
+                Question(
+                    "address",
+                    f"I cannot make sense of the address on this one — it reads "
+                    f"{intake.address.strip()!r}. What is the property address?",
+                )
             )
-        )
 
     # A sold post with no closing price is deliberately **not** here. Chase's
     # rule, 2026-08-12: build the flyer, post the link, and then say the price

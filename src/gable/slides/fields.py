@@ -22,6 +22,8 @@ import re
 from dataclasses import dataclass, field
 from typing import Final
 
+from gable.listings.intake import ADDRESSLESS_CATEGORIES
+
 #: Names typed into the designs as examples. They are not tokens and look like
 #: real data, which is exactly why they must be recognised: an unreplaced sample
 #: name reads as a correct flyer for the wrong agent.
@@ -337,10 +339,6 @@ PATTERNS: Final[dict[str, tuple[re.Pattern[str], ...]]] = {
     ),
 }
 
-#: Categories whose designs legitimately carry no property address.
-ADDRESSLESS_CATEGORIES: Final[frozenset[str]] = frozenset(
-    {"Client Review", "Meet the Agent", "Neighborhood"}
-)
 
 #: Text that belongs to the design and must never be replaced. Matching one of
 #: these is how "Just", "Listed" and the brand line survive a fill.
