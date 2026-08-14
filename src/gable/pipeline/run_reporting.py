@@ -36,10 +36,16 @@ def fit_changed_text(
     values: Mapping[str, str],
 ) -> TextFitResult:
     """Resize filled text boxes and describe only changes Slides received."""
+    # Keyed on what was WRITTEN, not the value before the design's own
+    # conventions were applied. A supplied "4 beds" is written as the design's
+    # "4 BEDS", and matching on the raw value silently dropped that box out of
+    # the single-line set — the same mismatch the read-back check already hit.
     single_line = {
-        values.get(name, "").strip()
+        written
         for name in preflight.SINGLE_LINE_FIELDS
-        if name in resolution.fields and values.get(name, "").strip()
+        if (literal := resolution.fields.get(name))
+        and values.get(name, "").strip()
+        and (written := pairs.get(literal, "").strip())
     }
     fits = fitting.plan_fits(
         read_text_boxes(output_id),

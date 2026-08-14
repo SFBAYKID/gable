@@ -489,6 +489,45 @@ def resolve(texts: list[str], wanted: list[str] | None = None) -> Resolution:
 #: those would rewrite what somebody typed.
 _MATCH_PLACEHOLDER_CASE: Final[frozenset[str]] = frozenset({"agent_title"})
 
+#: Fields whose box carries a number and the design's own word for what it
+#: counts. The word belongs to the design, so a filled value keeps it.
+_MEASUREMENT_FIELDS: Final[frozenset[str]] = frozenset({"beds", "baths", "square_feet"})
+
+#: The digits and separators at the start of a measurement, e.g. `2,450` in
+#: "2,450 SQFT" or in "2,450 square feet".
+_LEADING_NUMBER: Final[re.Pattern[str]] = re.compile(r"^\s*([\d,]*\d)")
+
+
+def _measurement_as_written(literal: str, value: str) -> str:
+    r"""Write a measurement the way its own box already writes one.
+
+    Open House sets its counts as "5 BEDS" and "6,348 SQFT"; New Listing sets
+    them on two lines as "4\nBedrooms". Filling those with the words a person
+    typed replaced the design's own label — an answered flyer read "4 beds" and
+    "2,450" where the design reads "5 BEDS" and "6,348 SQFT", so the unit
+    disappeared and the capitals with it.
+
+    Args:
+        literal: The design's own placeholder text, which supplies the unit.
+        value: What Gable would otherwise write.
+
+    Returns:
+        The value's number carrying the literal's own trailing text. The value
+        unchanged when it holds no number, and the number alone when the design
+        writes none — a bracketed placeholder labels itself elsewhere.
+
+    Raises:
+        Nothing.
+    """
+    supplied = _LEADING_NUMBER.match(value)
+    if not supplied:
+        return value
+    number = supplied.group(1)
+    designed = _LEADING_NUMBER.match(literal)
+    if not designed:
+        return number
+    return f"{number}{literal[designed.end() :]}"
+
 
 def _as_written(name: str, literal: str, value: str) -> str:
     """Fill a fixed credential the way the design already writes it.
@@ -513,6 +552,8 @@ def _as_written(name: str, literal: str, value: str) -> str:
     """
     if name == "open_house":
         return _open_house_part(literal, value)
+    if name in _MEASUREMENT_FIELDS:
+        return _measurement_as_written(literal, value)
     if name not in _MATCH_PLACEHOLDER_CASE:
         return value
     stripped = literal.strip()

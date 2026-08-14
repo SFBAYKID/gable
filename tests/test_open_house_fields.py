@@ -112,3 +112,28 @@ def test_the_sample_agent_and_listing_on_that_design_are_still_recognised() -> N
     assert resolved.fields["agent_name"] == "Kelsey Mahon"
     assert resolved.fields["address"] == "3822 6th St, Baltimore, MD 21225"
     assert resolved.fields["agent_phone"] == "C: 410.456.6868\nO: 443.499.3839"
+
+
+def test_a_supplied_count_keeps_the_design_s_own_unit_and_capitals() -> None:
+    """An answered listing rendered "4 beds" where the design reads "5 BEDS".
+
+    The words a person types are not the design's. Open House writes its counts
+    as "5 BEDS" and "6,348 SQFT" and New Listing writes them on two lines as
+    "4\\nBedrooms"; filling those with the reply verbatim replaced the design's
+    own label, so the unit disappeared and the capitals with it.
+    """
+    assert fields._as_written("beds", "5 BEDS", "4 beds") == "4 BEDS"
+    assert fields._as_written("baths", "5 BATHS", "3 baths") == "3 BATHS"
+    assert fields._as_written("square_feet", "6,348 SQFT", "2,450") == "2,450 SQFT"
+    assert fields._as_written("beds", "4\nBedrooms", "4 beds") == "4\nBedrooms"
+    assert fields._as_written("square_feet", "2,430\nSq FT", "2,450") == "2,450\nSq FT"
+
+
+def test_a_design_that_writes_no_unit_gets_the_number_alone() -> None:
+    """A bracketed placeholder labels itself elsewhere, so nothing is invented."""
+    assert fields._as_written("beds", "[ BEDS ]", "4 beds") == "4"
+
+
+def test_a_count_with_no_number_is_left_exactly_as_supplied() -> None:
+    """ "Studio" is not a number, and rewriting it would lose what was said."""
+    assert fields._as_written("beds", "5 BEDS", "Studio") == "Studio"
