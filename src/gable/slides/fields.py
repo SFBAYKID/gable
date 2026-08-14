@@ -36,6 +36,11 @@ SAMPLE_AGENT_NAMES: Final[tuple[str, ...]] = (
     "Tracey Edwards",
     "Piet de Dreu",
     "Melissa Hargreaves",
+    # Client Review Post's footer, read from the live design 2026-08-14. Without
+    # it the agent name never resolved, so this name would have printed on
+    # somebody else's testimonial flyer.
+    "Sebastion Johnson",
+    "Sebastian Johnson",
 )
 
 #: Field name -> patterns that mean it, most specific first. Bracketed forms are
@@ -226,7 +231,12 @@ PATTERNS: Final[dict[str, tuple[re.Pattern[str], ...]]] = {
     "review_quote": (
         # The sample testimonial, carried by every Client Review design with and
         # without its opening quotation mark.
-        re.compile(r'^"?Working with Corner House Realty was such a smooth.*', re.DOTALL),
+        # Anchored at the start until 2026-08-14, when the live design was read:
+        # its sample opens "Review goes here...Working with Corner House Realty",
+        # so the anchor missed it and a stranger's testimonial would have
+        # survived onto a real agent's flyer.
+        re.compile(r".*Working with Corner House Realty was such a smooth.*", re.DOTALL),
+        re.compile(r"^\"?Review goes here\.\.\..*", re.DOTALL),
         re.compile(r"^\[\s*(?:REVIEW|TESTIMONIAL|QUOTE)\s*\]$", re.IGNORECASE),
     ),
     "agent_title": (
@@ -335,6 +345,15 @@ BRAND_TEXT: Final[frozenset[str]] = frozenset(
         "offers from",
         "offered at",
         "hosted by",
+        # The heading above Client Review Post's quote. It labels the section
+        # rather than naming a value, and Gable stopped at needs_template
+        # calling it a fillable field it could not identify.
+        "client testimonial",
+        "real people",
+        "real results",
+        # The design uses a curly apostrophe; matching needs the same one.
+        "let’s find your corner.",  # noqa: RUF001
+        "let's find your corner.",
     }
 )
 
