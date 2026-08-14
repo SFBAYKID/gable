@@ -74,6 +74,29 @@ SAMPLE_PEOPLE: Final[tuple[str, ...]] = (
     "Realtor Name",
 )
 
+#: A weekday date as a design carries it for a sample open house, e.g.
+#: "Sunday, Aug 2, 2026". Anchored whole-string so it cannot match body copy.
+_SAMPLE_OPEN_HOUSE_DATE: Final[re.Pattern[str]] = re.compile(
+    r"^(?:Mon|Tues|Wednes|Thurs|Fri|Satur|Sun)day,?\s+[A-Za-z]{3,9}\.?\s+\d{1,2}(?:st|nd|rd|th)?"
+    r"(?:,?\s+\d{4})?$",
+    re.IGNORECASE,
+)
+
+#: A bare time range, e.g. "2-4PM" or "11:30 AM - 1 PM". The en and em dashes
+#: are deliberate: a designer typing a range in Slides gets one of them from
+#: autocorrect as often as a plain hyphen.
+_TIME_RANGE_ONLY: Final[re.Pattern[str]] = re.compile(
+    r"^\d{1,2}(?::\d{2})?\s*(?:[AP]\.?M\.?)?\s*(?:-|–|—|to)\s*\d{1,2}(?::\d{2})?\s*[AP]\.?M\.?$",  # noqa: RUF001
+    re.IGNORECASE,
+)
+
+#: The same time range, found anywhere inside a longer sentence, so a supplied
+#: "Sunday, Aug 2, 2026 2-4PM" can be split between the two boxes a design uses.
+_TIME_RANGE_INSIDE: Final[re.Pattern[str]] = re.compile(
+    r"\d{1,2}(?::\d{2})?\s*(?:[AP]\.?M\.?)?\s*(?:-|–|—|to)\s*\d{1,2}(?::\d{2})?\s*[AP]\.?M\.?",  # noqa: RUF001
+    re.IGNORECASE,
+)
+
 PATTERNS: Final[dict[str, tuple[re.Pattern[str], ...]]] = {
     "address": (
         re.compile(r"^\[\s*PROPERTY ADDRESS\s*\]$", re.IGNORECASE),
@@ -160,10 +183,16 @@ PATTERNS: Final[dict[str, tuple[re.Pattern[str], ...]]] = {
     "beds": (
         re.compile(r"^\[\s*\d*\s*BEDS?\s*\]$", re.IGNORECASE),
         re.compile(r"^\d+\s*/?\s*Bedrooms?$", re.IGNORECASE),
+        # Live sample data, as Open House carries it: "5 BEDS" with no bracket.
+        # Square footage already accepted its unbracketed form below; without
+        # the same for beds and baths, Open House stopped at needs_template
+        # complaining about a fillable-looking field it could not name.
+        re.compile(r"^\d+\s*/?\s*BEDS?$", re.IGNORECASE),
     ),
     "baths": (
         re.compile(r"^\[\s*\d*\s*BATHS?\s*\]$", re.IGNORECASE),
         re.compile(r"^\d+\s*/?\s*Bathrooms?$", re.IGNORECASE),
+        re.compile(r"^\d+\s*/?\s*BATHS?$", re.IGNORECASE),
     ),
     "square_feet": (
         re.compile(r"^\[\s*SQ\.?\s*FT\s*\]$", re.IGNORECASE),
@@ -257,6 +286,12 @@ PATTERNS: Final[dict[str, tuple[re.Pattern[str], ...]]] = {
         re.compile(r"^\[\s*TIME\s*\]$", re.IGNORECASE),
         re.compile(r"^\[\s*SATURDAY DATE\s*\]$", re.IGNORECASE),
         re.compile(r"^\[\s*SUNDAY DATE\s*\]$", re.IGNORECASE),
+        # Live sample data, as Open House carries it: a weekday date in one box
+        # and a time range in another. Leaving these unrecognised was not
+        # neutral — the design ships with a real previous listing's date and
+        # time, so an unfilled box puts somebody else's open house on the flyer.
+        _SAMPLE_OPEN_HOUSE_DATE,
+        _TIME_RANGE_ONLY,
     ),
 }
 
@@ -446,12 +481,44 @@ def _as_written(name: str, literal: str, value: str) -> str:
     Raises:
         Nothing.
     """
+    if name == "open_house":
+        return _open_house_part(literal, value)
     if name not in _MATCH_PLACEHOLDER_CASE:
         return value
     stripped = literal.strip()
     if stripped and stripped.isupper() and not value.isupper():
         return value.upper()
     return value
+
+
+def _open_house_part(literal: str, value: str) -> str:
+    """Give a design's date box the date and its time box the time.
+
+    Open House sets the two in separate boxes. Filling both with the whole
+    supplied string reads as a duplicate, and filling only one leaves the
+    design's own sample — a real previous listing's date and time — on somebody
+    else's flyer. So the supplied text is split when it plainly carries both.
+
+    Args:
+        literal: The design's own placeholder text.
+        value: The open-house details exactly as they were supplied.
+
+    Returns:
+        The matching half, or the whole value when it cannot be split
+        confidently. Never an empty string: a blank here would leave the
+        design's sample showing.
+
+    Raises:
+        Nothing.
+    """
+    found = _TIME_RANGE_INSIDE.search(value)
+    if not found:
+        return value
+    wants_time = bool(_TIME_RANGE_ONLY.match(literal.strip()) or "TIME" in literal.upper())
+    if wants_time:
+        return found.group(0).strip()
+    remainder = (value[: found.start()] + " " + value[found.end() :]).strip(" ,-\u2013\u2014\t")
+    return " ".join(remainder.split()) or value
 
 
 def replacements(resolution: Resolution, values: dict[str, str]) -> dict[str, str]:
