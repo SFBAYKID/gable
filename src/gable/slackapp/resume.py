@@ -102,3 +102,36 @@ def resume_with_current_sources(
         if result.needs_a_human
         else "I could not finish the rebuild, so I left the current flyer unchanged."
     )
+
+
+def may_rebuild(
+    connection: Connection,
+    run: store.RunRow,
+    action_id: str,
+    thread_ts: str,
+) -> bool:
+    """Whether a run can now be rebuilt in its own thread.
+
+    A finished flyer is terminal, so the claim inside a resume refuses it and
+    the most natural thing to ask after reading one — "run it again, the price
+    should be $560,000" — answered that nothing was waiting. Reopening it is
+    what lets the reply be used.
+
+    Args:
+        connection: An open database connection.
+        run: The run this thread owns.
+        action_id: Stable Slack identity of the request, so a duplicate
+            delivery cannot rebuild the same flyer twice.
+        thread_ts: The thread the request arrived in.
+
+    Returns:
+        True when the run is already rebuildable or was reopened here. False
+        when another delivery of the same request won the claim, in which case
+        the caller must say nothing rather than contradict it.
+
+    Raises:
+        sqlite3.Error: on a write failure.
+    """
+    if run.status not in {"delivered", "needs_review"}:
+        return True
+    return store.reopen_for_rebuild(connection, run.run_id, action_id, thread_ts)

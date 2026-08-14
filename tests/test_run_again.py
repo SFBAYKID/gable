@@ -16,6 +16,7 @@ from gable.db import store
 from gable.db.schema import apply_migrations, connect
 from gable.listings.intake import Intake
 from gable.slackapp.intents import asks_to_run_again
+from tests.runner_support import record, submission
 
 THREAD = "1786468156.701419"
 
@@ -116,3 +117,61 @@ def test_the_words_chase_actually_uses_are_recognised(said: str) -> None:
 def test_anything_else_falls_through_to_the_conversation(said: str) -> None:
     """This authorises replacing a delivered flyer, so it stays exact."""
     assert asks_to_run_again(said) is False
+
+
+def test_a_value_supplied_after_delivery_reopens_the_finished_run(
+    tmp_path: Path,
+) -> None:
+    """Asking to run it again with a new price answered that nothing was waiting.
+
+    The brain reads "Can you run this again? The price should be $560,000" as a
+    supplied value, which is right. But a delivered run is terminal, so the
+    claim inside the resume refused it, and the most natural thing to ask after
+    reading a flyer got the "already being rechecked" message instead of a new
+    one. Observed live on Deborah Manarin's New Listing with Open House.
+    """
+    from gable.slackapp.resume import may_rebuild
+
+    connection = connect(tmp_path / "g.db")
+    apply_migrations(connection)
+    item = submission(rid="rid-again-value", email="deborah@cornerhouserealty.com")
+    record(connection, item)
+    run = store.start_run(connection, item.response_row_id)
+    store.set_status(connection, run.run_id, "delivered", "built", slack_thread_ts="111.1")
+
+    reopened = may_rebuild(connection, store.run_by_id(connection, run.run_id), "act-1", "111.1")
+
+    assert reopened
+    assert store.run_by_id(connection, run.run_id).status not in store.TERMINAL
+
+
+def test_the_same_request_delivered_twice_rebuilds_once(tmp_path: Path) -> None:
+    """Slack redelivers; only one of them may reopen the flyer."""
+    from gable.slackapp.resume import may_rebuild
+
+    connection = connect(tmp_path / "g.db")
+    apply_migrations(connection)
+    item = submission(rid="rid-again-twice", email="deborah@cornerhouserealty.com")
+    record(connection, item)
+    run = store.start_run(connection, item.response_row_id)
+    store.set_status(connection, run.run_id, "delivered", "built", slack_thread_ts="222.2")
+
+    first = may_rebuild(connection, store.run_by_id(connection, run.run_id), "act-2", "222.2")
+    second = may_rebuild(connection, store.run_by_id(connection, run.run_id), "act-2", "222.2")
+
+    assert first
+    assert not second
+
+
+def test_a_run_still_waiting_needs_no_reopening(tmp_path: Path) -> None:
+    """Only a finished flyer is terminal; a paused one continues as it always did."""
+    from gable.slackapp.resume import may_rebuild
+
+    connection = connect(tmp_path / "g.db")
+    apply_migrations(connection)
+    item = submission(rid="rid-again-paused", email="deborah@cornerhouserealty.com")
+    record(connection, item)
+    run = store.start_run(connection, item.response_row_id)
+    store.set_status(connection, run.run_id, "needs_info", "asked", slack_thread_ts="333.3")
+
+    assert may_rebuild(connection, store.run_by_id(connection, run.run_id), "act-3", "333.3")

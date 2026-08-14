@@ -48,7 +48,7 @@ from gable.slackapp.recovery import (
     notify_interrupted_runs,
     prepare_pending_notifications,
 )
-from gable.slackapp.resume import resume_with_current_sources
+from gable.slackapp.resume import may_rebuild, resume_with_current_sources
 from gable.slackapp.source_refresh import SourceRefreshError, refresh_submission_sources
 from gable.slides.library import list_files as list_template_files
 from gable.voice import is_clean, safe
@@ -379,6 +379,10 @@ def build_components(settings: Settings) -> RuntimeComponents:
                         "I did not understand that as one of the details I asked for, so I "
                         "have not recorded it."
                     )
+                # The value is recorded by this point; reopening a finished
+                # flyer is what lets the reply actually be used.
+                if not may_rebuild(action_connection, run, action_id, thread_ts):
+                    return ""
                 return resume_with_current_sources(
                     settings=settings,
                     connection=action_connection,
@@ -471,15 +475,7 @@ def build_components(settings: Settings) -> RuntimeComponents:
                     refreshed = store.template_audit(action_connection, run.template_file_id)
                     if refreshed is None or refreshed.status != "ready":
                         return verdict
-                # A delivered run is terminal, so the claim below would refuse
-                # it and "run it again" — the most natural thing to ask after
-                # reading a flyer — would answer that nothing was waiting.
-                if run.status == "delivered" and not store.reopen_for_rebuild(
-                    action_connection,
-                    run.run_id,
-                    action_id,
-                    thread_ts,
-                ):
+                if not may_rebuild(action_connection, run, action_id, thread_ts):
                     return ""
                 return resume_with_current_sources(
                     settings=settings,
