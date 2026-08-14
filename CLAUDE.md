@@ -349,6 +349,7 @@ gable/
 │   ├── preview_poll.py           # read-only preview of work polling would open
 │   ├── reconcile_image_reservation.py # evidence-gated pre-inference release
 │   ├── run_row.py               # start one row by tab and number, or resume it
+│   ├── seed_test_rows.py        # append test rows to a Testing tab, by header only
 │   └── template_smoke_test.py   # recoverable live new-template path
 ├── src/gable/
 │   ├── config.py                # frozen settings dataclass, env parsing
