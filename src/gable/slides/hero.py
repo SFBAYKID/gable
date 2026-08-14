@@ -275,15 +275,24 @@ def _is_filled(element: dict[str, Any]) -> bool:
 #: designs rather than forty-five, and each id was measured against that
 #: template's own render rather than read by eye — the rejected candidate in
 #: four cases contains 9-20% near-white pixels because it also covers the logo
-#: strip, while the chosen one is pure photograph, and Under Contract was
-#: settled by finding lawn colour continuing to 66% of the slide.
+#: strip, while the chosen one is pure photograph.
+#:
+#: Under Contract was the exception, settled instead by following lawn colour to
+#: 66% of the slide, and that method picked the wrong shape. Corrected
+#: 2026-08-14 from `p1_i88` to `p1_i85` after a live run clipped the word
+#: "Realty" out of the logo. The test below pins the property that separates
+#: them, and it is geometric rather than pictorial: the hero sits IN FRONT of
+#: the logo in z-order, `p1_i88` starts 95,212 EMU above the logo's bottom edge,
+#: so filling it necessarily paints over the logo's last line. `p1_i85` starts
+#: 285,795 EMU below the logo and covers nothing behind it — which is exactly
+#: what the other five recorded wells do.
 #:
 #: This is a hint, never an authority. `find_hero_frame` re-measures the named
 #: shape and falls back to the geometric search when it is absent or implausible,
 #: so a redesigned template degrades to "ask" rather than to a wrong frame.
 HERO_OBJECT_IDS: Final[dict[str, str]] = {
     "sold": "p1_i87",
-    "under contract": "p1_i88",
+    "under contract": "p1_i85",
     "open house": "p1_i104",
     "new listing": "p1_i92",
     "new listing with open house": "p1_i92",
