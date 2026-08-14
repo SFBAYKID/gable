@@ -170,3 +170,30 @@ def test_the_well_is_never_returned_as_an_extra_deletion() -> None:
     page: dict[str, Any] = {"pageElements": [_shape("p1_i90", 0, 144759, 10287000, 4853494)]}
 
     assert extra_deletions(page, "New Listing", "p1_i90") == ()
+
+
+#: Open House, measured 2026-08-14. The sample house is attached to the outer
+#: shape; the inner one is a sky backdrop marking the band the design shows.
+OH_WELL = _shape("p1_i105", 0, 313208, 10287000, 5308509)
+OH_GUIDE = _shape("p1_i104", 0, 1154916, 10287000, 4466800)
+
+
+def test_open_house_replaces_the_shape_holding_its_sample_house() -> None:
+    """Replacing the backdrop instead put the supplied photo behind it."""
+    page: dict[str, Any] = {"pageElements": [OH_GUIDE, OH_WELL]}
+
+    frame = find_hero_frame(page, SLIDE_WIDTH, SLIDE_HEIGHT, "Open House")
+
+    assert frame is not None
+    assert frame.object_id == "p1_i105"
+
+
+def test_open_house_draws_the_photo_in_the_band_the_design_shows() -> None:
+    """The well runs up behind the logo; the backdrop marks the real band."""
+    page: dict[str, Any] = {"pageElements": [OH_GUIDE, OH_WELL]}
+
+    frame = find_hero_frame(page, SLIDE_WIDTH, SLIDE_HEIGHT, "Open House")
+
+    assert frame is not None
+    assert frame.y == 1154916
+    assert frame.y + frame.height == 313208 + 5308509

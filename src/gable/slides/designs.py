@@ -37,7 +37,14 @@ from typing import Any, Final
 HERO_OBJECT_IDS: Final[dict[str, str]] = {
     "sold": "p1_i87",
     "under contract": "p1_i88",
-    "open house": "p1_i104",
+    # Corrected 2026-08-14: `p1_i104` is a sky backdrop, and the sample house
+    # is attached to `p1_i105` in front of it, so replacing `p1_i104` put the
+    # supplied photo behind the template's own house and the visual gate
+    # reported a completely different property. Established by copying the
+    # design and deleting each in turn. `p1_i105` runs up behind the logo, and
+    # `p1_i104` is contained within it and starts lower, so the placement guide
+    # below draws the photo in exactly the band the design shows.
+    "open house": "p1_i105",
     "new listing": "p1_i92",
     "new listing with open house": "p1_i92",
     "client review post": "p1_i90",
