@@ -507,28 +507,46 @@ def _to_run(row: sqlite3.Row) -> RunRow:
 BUILD_WITH_BLANKS: Final[str] = "build_with_blank_fields"
 
 
-def approve_blank_fields(connection: sqlite3.Connection, run_id: str) -> None:
-    """Record that a person accepted a flyer with its unknown values left blank.
+def approve_blank_fields(
+    connection: sqlite3.Connection,
+    run_id: str,
+    detail: str = "approved building with the unknown values left blank",
+) -> None:
+    """Record that a flyer may be built with its unknown values left blank.
+
+    The release is recorded WITHOUT moving the run. It used to set the status to
+    ``pending``, which put the run outside `PAUSED` and made the very next step —
+    `claim_paused_run` — fail, so every release answered "this listing is
+    already being rechecked" and nothing was ever built. The run stays paused
+    here and the caller claims it exactly as it would any other resume.
 
     Args:
         connection: An open connection.
-        run_id: The paused run being released.
+        run_id: The run being released.
+        detail: Immutable audit note for the event row.
 
     Raises:
         sqlite3.Error: on a write failure.
     """
     row = connection.execute(
-        "SELECT approved_warning_codes FROM runs WHERE run_id = ?", (run_id,)
+        "SELECT status, approved_warning_codes FROM runs WHERE run_id = ?", (run_id,)
     ).fetchone()
-    codes = {code for code in str(row["approved_warning_codes"] if row else "").split(",") if code}
+    if row is None:
+        return
+    codes = {code for code in str(row["approved_warning_codes"] or "").split(",") if code}
+    if BUILD_WITH_BLANKS in codes:
+        return
     codes.add(BUILD_WITH_BLANKS)
-    set_status(
-        connection,
-        run_id,
-        "pending",
-        "approved building with the unknown values left blank",
-        approved_warning_codes=",".join(sorted(codes)),
-    )
+    now = _now()
+    with _transition(connection):
+        connection.execute(
+            "UPDATE runs SET approved_warning_codes = ?, updated_at = ? WHERE run_id = ?",
+            (",".join(sorted(codes)), now, run_id),
+        )
+        connection.execute(
+            "INSERT INTO run_events (run_id, at, status, detail) VALUES (?,?,?,?)",
+            (run_id, now, str(row["status"]), detail),
+        )
 
 
 def blanks_approved(connection: sqlite3.Connection, run_id: str) -> bool:

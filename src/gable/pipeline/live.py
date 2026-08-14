@@ -31,6 +31,7 @@ from gable.photos.headshots import MAX_HEADSHOT_BYTES
 from gable.photos.headshots import url_for_agent as headshot_url_for
 from gable.photos.store import content_name, publish_local, verify_public
 from gable.photos.verify import verify as verify_image
+from gable.pipeline import run_reporting
 from gable.pipeline.questions import Reconciliation
 from gable.pipeline.runner import Runner
 from gable.pipeline.vision import Inspection
@@ -684,7 +685,7 @@ def build_runner(
             run_id,
             "building",
             (
-                "used deterministic small-source photo fitting"
+                run_reporting.SMALL_SOURCE_DETAIL
                 if used_small_source_fit
                 else "used local photo fitting"
             ),

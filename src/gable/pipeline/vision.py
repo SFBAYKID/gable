@@ -21,7 +21,7 @@ import base64
 import json
 import logging
 import urllib.request
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from enum import StrEnum
 from typing import Any, Final
 
@@ -247,6 +247,41 @@ class Inspection:
             and all(
                 kind is InspectionProblemKind.SOURCE_PHOTO_CONFLICT for kind in self.problem_kinds
             )
+        )
+
+    def without_expected_placeholders(self) -> Inspection:
+        """Drop only the problems naming a placeholder Gable left on purpose.
+
+        A value nobody supplied was already asked for once, and Chase's rule is
+        that the flyer still ships with the design's own placeholder showing.
+        The visual gate would otherwise report exactly that as a defect and
+        park a correct flyer in review.
+
+        Returns:
+            A verdict with placeholder-kind problems removed, passing when
+            nothing else remained. Unchanged when the categories do not line up
+            one-to-one with the problems, because then nothing can be dropped
+            safely and the flyer must still go to a person.
+
+        Raises:
+            Nothing.
+        """
+        if len(self.problem_kinds) != len(self.problems) or not self.problems:
+            return self
+        kept = [
+            (problem, kind)
+            for problem, kind in zip(self.problems, self.problem_kinds, strict=True)
+            if kind is not InspectionProblemKind.PLACEHOLDER
+        ]
+        if len(kept) == len(self.problems):
+            return self
+        problems = [problem for problem, _ in kept]
+        return replace(
+            self,
+            problems=problems,
+            problem_kinds=tuple(kind for _, kind in kept),
+            looks_right=self.looks_right or not problems,
+            remedy=self.remedy if problems else InspectionRemedy.NONE,
         )
 
     @property

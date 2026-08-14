@@ -432,3 +432,55 @@ def test_live_research_reserves_and_records_one_firecrawl_search(
     assert found.beds == "4"
     assert calls == ["123 Main St:key"]
     assert spend.total_spent(db) == pytest.approx(spend.FIRECRAWL_PER_SEARCH)
+
+
+def test_configure_ceiling_moves_the_ceiling_and_its_warning_together() -> None:
+    """The campaign raises the ceiling; the warning threshold follows it."""
+    original_ceiling = spend.CEILING_USD
+    original_warn = spend.WARN_AT_USD
+    try:
+        spend.configure_ceiling(500)
+
+        assert pytest.approx(500.0) == spend.CEILING_USD
+        assert pytest.approx(500.0 * spend.WARN_FRACTION) == spend.WARN_AT_USD
+    finally:
+        spend.CEILING_USD = original_ceiling
+        spend.WARN_AT_USD = original_warn
+
+
+def test_configure_ceiling_refuses_a_ceiling_that_would_stop_every_call() -> None:
+    """Zero is a configuration mistake, not a budget of nothing."""
+    original_ceiling = spend.CEILING_USD
+    original_warn = spend.WARN_AT_USD
+    try:
+        with pytest.raises(ValueError, match="positive"):
+            spend.configure_ceiling(0)
+
+        assert pytest.approx(original_ceiling) == spend.CEILING_USD
+    finally:
+        spend.CEILING_USD = original_ceiling
+        spend.WARN_AT_USD = original_warn
+
+
+def test_a_raised_ceiling_admits_a_call_the_default_would_refuse(
+    db: sqlite3.Connection,
+) -> None:
+    """The guard enforces the configured ceiling, not the compiled-in default."""
+    original_ceiling = spend.CEILING_USD
+    original_warn = spend.WARN_AT_USD
+    spend.record(
+        db,
+        spend.Estimate("test", "prior", spend.DEFAULT_CEILING_USD - 0.01, "prior spend"),
+    )
+    call = spend.Estimate("test", "campaign", 0.10, "one campaign call")
+    try:
+        with pytest.raises(spend.BudgetExceededError):
+            spend.reserve(db, call)
+
+        spend.configure_ceiling(500)
+        spend.reserve(db, call)
+
+        assert spend.total_spent(db) == pytest.approx(spend.DEFAULT_CEILING_USD + 0.09)
+    finally:
+        spend.CEILING_USD = original_ceiling
+        spend.WARN_AT_USD = original_warn

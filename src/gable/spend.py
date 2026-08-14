@@ -44,11 +44,43 @@ IMAGE_EDIT_RESERVE_USD: Final[float] = 0.25
 #: Exact ledger detail used to enforce the one-upscale-per-listing limit.
 IMAGE_UPSCALE_DETAIL: Final[str] = "conservative real-photo upscale reservation"
 
-#: The ceiling Chase set. Reaching it stops the run rather than warning.
-CEILING_USD: Final[float] = 50.0
+#: The ceiling Chase set for ordinary operation. Reaching it stops the run
+#: rather than warning. A deliberately large campaign — every design against
+#: every salesperson — reserves far more than day-to-day use, so the value is
+#: configurable through `GABLE_SPEND_CEILING_USD` and applied once at startup by
+#: `configure_ceiling`. The default is unchanged, so production behaves exactly
+#: as before unless the variable is set.
+DEFAULT_CEILING_USD: Final[float] = 50.0
 
-#: Warn from here, so there is room to react before the ceiling.
-WARN_AT_USD: Final[float] = 35.0
+#: Warn from this share of the ceiling, so there is room to react before it.
+WARN_FRACTION: Final[float] = 0.7
+
+#: Current ceiling. Module state rather than a constant because it is set once
+#: from the frozen settings; nothing else may write it.
+CEILING_USD: float = DEFAULT_CEILING_USD
+
+#: Warn from here. Kept in step with the ceiling by `configure_ceiling`.
+WARN_AT_USD: float = DEFAULT_CEILING_USD * WARN_FRACTION
+
+
+def configure_ceiling(ceiling_usd: float) -> None:
+    """Apply the configured spend ceiling once, at process startup.
+
+    Args:
+        ceiling_usd: Dollars this process may reserve in total, from
+            `Settings.spend_ceiling_usd`.
+
+    Raises:
+        ValueError: if the ceiling is not positive. A zero or negative ceiling
+            would stop every paid call, which is a configuration mistake rather
+            than a budget.
+    """
+    if ceiling_usd <= 0:
+        msg = f"the spend ceiling must be positive, not {ceiling_usd!r}"
+        raise ValueError(msg)
+    global CEILING_USD, WARN_AT_USD
+    CEILING_USD = float(ceiling_usd)
+    WARN_AT_USD = CEILING_USD * WARN_FRACTION
 
 
 class BudgetExceededError(Exception):

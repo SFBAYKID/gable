@@ -252,7 +252,11 @@ def test_research_that_finds_nothing_asks(db: sqlite3.Connection) -> None:
     assert result.status == "needs_info"
     # Every pause announces the listing first, then asks inside that thread.
     assert "request from" in rec.said[0].lower()
-    assert "could not find" in rec.said[1].lower()
+    # One message names every gap, rather than one message per gap.
+    asked = rec.said[1].lower()
+    for wanted in ("beds", "baths", "square footage", "price"):
+        assert wanted in asked, f"the one ask must name the {wanted}"
+    assert len(rec.said) == 2, "the listing is announced once and asked once"
 
 
 def test_one_named_agent_is_not_ambiguous_and_still_builds(db: sqlite3.Connection) -> None:
@@ -703,8 +707,6 @@ def test_a_box_that_already_fits_costs_no_calls(db: sqlite3.Connection) -> None:
 
 def test_a_flyer_the_vision_pass_rejects_is_not_delivered(db: sqlite3.Connection) -> None:
     """Only the vision pass can see a value that is present but clipped."""
-    from gable.pipeline.vision import Inspection
-
     submission = _submission(rid="rid-vision")
     _record(db, submission)
     rec = Recorder()
@@ -722,8 +724,6 @@ def test_a_bare_negative_vision_verdict_cannot_silently_deliver(
     db: sqlite3.Connection,
 ) -> None:
     """A strict schema does not require a problem sentence with a false verdict."""
-    from gable.pipeline.vision import Inspection
-
     submission = _submission(rid="rid-vision-empty-problem")
     _record(db, submission)
     runner = _runner(db, Recorder())
@@ -769,7 +769,7 @@ def test_every_pause_announces_the_listing_before_asking(db: sqlite3.Connection)
     assert len(rec.said) == 2
     assert "request from" in rec.said[0].lower(), "the channel must name the listing"
     assert rec.said[0].endswith("7940 Oakwood Rd, Glen Burnie, MD 21061")
-    assert "could not find" in rec.said[1].lower(), "the question belongs in the thread"
+    assert "i still need" in rec.said[1].lower(), "the question belongs in the thread"
 
 
 def test_a_request_type_beginning_with_new_is_not_announced_twice(

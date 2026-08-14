@@ -101,7 +101,13 @@ resumes the same run automatically.
 - Beyond 2x, Gable keeps a complete foreground copy at no more than 2x over a
   blurred, darkened fill derived only from the same upload. It never invents
   property detail and never calls an image provider.
-- Gable never asks for a larger version merely because the upload is small.
+- Gable never asks for a larger version merely because the upload is small. It
+  never pauses for one, and it never withholds the flyer waiting for one. When
+  a fit was composed this way it says so **once, in the finished-flyer message**,
+  and invites a better original without requiring it: *"I did my best to fit
+  this image to the frame. If you have a higher-quality version, send it here
+  and I will run it again."* That is an offer attached to a delivered link, not
+  a question standing between Carmen and her flyer.
 - A shape mismatch, even one requiring a large center crop, is fitted
   automatically. Gable reports a material crop in the single final outcome; it
   never asks whether to run anyway. The rendered vision inspection still stops
@@ -217,7 +223,38 @@ another agent.
 
 ### 2.7 Asking for something missing
 
-Name the listing, name the field, say why it matters — as a sentence.
+**Everything Gable needs goes out in one message, once.** Chase's rule,
+2026-08-13: one list, one round of answers, then the link. Gable walks its
+checks gathering every outstanding item — the photograph and every value the
+selected design displays that neither the form nor research could settle — and
+asks for all of them together, inside the listing thread:
+
+```
+New Under Contract request from Andy Jang — 3283 Doyle Place, Aberdeen, MD 21009
+
+     Can you send me the image? I also need the price, beds and baths.
+     Answer in one reply with whatever you have. Anything you leave out
+     stays as the design's own placeholder for you to fill in.
+```
+
+The last sentence is load-bearing. It makes silence a usable answer, so Carmen
+never has to reply in order to decline. **A value nobody supplies does not stop
+the flyer**: the design's own placeholder stays visible, the flyer is delivered,
+and the finished-flyer message names exactly what was left for her to type over.
+Gable does not ask a second time — asking again with the same words is how a
+question becomes a dead end.
+
+Two things are deliberately **not** folded into that batch, because they are not
+values Carmen can supply in a reply:
+
+- **A contradiction**, such as an address that reads as a review link. It cannot
+  be left as a placeholder and must not be guessed past, so it stops on its own.
+- **A structural stop** — no design file named for this request type, an
+  uncertified two-agent layout, a missing headshot. Those keep their own exact
+  message and their own status.
+
+When one of those stops does happen: name the listing, name the field, say why
+it matters — as a sentence.
 
 ```
 123 Main St — Lolo Simmons
@@ -387,7 +424,11 @@ Gable must never:
    workbook value or source-required credential for the current run after one
    exact-name profile confirms the submitted email. Never infer a credential;
    flag every discrepancy and change neither source.
-8. **Report a flyer ready with any required field empty.**
+8. **Report a flyer ready without naming the fields it left unfilled.** A value
+   nobody supplied no longer blocks delivery — it was asked for once (§2.7) and
+   the design's own placeholder is deliberately left showing for Carmen to type
+   over. What is forbidden is the silence: calling a flyer finished while a
+   placeholder sits on it unmentioned. Say which ones, every time.
 9. **Retry a failing listing more than 3 times.** After that, fail it loudly and
    move on. Retry storms can take the 1 GB process down and spend in a loop.
 10. **Log a secret**, or echo a token into Slack.
@@ -402,8 +443,12 @@ These mirror `CLAUDE.md` §2, applied to the running system.
   accepts only the human-supplied Slack upload.
 - If verification could not run, say so — do not imply details were confirmed.
 - If text had to shrink to fit, say so in the delivery outcome.
-- If a placeholder in the template had no value to fill it, say which one — do
-  not deliver a post with a visible `{{price}}` and call it ready.
+- If a placeholder in the template had no value to fill it, say which one. The
+  flyer is still delivered and the placeholder is still visible, on purpose —
+  what is never acceptable is calling it ready without mentioning it.
+- That forgiveness is exact and narrow. Only the literal belonging to a field
+  nobody supplied may survive an inspection; any other placeholder, and the
+  template's own sample agent or sample house, still stop delivery.
 - If the render check (§2.9) was inconclusive, say it was inconclusive. "I
   looked and I'm not sure" is an honest answer; silence implies it passed.
 - If something failed, name what failed. "Something went wrong" is not a report.
@@ -439,7 +484,7 @@ indefinitely and are re-checked from their owned Slack thread:
 |---|---|---|
 | `needs_photo` | No supplied hero image, the upload could not be used, or inspection proved it contradicts the listing | Carmen or Chase uploads one in the owned thread |
 | `needs_template` | No exact request-type design, unsafe structure, unresolved new-template audit, or text that cannot fit legibly | The source is fixed or added, then Carmen or Chase asks in its thread to check again |
-| `needs_info` | A required form or headshot value is missing, or official contact fallback was unavailable, ambiguous, or conflicting | The source record or Head Shots folder is fixed, then the run is rechecked |
+| `needs_info` | The one batched ask (§2.7) is outstanding, a value present in the row contradicts itself, a headshot is missing, or official contact fallback was unavailable, ambiguous, or conflicting | The reply answers what it can, or the source record or Head Shots folder is fixed and the run is rechecked. A value left unanswered does **not** hold this state — the flyer builds with that placeholder showing |
 | `needs_review` | A non-source-photo build, readback, placement, or inspection problem could not prove the output is right | Carmen or Chase resolves the named problem and requests a recheck or retry |
 
 `rendered → checked` is the vision pass of ARCHITECTURE.md §4.7b. A post that

@@ -75,6 +75,8 @@ def resolve(
     step = after_research(intake, found, known, required)
     if allow_blank_fields and step.outcome is Outcome.ASK:
         # The gap was already put to a person and they chose to proceed. Asking
-        # again with the same words is how a question becomes a dead end.
-        return Step(outcome=Outcome.BUILD), known
+        # again with the same words is how a question becomes a dead end. The
+        # names are carried through so the delivery message can say which
+        # values were left as placeholders.
+        return Step(outcome=Outcome.BUILD, missing=step.missing), known
     return step, known

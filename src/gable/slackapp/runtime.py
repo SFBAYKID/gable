@@ -748,6 +748,9 @@ def main() -> int:
         log_format=settings.log_format,
         redact_secrets=settings.log_redact_secrets,
     )
+    # Applied once, from the frozen settings. Omitting it leaves the default
+    # ceiling in place, which stops early rather than overspending.
+    spend.configure_ceiling(settings.spend_ceiling_usd)
     try:
         components = build_components(settings)
     except Exception:

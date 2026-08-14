@@ -60,6 +60,10 @@ class Step:
     category: str = ""
     #: Anything worth recording against the run.
     detail: str = ""
+    #: Field names this step could not settle, for the runner to fold into its
+    #: one batched ask. Names, not sentences: the caller words them once,
+    #: together with everything else outstanding, rather than posting each.
+    missing: tuple[str, ...] = ()
 
 
 def plan(
@@ -93,6 +97,7 @@ def plan(
             say=problems[0].ask,
             category=intake.category,
             detail=f"{len(problems)} thing(s) do not add up",
+            missing=tuple(problem.field_name for problem in problems if problem.absent),
         )
 
     # No category gate. A design is whatever file in Generic Templates carries
@@ -172,11 +177,16 @@ def after_research(
         return Step(
             outcome=Outcome.ASK,
             questions=[
-                Question("facts", f"I could not find the {readable}. Do you have {pronoun}?")
+                Question(
+                    "facts",
+                    f"I could not find the {readable}. Do you have {pronoun}?",
+                    absent=True,
+                )
             ],
             say=f"I could not find the {readable} for this one. Do you have {pronoun}?",
             category=intake.category,
             detail=f"research did not settle {readable}",
+            missing=tuple(still_missing),
         )
 
     said = ""
@@ -208,7 +218,12 @@ class QualityVerdict:
         return f"I rendered it, but {first}"
 
 
-def judge(rendered_text: str, expected_values: dict[str, str], pass_number: int) -> QualityVerdict:
+def judge(
+    rendered_text: str,
+    expected_values: dict[str, str],
+    pass_number: int,
+    allowed_placeholders: tuple[str, ...] = (),
+) -> QualityVerdict:
     """Inspect a rendered flyer for the failures that are silent.
 
     Every API call can succeed while the result is wrong: a placeholder left
@@ -228,6 +243,10 @@ def judge(rendered_text: str, expected_values: dict[str, str], pass_number: int)
         rendered_text: All text read back from the rendered slide.
         expected_values: What should appear, by field name.
         pass_number: Which inspection this is, 1 or 2.
+        allowed_placeholders: The design's own literals for fields nobody
+            supplied, which were already asked for once and are deliberately
+            left showing for Carmen to type over. Exact strings, so every other
+            surviving placeholder is still caught.
 
     Returns:
         A verdict. Chase asked for two passes; the second runs after any repair
@@ -238,10 +257,17 @@ def judge(rendered_text: str, expected_values: dict[str, str], pass_number: int)
     """
     problems: list[str] = []
 
+    # Remove only the exact expected literals before looking for leftovers. A
+    # blanket "ignore brackets" rule would have passed the flyer that shipped
+    # with the template's own sample agent still on it.
+    remaining = rendered_text
+    for literal in allowed_placeholders:
+        if literal:
+            remaining = remaining.replace(literal, "")
     leftovers = [
         fragment
         for fragment in ("[", "{{", "PROPERTY ADDRESS", "AGENT NAME", "[PRICE]")
-        if fragment in rendered_text
+        if fragment in remaining
     ]
     if leftovers:
         problems.append("some of the template's own placeholder text is still showing")

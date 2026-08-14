@@ -316,6 +316,12 @@ class Question:
     field_name: str
     #: The sentence Gable says. Written to be posted verbatim.
     ask: str
+    #: True when this names a value nobody supplied, false when it names a
+    #: contradiction. An absent value joins the one batched ask and, if nobody
+    #: answers, the design's own placeholder stays visible. A contradiction —
+    #: an address that reads as a review link — still stops the run, because
+    #: writing known-wrong text onto a client-facing flyer is worse than a gap.
+    absent: bool = False
 
 
 def missing_public_facts(intake: Intake, known: dict[str, str] | None = None) -> list[str]:
@@ -458,6 +464,7 @@ def incoherences(intake: Intake) -> list[Question]:
                 "address",
                 "This request came through without a property address, so I cannot "
                 "look anything up or build the flyer. What is the address?",
+                absent=True,
             )
         )
 
@@ -482,6 +489,7 @@ def incoherences(intake: Intake) -> list[Question]:
             Question(
                 "new price",
                 "This is a price reduction, but no new price came through. What is it now?",
+                absent=True,
             )
         )
 
@@ -490,6 +498,7 @@ def incoherences(intake: Intake) -> list[Question]:
             Question(
                 "open house date and time",
                 "This is an open house post and I do not have the date or time for it. When is it?",
+                absent=True,
             )
         )
 

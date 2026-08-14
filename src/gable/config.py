@@ -34,6 +34,7 @@ from typing import Final, TypeVar
 
 from dotenv import load_dotenv
 
+from gable import spend
 from gable.photos.fit import MAX_OUTPUT_PIXELS, MAX_TARGET_EDGE_PX
 from gable.pipeline.schedule import PollSchedule
 
@@ -88,6 +89,10 @@ ALLOWED_SLACK_CHANNEL_IDS: Final[frozenset[str]] = frozenset(
 MAX_ALLOWED_BATCH: Final[int] = 200
 MIN_POLL_INTERVAL_SECONDS: Final[int] = 30
 
+#: A ceiling on the ceiling. Paid work is bounded by a number a person chose, so
+#: a mistyped variable cannot authorise unbounded spend.
+MAX_SPEND_CEILING_USD: Final[int] = 1000
+
 
 @dataclass(frozen=True, slots=True)
 class Settings:
@@ -138,6 +143,11 @@ class Settings:
     max_batch: int
     dry_run: bool
     db_path: Path
+    #: Total dollars this process may reserve for paid calls, applied to
+    #: `spend.CEILING_USD` at startup. The default matches the ceiling Chase set
+    #: for ordinary operation; a deliberate test campaign against every design
+    #: and salesperson reserves far more and raises it for that database only.
+    spend_ceiling_usd: int
 
     # --- AI providers ---
     openai_image_api_key: str
@@ -262,6 +272,12 @@ class Settings:
             max_batch=reader.int_value("GABLE_MAX_BATCH", 25, minimum=1, maximum=MAX_ALLOWED_BATCH),
             dry_run=reader.bool_value("GABLE_DRY_RUN", False),
             db_path=reader.path_value("GABLE_DB_PATH", Path("/opt/gable/var/gable.db")),
+            spend_ceiling_usd=reader.int_value(
+                "GABLE_SPEND_CEILING_USD",
+                int(spend.DEFAULT_CEILING_USD),
+                minimum=1,
+                maximum=MAX_SPEND_CEILING_USD,
+            ),
             openai_image_api_key=reader.secret("OPENAI_IMAGE_API_KEY", require_credentials),
             conversation_model=reader.str_value("GABLE_CONVERSATION_MODEL", "gpt-5.6-sol"),
             vision_model=reader.str_value("GABLE_VISION_MODEL", "gpt-5.6-sol"),

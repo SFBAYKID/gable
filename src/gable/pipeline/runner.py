@@ -16,7 +16,7 @@ from gable.agents import website as agent_website
 from gable.db import store
 from gable.listings.enrich import Facts
 from gable.listings.intake import Intake, needs_two_agents, price_note
-from gable.pipeline import audit, people, research_gate, run_reporting, run_values
+from gable.pipeline import audit, needs, people, research_gate, run_reporting, run_values
 from gable.pipeline import questions as run_questions
 from gable.pipeline.contact_gate import ContactGate
 from gable.pipeline.orchestrator import Outcome, agent_slots, judge, plan
@@ -273,12 +273,26 @@ class Runner:
         contact = contact_gate.check(run_id)
         if not contact.ready:
             return self._ask(run_id, intake, contact.problem, [], result, status="needs_info")
+        # Released by a person, or by Gable's own batched ask having already
+        # gone out. Either way a value nobody has leaves the design's own
+        # placeholder from here on, instead of asking for it a second time.
+        allow_blank = store.blanks_approved(self.connection, run_id)
+        # Outstanding requests are gathered rather than posted one at a time.
+        # Chase's rule, 2026-08-13: one list, one round of answers, then build.
+        outstanding = needs.Needs()
+
         # Contradictions are cheap and source-independent. They stop before
         # template reads, web calls, or Slack; property research deliberately
         # waits until the selected source reveals which facts it displays.
         step = plan(intake, required_public_facts=frozenset())
         if step.outcome is Outcome.ASK:
-            return self._ask(run_id, intake, step.say, step.questions, result)
+            if not all(question.absent for question in step.questions):
+                # A contradiction is not a gap. An address that reads as a
+                # review link cannot be left as a placeholder and cannot be
+                # guessed past, so it still stops here on its own.
+                return self._ask(run_id, intake, step.say, step.questions, result)
+            if not allow_blank:
+                outstanding.add_values(list(step.missing))
         if step.outcome is Outcome.SKIP:
             store.set_status(self.connection, run_id, "skipped", step.detail)
             result.status = "skipped"
@@ -291,22 +305,9 @@ class Runner:
         if slots.outcome is Outcome.ASK:
             return self._ask(run_id, intake, slots.say, slots.questions, result)
 
-        # The parser can prove who is listing and who is hosting, but the
-        # generic template contract does not yet identify which text and photo
-        # objects belong to each role. Filling repeated labels by page order
-        # produced a polished but false flyer in the old partial path. Stop
-        # before source selection until a two-agent template has an explicit,
-        # testable slot contract.
         if needs_two_agents(intake):
             return self._ask(
-                run_id,
-                intake,
-                "This request needs two agent placements, but that template layout is not "
-                "certified yet. I cannot prove which text and photo spot belongs to the "
-                "listing agent and which belongs to the hosting agent, so I have not built it.",
-                [],
-                result,
-                status="needs_template",
+                run_id, intake, needs.TWO_AGENT_STOP, [], result, status="needs_template"
             )
 
         # Select the exact request-type source before either source-specific
@@ -317,18 +318,10 @@ class Runner:
         self.progress("is choosing the design...")
         template_id, template_label = self.pick_template(step.category, intake)
         if not template_id:
-            # Name the file it is looking for, not the category it mapped to.
-            # A design is added by putting it in Generic Templates and calling
-            # it exactly what the form calls this request, so the useful
-            # sentence says which name is missing rather than asking Carmen to
-            # nominate one.
-            wanted = intake.request_type.strip() or "this request type"
             return self._ask(
                 run_id,
                 intake,
-                f"I do not have a design named {wanted} in the Generic Templates "
-                "folder, so I have not built anything. Add one with that exact "
-                "name and I will use it.",
+                needs.missing_design(intake.request_type),
                 [],
                 result,
                 status="needs_template",
@@ -356,8 +349,6 @@ class Runner:
                 result,
                 status="needs_template",
             )
-        # Released by a person for this run only. See preflight.blocking_after_release.
-        allow_blank = store.blanks_approved(self.connection, run_id)
         step, known = research_gate.resolve(
             self.connection,
             intake,
@@ -367,20 +358,22 @@ class Runner:
             allow_blank_fields=allow_blank,
         )
         if step.outcome is Outcome.ASK:
-            return self._ask(run_id, intake, step.say, step.questions, result)
-        values = run_values.for_intake(self.connection, intake, known)
-        values.update(
-            {
-                "agent_name": contact.name,
-                "agent_email": contact.email,
-                "agent_phone": contact.phone,
-                "agent_title": contact.title,
-            }
+            if not step.missing:
+                # A researched number that looks wrong is not a gap either. It
+                # gets confirmed before it reaches a flyer, on its own.
+                return self._ask(run_id, intake, step.say, step.questions, result)
+            outstanding.add_values(list(step.missing))
+        values = run_values.assembled(
+            self.connection,
+            intake,
+            known,
+            agent_name=contact.name,
+            agent_email=contact.email,
+            agent_phone=contact.phone,
+            agent_title=contact.title,
+            hero_photo_url=self.hero_photo_url,
+            headshot_for=self.headshot_for,
         )
-        values["address"] = template_manifest.normalise_address(values.get("address", ""))
-        values["hero_photo"] = self.hero_photo_url
-        if not values.get("headshot"):
-            values["headshot"] = self.headshot_for(values.get("agent_name", ""))
 
         self.progress("is measuring the design...")
         measured = self.preflight_template(
@@ -390,7 +383,10 @@ class Runner:
             resolution,
             values,
         )
-        blockers = preflight.blocking_after_release(measured, allow_blank)
+        # A value that is about to be asked for in the same breath as the photo
+        # must not stop preflight on the way there.
+        gathering = allow_blank or bool(outstanding.values)
+        blockers = preflight.blocking_after_release(measured, gathering)
         if blockers:
             issue = blockers[0]
             return self._ask(run_id, intake, issue.say, [], result, status=issue.status)
@@ -404,13 +400,26 @@ class Runner:
         # has already been checked, so the upload can resume this same run and
         # compare the photo against the measured frame before anything builds.
         if not self.hero_photo_url:
+            outstanding.photo = True
+
+        # Everything Carmen could answer goes out in one message, once. She
+        # replies once, and the next thing she sees is the link.
+        if outstanding.anything:
+            if outstanding.values:
+                # Saying so is what makes one round enough: from here, silence
+                # is an answer and an unsupplied value keeps its placeholder.
+                store.approve_blank_fields(
+                    self.connection,
+                    run_id,
+                    "asked for every outstanding value and the photo in one message",
+                )
             return self._ask(
                 run_id,
                 intake,
-                "Can you send me the image?",
+                outstanding.message(),
                 [],
                 result,
-                status="needs_photo",
+                status=outstanding.status(),
                 headline=people.announce(self.connection, intake, contact.name),
             )
 
@@ -427,7 +436,12 @@ class Runner:
         # shipped a flyer carrying the literal words "Phone" and "Website".
         manifest = template_manifest.manifest_for(template_label)
         field_problems = template_manifest.validate(manifest, values)
-        blocking = [item for item in field_problems if item.blocking]
+        # An absent value was already asked for in the one batched message. It
+        # keeps the design's placeholder rather than stopping a finished flyer;
+        # a value that is present and malformed still stops.
+        blocking = [
+            item for item in field_problems if item.blocking and not (allow_blank and item.absent)
+        ]
         if blocking:
             return self._ask(run_id, intake, blocking[0].say, [], result)
         # The legacy manifest's character budgets are deliberately not spoken.
@@ -623,49 +637,25 @@ class Runner:
             logger.info("run %s refitted %d text box(es)", run_id, text_fit.count)
             advisories.append(safe(text_fit.note))
 
-        # 7b. Check it twice: once on the text, once by looking at it. The text
-        # pass verifies every value is PRESENT; only the vision pass can see
-        # whether it FITS, and that gap delivered a clipped flyer once already.
-        expected = {
-            name: values[name]
-            for name, literal in resolution.fields.items()
-            if literal in pairs and values.get(name, "").strip()
-        }
-        final_text = run_reporting.read_back(self.read_slide_text, output_id)
-        verdict = judge(final_text or "", expected, 1)
-        seen: Inspection = self.look_at(run_id, self.thumbnail(output_id))
+        # 7b. Check it twice: once on the text, once by looking at it.
+        checked = run_reporting.verify_rendered(
+            run_id,
+            output_id,
+            read_slide_text=self.read_slide_text,
+            thumbnail=self.thumbnail,
+            look_at=self.look_at,
+            judge_text=judge,
+            pairs=pairs,
+            resolution=resolution,
+            values=values,
+            text_fit=text_fit,
+        )
 
-        non_visual_problems = list(verdict.problems)
-        if final_text is None:
-            non_visual_problems.insert(0, "the final text could not be read back for verification")
-        if text_fit.unreadable:
-            non_visual_problems.append(
-                f"the {text_fit.unreadable[0].text[:24]} would have to be shrunk so far "
-                "it would be hard to read"
-            )
-
-        problems = list(non_visual_problems)
-        if not seen.checked:
-            problems.append("the visual inspection could not run")
-        elif not seen.confident:
-            problems.append("the visual inspection was inconclusive")
-        elif not seen.looks_right:
-            problems.extend(seen.problems or ["the visual inspection found a problem"])
-
-        if problems:
-            # A source-photo contradiction has one clear recovery: the next
-            # thread image replaces it on this run. Mixed or non-photo failures
-            # stay in needs_review because a new photo cannot fix them.
-            needs_replacement_photo = not non_visual_problems and seen.needs_source_replacement
-            detail = "; ".join(problems)[:400]
+        if not checked.ok:
+            detail = checked.detail
+            spoken = checked.spoken
             result.output_url = output_url
-            if not seen.checked:
-                spoken = safe("I rendered it, but I could not complete the visual inspection.")
-            elif not seen.confident:
-                spoken = safe("I rendered it, but the visual inspection was inconclusive.")
-            else:
-                spoken = seen.say or verdict.say or safe(f"I rendered it, but {problems[0]}")
-            if needs_replacement_photo:
+            if checked.needs_replacement_photo:
                 delivery = run_questions.prepare_and_deliver(
                     self.connection,
                     run_id,
@@ -708,19 +698,21 @@ class Runner:
         # The verified file and exact link message are persisted before Slack.
         # Until Slack confirms the post the run remains building and the
         # process-lifetime outbox retries without rebuilding the flyer.
-        photo_note = run_reporting.photo_note(self.connection, run_id)
-        missing_price_note = price_note(intake, "price" in resolution.fields)
-        # Keep every useful outcome detail in the one link message.
-        message = safe(
-            "\n".join(
-                [
-                    f"Your flyer is ready. <{output_url}|Open the flyer>",
-                    *run_notes,
-                    *([photo_note] if photo_note else []),
-                    *advisories,
-                    *([missing_price_note] if missing_price_note else []),
-                ]
-            )
+        # A value nobody supplied kept the design's placeholder rather than
+        # stopping the flyer, so the delivery message says which ones.
+        left_blank = [
+            needs.readable(name)
+            for name in resolution.fields
+            if not values.get(name, "").strip()
+        ]
+        message = run_reporting.delivery_message(
+            self.connection,
+            run_id,
+            output_url=output_url,
+            run_notes=run_notes,
+            advisories=advisories,
+            left_blank=left_blank,
+            price_missing_note=price_note(intake, "price" in resolution.fields),
         )
         return self._outcome(
             run_id,

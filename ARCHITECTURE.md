@@ -310,17 +310,30 @@ raising out of the batch.
 The form does not collect every field every design may need. A required field
 being absent is a normal paused state, not an exception.
 
-When a field the template needs is missing or malformed, Gable asks for that
-specific field, naming the listing:
+**Everything outstanding is asked for once, in one message** (`pipeline/needs.py`,
+AGENTS.md §2.7). The runner walks its checks gathering into a `needs.Needs`
+rather than pausing at the first gap, then asks for the photograph and every
+unsettled value together, naming the listing:
 
 > **123 Main St — Lolo Simmons**
-> I don't have a phone number for this listing, and the template has a spot for
-> one. What should it say?
+> Can you send me the image? I also need the price, beds and baths. Answer in
+> one reply with whatever you have. Anything you leave out stays as the design's
+> own placeholder for you to fill in.
 
-It never invents a value and never silently drops a field. Status is
-`needs_info`, and the listing is **paused, not failed** — it waits indefinitely
-and re-enters when Carmen or Chase replies in its owned thread after correcting
-the form or roster source.
+That last sentence is the contract: **silence is a usable answer.** The ask
+records the promise on the run itself, so a resume never repeats the question,
+and a value nobody supplied leaves the design's placeholder visible rather than
+stopping the flyer. The finished-flyer message then names exactly what was left
+showing. It never invents a value and never silently drops a field.
+
+Two kinds of stop are deliberately excluded from the batch, because neither is a
+value a reply can supply. A **contradiction** — an address that reads as a
+review link, a researched number that looks wrong — cannot be left as a
+placeholder and stops on its own. A **structural stop** — no design named for
+the request type, an uncertified two-agent layout, a missing headshot — keeps
+its own message and status. Both are `needs_info` or `needs_template`, and the
+listing is **paused, not failed**: it waits indefinitely and re-enters when
+Carmen or Chase replies in its owned thread after correcting the source.
 
 Agent details start with the Drive sources. A missing roster field may be used
 from one exact official-site profile for the current run only; Gable never
@@ -502,6 +515,13 @@ checks what source rectangles cannot:
 - Is it still the same property and composition as the human-supplied photo?
 - Is any text overflowing its box or colliding with the background art?
 - Is a fillable label or sample value still visible anywhere on the page?
+
+The model is told nothing about which fields went unanswered; its verdict is
+filtered afterwards instead. A finding typed `placeholder` is dropped only when
+this run deliberately left placeholders and only when the returned categories
+line up one-to-one with the problems — otherwise nothing can be dropped safely
+and the flyer still goes to a person. Every other finding stands, so a clipped
+line, a bad crop, or the template's own sample agent still stops delivery.
 
 This exists because the failure mode here is *silent*. A render can succeed at
 every API level — valid file, valid image, HTTP 200 throughout — and still be

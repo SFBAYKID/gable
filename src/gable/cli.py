@@ -13,6 +13,7 @@ import logging
 import sys
 from typing import Any, Final
 
+from gable import spend
 from gable.agents.contacts import sync_contacts
 from gable.config import ConfigError, Settings
 from gable.db.schema import apply_migrations, connect
@@ -70,6 +71,7 @@ def main() -> int:
         log_format=settings.log_format,
         redact_secrets=settings.log_redact_secrets,
     )
+    spend.configure_ceiling(settings.spend_ceiling_usd)
     missing = _local_requirements(settings)
     if missing:
         for problem in missing:

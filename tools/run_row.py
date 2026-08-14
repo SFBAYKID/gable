@@ -24,6 +24,7 @@ import sys
 from sqlite3 import Connection
 from typing import Any, Final
 
+from gable import spend
 from gable.agents.contacts import sync_contacts
 from gable.config import ConfigError, Settings
 from gable.db import store
@@ -149,6 +150,7 @@ def main(argv: list[str] | None = None) -> int:
         log_format=settings.log_format,
         redact_secrets=settings.log_redact_secrets,
     )
+    spend.configure_ceiling(settings.spend_ceiling_usd)
 
     if not settings.google_service_account_file.is_file():
         print(

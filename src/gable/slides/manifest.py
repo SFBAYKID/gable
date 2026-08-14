@@ -184,6 +184,11 @@ class Problem:
     say: str
     #: True when Gable cannot proceed at all.
     blocking: bool = True
+    #: True when the value is simply absent, false when one is present and
+    #: wrong. Once the batched ask has gone out, an absent value is allowed to
+    #: keep the design's own placeholder; a malformed one never is, because
+    #: writing it onto a client-facing flyer states something untrue.
+    absent: bool = False
 
 
 def validate(manifest: Manifest, values: dict[str, str]) -> list[Problem]:
@@ -212,6 +217,7 @@ def validate(manifest: Manifest, values: dict[str, str]) -> list[Problem]:
                     slot.name,
                     f"This design needs the {readable} and I do not have it. "
                     f"I have not built it rather than leaving a label on the flyer. {question}",
+                    absent=True,
                 )
             )
             continue

@@ -15,6 +15,7 @@ from typing import cast
 
 import pytest
 
+from gable import spend
 from gable.db.schema import apply_migrations, connect
 from gable.pipeline.questions import ReconcileState, Reconciliation
 from gable.sheets import repository as sheet_repo
@@ -58,6 +59,7 @@ def _exercise_main(
         db_path=tmp_path / "gable.db",
         slack_bot_token="xoxb-test",
         slack_channel_id="C0B02721MNK",
+        spend_ceiling_usd=int(spend.DEFAULT_CEILING_USD),
     )
     intake = SimpleNamespace(
         agent_name="Mike Kulnich",
