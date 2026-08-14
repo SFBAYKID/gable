@@ -232,8 +232,14 @@ class Runner:
         """Run the sequence behind one shared, state-recording failure boundary."""
         try:
             return self._sequence(run_id, intake, result)
-        except Exception:
+        except Exception as error:
             logger.exception("run %s failed", run_id)
+            # The kind of error, never its message, which can carry a signed
+            # URL or an id. Three overnight runs failed here and recorded the
+            # same sentence, so none could be told apart without reproducing it.
+            reason = (
+                f"a processing step failed before an outcome was confirmed ({type(error).__name__})"
+            )
             current = store.run_by_id(self.connection, run_id)
             if current is not None and store.has_pending_run_notification(self.connection, run_id):
                 result.status = current.status
@@ -249,20 +255,11 @@ class Runner:
                     spoken,
                     result,
                     status="failed",
-                    detail="a processing step failed before an outcome was confirmed",
+                    detail=reason,
                 )
             except Exception:
                 logger.exception("could not persist the failure outcome for run %s", run_id)
-                try:
-                    store.set_status(
-                        self.connection,
-                        run_id,
-                        "failed",
-                        "unhandled error during the run",
-                        failure_reason="a processing step failed before an outcome was confirmed",
-                    )
-                except Exception:
-                    logger.exception("could not record failure for run %s", run_id)
+                run_reporting.record_unhandled_failure(self.connection, run_id, reason)
             result.status = "failed"
             return result
 

@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from sqlite3 import Connection
 from typing import Any, Final
 
+from gable.db import store
 from gable.pipeline.orchestrator import QualityVerdict
 from gable.pipeline.vision import Inspection
 from gable.slides import fields as template_fields
@@ -324,3 +325,24 @@ def delivery_message(
             ]
         )
     )
+
+
+def record_unhandled_failure(connection: Connection, run_id: str, reason: str) -> None:
+    """Mark a run failed when even its outcome could not be recorded normally.
+
+    Args:
+        connection: An open database connection.
+        run_id: The run that raised.
+        reason: The recorded reason, naming the error's kind but never its
+            message, which can carry a signed URL or an id.
+
+    Raises:
+        Nothing. This is the last thing standing between a raised run and a row
+        that still says it is building, so it swallows its own failure too.
+    """
+    try:
+        store.set_status(
+            connection, run_id, "failed", "unhandled error during the run", failure_reason=reason
+        )
+    except Exception:
+        logger.exception("could not record failure for run %s", run_id)
