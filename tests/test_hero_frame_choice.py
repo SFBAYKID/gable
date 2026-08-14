@@ -44,14 +44,15 @@ WELL = _shape("p1_i88", 8400, 1791425, 10270918, 6781440)
 PAGE: dict[str, Any] = {"pageElements": [LOGO, GUIDE, WELL]}
 
 
-def test_the_well_is_replaced_but_the_photo_is_drawn_at_the_guide() -> None:
-    """Both halves matter: delete the sample, draw where the design says."""
+def test_the_well_is_replaced_and_the_photo_starts_at_the_guide() -> None:
+    """Both halves matter: delete the sample, start where the design says."""
     frame = find_hero_frame(PAGE, SLIDE_WIDTH, SLIDE_HEIGHT, "Under Contract")
 
     assert frame is not None
     assert frame.object_id == "p1_i88", "the sample photograph lives in the well"
-    assert frame.y == 2172432, "the image is drawn at the guide, not the well"
-    assert frame.height == 5337953
+    assert frame.y == 2172432, "the photo begins at the guide, clear of the logo"
+    assert frame.y + frame.height == 1791425 + 6781440, "and still ends at the well"
+    assert frame.width == 10270918, "the well's full width is kept"
 
 
 def test_the_drawn_photo_clears_the_logo() -> None:
@@ -84,6 +85,7 @@ def test_a_shape_that_is_not_contained_is_not_a_guide() -> None:
 
     assert frame is not None
     assert frame.y == 1791425, "only a contained guide may move the photo"
+    assert frame.height == 6781440
 
 
 def test_a_guide_no_lower_than_its_well_is_ignored() -> None:
@@ -123,3 +125,14 @@ def test_every_live_design_still_has_a_recorded_well() -> None:
 def test_an_unknown_design_falls_through_rather_than_guessing() -> None:
     """Two candidates and no recorded id must refuse, not pick the bigger one."""
     assert find_hero_frame(PAGE, SLIDE_WIDTH, SLIDE_HEIGHT, "Price Reduction") is None
+
+
+def test_the_photo_still_reaches_the_bottom_of_the_well() -> None:
+    """Taking the guide's bounds outright left a grey gap above the title."""
+    frame = find_hero_frame(PAGE, SLIDE_WIDTH, SLIDE_HEIGHT, "Under Contract")
+
+    assert frame is not None
+    guide_bottom = 2172432 + 5337953
+    well_bottom = 1791425 + 6781440
+    assert frame.y + frame.height > guide_bottom
+    assert frame.y + frame.height == well_bottom

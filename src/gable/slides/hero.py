@@ -395,10 +395,20 @@ def _placement_guide(
             best = guide
     if best is None:
         return None
-    # The well's identity, the guide's geometry: the sample photograph lives in
-    # the well and must still be deleted, but the new image is drawn where the
-    # design says the picture belongs.
-    return HeroFrame(well.object_id, best.x, best.y, best.width, best.height)
+    # The well, clipped to start at the guide's top. The guide says where the
+    # picture BEGINS — below the design's furniture — and the well still says
+    # where it ends. Taking the guide's bounds outright instead left a band of
+    # empty background between the photo and the title, because the guide stops
+    # 1,062,480 EMU short of the well on Under Contract. The well keeps its
+    # identity throughout: it is the shape carrying the sample photograph, and
+    # it is what gets deleted.
+    return HeroFrame(
+        well.object_id,
+        well.x,
+        best.y,
+        well.width,
+        well.y + well.height - best.y,
+    )
 
 
 def find_hero_frame(
