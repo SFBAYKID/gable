@@ -232,7 +232,7 @@ def test_the_readback_checks_what_was_written_not_the_raw_value() -> None:
         "file-1",
         read_slide_text=lambda _fid: ["REALTOR"],
         thumbnail=lambda _fid: b"",
-        look_at=lambda _run, _image: Inspection(looks_right=True, confident=True),
+        look_at=lambda _run, _image, _expected: Inspection(looks_right=True, confident=True),
         judge_text=__import__("gable.pipeline.orchestrator", fromlist=["judge"]).judge,
         pairs=pairs,
         resolution=resolution,

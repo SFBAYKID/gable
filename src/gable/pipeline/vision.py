@@ -500,11 +500,42 @@ def _warn_if_truncated(body: dict[str, Any]) -> None:
     )
 
 
+def kept_placeholder_note(literals: tuple[str, ...]) -> str:
+    """The sentence telling the inspector which sample text is meant to remain.
+
+    Args:
+        literals: The design's own text for fields nobody supplied.
+
+    Returns:
+        An empty string when nothing was left, otherwise one paragraph to append
+        to the prompt. Naming them is not a licence to ignore that area: the
+        model is still asked to report them clipped, overlapping or unreadable,
+        which is the only thing Gable could have caused.
+
+    Raises:
+        Nothing.
+    """
+    named = [" ".join(text.split()) for text in literals if text.strip()]
+    if not named:
+        return ""
+    listed = "\n".join(f"  - {text}" for text in sorted(set(named)))
+    return (
+        "\n\nNobody supplied some of this listing's values, so the design's own "
+        "sample text is deliberately still showing for them. Treat the following "
+        "text as expected and correct, and do not report it as a placeholder, a "
+        "typo, a formatting mistake, or the wrong content:\n"
+        f"{listed}\n"
+        "Do still report it if it is clipped, overlapping something, or too small "
+        "to read — that would be a layout problem rather than a missing value."
+    )
+
+
 def inspect(
     image_bytes: bytes,
     api_key: str | None = None,
     model: str | None = None,
     reference_image_bytes: bytes = b"",
+    expected_placeholders: tuple[str, ...] = (),
 ) -> Inspection:
     """Ask a vision model whether a rendered flyer looks right.
 
@@ -515,6 +546,9 @@ def inspect(
         reference_image_bytes: The person's original property photo, when
             available. It is compared with the photo visible in the flyer in
             the same call, so a bad crop or placement cannot pass as good layout.
+        expected_placeholders: The design's own sample text for fields nobody
+            supplied. Named in the prompt so a correct flyer is not parked in
+            review for showing exactly what it was asked to show.
 
     Returns:
         An `Inspection`. Never raises: this runs on the delivery path, and a
@@ -528,11 +562,16 @@ def inspect(
     """
     return _inspect(
         image_bytes,
-        PROMPT,
+        PROMPT + kept_placeholder_note(expected_placeholders),
         api_key=api_key,
         model=model,
         reference_image_bytes=reference_image_bytes,
     )
+
+
+def default_look_at(_run_id: str, image: bytes, expected: tuple[str, ...] = ()) -> Inspection:
+    """Inspect a render directly, for callers that wire no budget-guarded seam."""
+    return inspect(image, expected_placeholders=expected)
 
 
 def inspect_template(

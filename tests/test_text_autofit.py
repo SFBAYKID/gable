@@ -130,7 +130,7 @@ def test_mike_sold_text_autofits_in_slides_and_still_reads_back(
     flyer.apply = lambda _file_id, requests: applied.extend(requests)
     inspected: list[str] = []
 
-    def inspect_render(run_id: str, _image: bytes) -> Inspection:
+    def inspect_render(run_id: str, _image: bytes, _expected: tuple[str, ...] = ()) -> Inspection:
         """Record that the final rendered-flyer gate actually ran."""
         inspected.append(run_id)
         return Inspection(looks_right=True, confident=True)

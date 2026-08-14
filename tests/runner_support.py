@@ -123,7 +123,7 @@ def runner(db: sqlite3.Connection, rec: Recorder, facts: Facts | None = None) ->
         read_slide_text=rec.read,
         copy_template=rec.copy,
         fill=rec.fill,
-        look_at=lambda _run_id, _image: Inspection(looks_right=True, confident=True),
+        look_at=lambda _run_id, _image, _expected: Inspection(looks_right=True, confident=True),
         research=lambda _address, _fields: (
             facts
             or Facts(

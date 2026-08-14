@@ -241,7 +241,11 @@ def build_runner(
             photo_size=photo_size,
         )
 
-    def look_at(run_id: str, image_bytes: bytes) -> Inspection:
+    def look_at(
+        run_id: str,
+        image_bytes: bytes,
+        expected_placeholders: tuple[str, ...] = (),
+    ) -> Inspection:
         """Run the paid visual check only while the hard budget permits it."""
         if not settings.openai_image_api_key or not image_bytes:
             return inspect_flyer(
@@ -249,6 +253,7 @@ def build_runner(
                 api_key=settings.openai_image_api_key,
                 model=settings.vision_model,
                 reference_image_bytes=vision_reference,
+                expected_placeholders=expected_placeholders,
             )
         estimate = spend.Estimate(
             service="openai",
@@ -265,6 +270,7 @@ def build_runner(
                     api_key=settings.openai_image_api_key,
                     model=settings.vision_model,
                     reference_image_bytes=vision_reference,
+                    expected_placeholders=expected_placeholders,
                 ),
                 run_id=run_id,
             )

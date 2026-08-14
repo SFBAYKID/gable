@@ -20,7 +20,7 @@ from gable.pipeline import audit, needs, people, research_gate, run_reporting, r
 from gable.pipeline import questions as run_questions
 from gable.pipeline.contact_gate import ContactGate
 from gable.pipeline.orchestrator import Outcome, agent_slots, judge, plan
-from gable.pipeline.vision import Inspection, inspect
+from gable.pipeline.vision import Inspection, default_look_at
 from gable.sheets import repository as repo
 from gable.slides import fields as template_fields
 from gable.slides import fitting, preflight
@@ -87,7 +87,7 @@ class Runner:
     thumbnail: Callable[[str], bytes] = lambda _fid: b""
     #: Looks at a rendered flyer. Injected like every other outside call, so a
     #: test can supply a verdict without spending a vision call.
-    look_at: Callable[[str, bytes], Inspection] = lambda _run_id, image: inspect(image)
+    look_at: Callable[[str, bytes, tuple[str, ...]], Inspection] = default_look_at
     #: The hero photo for this listing, already fitted and published, or "" if
     #: none has been supplied yet.
     hero_photo_url: str = ""

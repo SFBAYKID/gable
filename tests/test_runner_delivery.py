@@ -271,7 +271,7 @@ def test_pixelated_mike_render_is_held_without_exposing_the_bad_flyer(
             source_url="https://cornerhouserealty.com/mike-kulnich/",
         )
     )
-    runner.look_at = lambda _run_id, _image: Inspection(
+    runner.look_at = lambda _run_id, _image, _expected: Inspection(
         looks_right=False,
         confident=True,
         problems=["The main property photo is badly pixelated and blurry."],
@@ -328,7 +328,7 @@ def test_mike_wrong_property_photo_requests_one_replacement_on_the_same_run(
             source_url="https://cornerhouserealty.com/mike-kulnich/",
         )
     )
-    runner.look_at = lambda _run_id, _image: Inspection(
+    runner.look_at = lambda _run_id, _image, _expected: Inspection(
         looks_right=False,
         confident=True,
         problems=["The flyer says 703, but the house number in the photo says 721."],
@@ -372,7 +372,7 @@ def test_a_conflict_visible_only_in_the_render_stays_needs_review(
     _record(db, submission)
     rec = Recorder()
     runner = _runner(db, rec)
-    runner.look_at = lambda _run_id, _image: Inspection(
+    runner.look_at = lambda _run_id, _image, _expected: Inspection(
         looks_right=False,
         confident=True,
         problems=["The render shows 721, but the number is unreadable in the source image."],
@@ -401,7 +401,7 @@ def test_an_unconfirmed_replacement_request_remains_durable_review(
     _record(db, submission)
     rec = Recorder()
     runner = _runner(db, rec)
-    runner.look_at = lambda _run_id, _image: Inspection(
+    runner.look_at = lambda _run_id, _image, _expected: Inspection(
         looks_right=False,
         confident=True,
         problems=["The source house number says 721."],
@@ -443,7 +443,7 @@ def test_mixed_visual_problems_stay_review_even_with_a_replace_remedy(
     _record(db, submission)
     rec = Recorder()
     runner = _runner(db, rec)
-    runner.look_at = lambda _run_id, _image: Inspection(
+    runner.look_at = lambda _run_id, _image, _expected: Inspection(
         looks_right=False,
         confident=True,
         problems=["The source number says 721.", "The address overlaps the divider."],
@@ -475,7 +475,7 @@ def test_replacement_question_survives_an_overlong_visual_finding(
     _record(db, submission)
     rec = Recorder()
     runner = _runner(db, rec)
-    runner.look_at = lambda _run_id, _image: Inspection(
+    runner.look_at = lambda _run_id, _image, _expected: Inspection(
         looks_right=False,
         confident=True,
         problems=["The source proves a mismatch because " + ("detail " * 150)],

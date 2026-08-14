@@ -130,7 +130,7 @@ def verify_rendered(
     *,
     read_slide_text: Callable[[str], list[str]],
     thumbnail: Callable[[str], bytes],
-    look_at: Callable[[str, bytes], Inspection],
+    look_at: Callable[[str, bytes, tuple[str, ...]], Inspection],
     judge_text: Callable[[str, dict[str, str], int, tuple[str, ...]], QualityVerdict],
     pairs: Mapping[str, str],
     resolution: template_fields.Resolution,
@@ -176,11 +176,14 @@ def verify_rendered(
     )
     final_text = read_back(read_slide_text, output_id)
     verdict = judge_text(final_text or "", expected, 1, left_showing)
-    seen: Inspection = look_at(run_id, thumbnail(output_id))
+    # The gate is told exactly which sample text was left on purpose, because a
+    # correct flyer showing the design's own price was being parked in review
+    # for a comma the model read as a full stop. It is still asked to report
+    # that text clipped or overlapping, which is the only thing Gable causes.
+    seen: Inspection = look_at(run_id, thumbnail(output_id), left_showing)
     if left_showing:
-        # The visual gate is told nothing; its verdict is filtered afterwards,
-        # so only the placeholders this run deliberately left are forgiven and
-        # every other finding it made still stands.
+        # Filtered afterwards as well: naming them in the prompt is guidance,
+        # and the kind the model returns is the check that it was followed.
         seen = seen.without_expected_placeholders()
 
     non_visual = list(verdict.problems)

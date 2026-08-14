@@ -713,7 +713,7 @@ def test_a_flyer_the_vision_pass_rejects_is_not_delivered(db: sqlite3.Connection
     _record(db, submission)
     rec = Recorder()
     runner = _runner(db, rec)
-    runner.look_at = lambda _run_id, _image: Inspection(
+    runner.look_at = lambda _run_id, _image, _expected: Inspection(
         looks_right=False, confident=True, problems=["the price is cut off at the box edge"]
     )
     result = runner.run(submission)
@@ -729,7 +729,9 @@ def test_a_bare_negative_vision_verdict_cannot_silently_deliver(
     submission = _submission(rid="rid-vision-empty-problem")
     _record(db, submission)
     runner = _runner(db, Recorder())
-    runner.look_at = lambda _run_id, _image: Inspection(looks_right=False, confident=True)
+    runner.look_at = lambda _run_id, _image, _expected: Inspection(
+        looks_right=False, confident=True
+    )
 
     result = runner.run(submission)
 
@@ -744,7 +746,7 @@ def test_a_vision_check_that_could_not_run_blocks_delivery(
     submission = _submission(rid="rid-novision")
     _record(db, submission)
     runner = _runner(db, Recorder())
-    runner.look_at = lambda _run_id, _image: Inspection(
+    runner.look_at = lambda _run_id, _image, _expected: Inspection(
         looks_right=False,
         confident=False,
         checked=False,

@@ -195,3 +195,33 @@ def test_measured_boxes_reach_the_fitter_through_preflight() -> None:
     assert boxes[0].weight == 700
     fits = fitting.plan_fits(boxes, dynamic=["Annie Nowicki"], single_line=["Annie Nowicki"])
     assert fits[0].overflows
+
+
+def test_the_visual_gate_is_told_which_sample_text_was_left_on_purpose() -> None:
+    """A correct flyer was parked in review over the design's own price.
+
+    New Listing's unfilled price reads "$350,000" — the design's own sample —
+    and the inspector reported it as using a period instead of a comma. It is
+    not a placeholder-kind finding, so the post-filter could not drop it. The
+    prompt now names the text that was deliberately left.
+    """
+    from gable.pipeline.vision import kept_placeholder_note
+
+    note = kept_placeholder_note(("$350,000", "PROPERTY ADDRESS"))
+
+    assert "$350,000" in note
+    assert "PROPERTY ADDRESS" in note
+    assert "do not report it as a placeholder" in note
+    # It is guidance about content, never permission to ignore the layout.
+    assert "clipped" in note
+    assert kept_placeholder_note(()) == ""
+    assert kept_placeholder_note(("  ",)) == ""
+
+
+def test_repeated_sample_text_is_named_once() -> None:
+    """A literal in two boxes is one instruction, not two."""
+    from gable.pipeline.vision import kept_placeholder_note
+
+    note = kept_placeholder_note(("Realtor", "Realtor", "Realtor"))
+
+    assert note.count("- Realtor") == 1
