@@ -623,6 +623,7 @@ against the $500 campaign ceiling. `#calvo` received nothing.
 | The visual gate told which sample text was deliberately left, so a correct flyer is not held for showing the design's own price. | `86551d6` |
 | A failed run records the kind of error, not just that one happened. | `7abfc8a` |
 | A filled measurement keeps the design's own unit and capitals. Found by re-testing the first four people after the other fixes. | `3919d0e` |
+| A value supplied after delivery reopens the finished flyer, so "run it again, the price should be $560,000" produces a new one instead of "already being rechecked". | `6dd70c4` |
 
 ### Waiting on Chase
 
@@ -653,10 +654,12 @@ had ever had those filled correctly. It also surfaced one more for Chase: on
 New Listing with Open House the design's portrait is a cut-out, so a rectangular
 headshot fills the wider frame and covers the start of "REALTOR" beneath it.
 
-The thread contract was then proven end to end on the fixed code: Annie's Open
-House asked once for beds, baths, square footage and price, one reply answered
-all four, and Gable built the flyer and reported only the footer defect that is
-in the design.
+The whole flow was then proven end to end on the fixed code, in one thread on
+Deborah Manarin's New Listing with Open House: Gable posted the request, asked
+once for the only thing it lacked, took a one-line reply, delivered the flyer,
+and — after "Can you run this again? The price should be $560,000" — delivered a
+second one carrying the new price. Annie's Open House proved the same loop for a
+four-value answer.
 
 ### Known limits of the test itself
 
