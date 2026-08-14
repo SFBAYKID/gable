@@ -24,7 +24,7 @@ from typing import Any, Final
 from gable.photos.fit import assess
 from gable.slides import fields, fitting
 from gable.slides.elements import descendants, font_size_pt, font_weight, text_content
-from gable.slides.hero import absolute_boxes, find_hero_frame, headshot_frames
+from gable.slides.hero import find_hero_frame, headshot_frames
 
 PHOTO_CROP_WARNING: Final[float] = 0.30
 _TOKEN_MARKS: Final[re.Pattern[str]] = re.compile(r"[\[\]{}<>]")
@@ -128,6 +128,53 @@ def _axis_aligned_positive(element: dict[str, Any]) -> bool:
         return False
 
 
+def _leaves_with_group_scale(
+    elements: list[dict[str, Any]],
+    group_x: float = 1.0,
+    group_y: float = 1.0,
+) -> list[tuple[dict[str, Any], float, float, float]]:
+    """Every leaf element with the scale its enclosing groups apply.
+
+    The two scales are kept apart deliberately. An element's own transform
+    shapes its box — New Listing with Open House stores its title as a 3,000,000
+    EMU square scaled to 1.11 x 0.13 — and does not change the size of the type
+    inside it. A GROUP's scale does change the rendered type, because the whole
+    group is drawn smaller. Multiplying the two together read that title as
+    1.79pt and refused the design as unreadable.
+
+    Args:
+        elements: A `pageElements` list, or a group's children.
+        group_x: Accumulated horizontal scale from enclosing groups.
+        group_y: Accumulated vertical scale from enclosing groups.
+
+    Returns:
+        `(element, group_scale_y, width, height)` per leaf, with width and
+        height already in absolute EMU and the group scale kept separate so the
+        caller can apply it to the type size alone.
+
+    Raises:
+        Nothing.
+    """
+    out: list[tuple[dict[str, Any], float, float, float]] = []
+    for element in elements:
+        transform = element.get("transform", {})
+        own_x = float(transform.get("scaleX", 1.0) or 1.0)
+        own_y = float(transform.get("scaleY", 1.0) or 1.0)
+        group = element.get("elementGroup")
+        if group:
+            out.extend(
+                _leaves_with_group_scale(
+                    group.get("children", []), group_x * own_x, group_y * own_y
+                )
+            )
+            continue
+        size = element.get("size", {})
+        width = float(size.get("width", {}).get("magnitude", 0)) * own_x * group_x
+        height = float(size.get("height", {}).get("magnitude", 0)) * own_y * group_y
+        out.append((element, group_y, width, height))
+    return out
+
+
 def text_boxes(presentation: dict[str, Any]) -> list[fitting.TextBox]:
     """Measure every text box in a Slides presentation.
 
@@ -142,17 +189,14 @@ def text_boxes(presentation: dict[str, Any]) -> list[fitting.TextBox]:
         # New Listing with Open House scales its REALTOR box to 0.75, so its
         # own numbers overstated the usable width by a third and the design was
         # refused outright rather than measured.
-        for element, _x, _y, width, height in absolute_boxes(page.get("pageElements", [])):
+        for element, group_scale_y, width, height in _leaves_with_group_scale(
+            page.get("pageElements", [])
+        ):
             text = text_content(element)
             if not text:
                 continue
-            size = element.get("size", {})
-            intrinsic_height = float(size.get("height", {}).get("magnitude", 0))
-            # The group scales the type along with the box, so the rendered
-            # point size is the declared one times that same factor.
-            scale = height / intrinsic_height if intrinsic_height > 0 else 1.0
             declared = font_size_pt(element)
-            size_pt = declared * scale if declared else _implied_font_size_pt(height)
+            size_pt = declared * group_scale_y if declared else _implied_font_size_pt(height)
             lines = 1
             if size_pt > 0 and height > 0:
                 lines = max(1, int((height / fitting.EMU_PER_POINT) // (size_pt * 1.2)))

@@ -538,3 +538,50 @@ def test_releasing_blank_values_frees_only_the_missing_value_blockers() -> None:
         "unreadable_agent_name",
         "ambiguous_headshot_frame",
     ]
+
+
+def test_a_group_scales_the_type_but_a_box_transform_only_shapes_the_box() -> None:
+    """The real New Listing with Open House title, measured 2026-08-14.
+
+    It is stored as a 3,000,000 EMU square scaled to 1.11 x 0.13, inside a group
+    scaled 0.75, and declared at 18.79pt. Multiplying both scales into the font
+    read it as 1.79pt and refused the design as unreadable; the box transform
+    shapes the box, and only the group scales the type.
+    """
+    title = {
+        "objectId": "p1_i103",
+        "shape": {
+            "text": {
+                "textElements": [
+                    {
+                        "textRun": {
+                            "content": "REALTOR",
+                            "style": {"fontSize": {"magnitude": 18.79, "unit": "PT"}},
+                        }
+                    }
+                ]
+            }
+        },
+        "size": {"width": {"magnitude": 3000000}, "height": {"magnitude": 3000000}},
+        "transform": {"scaleX": 1.1123613333333333, "scaleY": 0.12682566666666667},
+    }
+    presentation = {
+        "slides": [
+            {
+                "objectId": "p1",
+                "pageElements": [
+                    {
+                        "objectId": "group",
+                        "transform": {"scaleX": 0.75, "scaleY": 0.75},
+                        "elementGroup": {"children": [title]},
+                    }
+                ],
+            }
+        ]
+    }
+
+    box = next(item for item in preflight.text_boxes(presentation) if item.object_id == "p1_i103")
+
+    assert round(box.font_size_pt, 2) == 14.09
+    assert box.font_size_pt > fitting.MIN_READABLE_PT
+    assert round(box.width_emu) == 2502813
