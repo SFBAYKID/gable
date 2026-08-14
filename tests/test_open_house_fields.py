@@ -72,3 +72,43 @@ def test_brand_copy_is_not_mistaken_for_a_date_or_a_time() -> None:
     assert "Open House" not in filled
     assert "Tour this home with Corner House Realty" not in filled
     assert "Local expertise. Exceptional results." not in filled
+
+
+#: New Listing with Open House puts the date and the time in ONE box, on two
+#: lines, inside the tag shape. Read from the live design 2026-08-14.
+NLWOH_TEXT: list[str] = [
+    "JUST LISTED",
+    "REALTOR",
+    "C: 410.456.6868\nO: 443.499.3839",
+    "Kelsey Mahon",
+    "3822 6th St, Baltimore, MD 21225",
+    "$450,000",
+    "Local experts. Modern approach.  Exceptional results.",
+    "Open House",
+    "SUNDAY, MAY 24TH\n1 PM - 3 PM",
+    "QUESTIONS ABOUT THIS PROPERTY?",
+    "DM me!",
+]
+
+
+def test_a_date_and_time_sharing_one_box_are_recognised() -> None:
+    """Neither single-line pattern matched, so the tag kept a real past date."""
+    resolved = fields.resolve(NLWOH_TEXT)
+
+    assert resolved.fields["open_house"] == "SUNDAY, MAY 24TH\n1 PM - 3 PM"
+
+
+def test_that_box_is_filled_on_two_lines_as_the_design_draws_it() -> None:
+    resolved = fields.resolve(NLWOH_TEXT)
+    pairs = fields.replacements(resolved, {"open_house": "Sunday, Sep 6, 2026 1-3PM"})
+
+    assert pairs["SUNDAY, MAY 24TH\n1 PM - 3 PM"] == "Sunday, Sep 6, 2026\n1-3PM"
+
+
+def test_the_sample_agent_and_listing_on_that_design_are_still_recognised() -> None:
+    """Kelsey Mahon's real details must never survive onto another flyer."""
+    resolved = fields.resolve(NLWOH_TEXT)
+
+    assert resolved.fields["agent_name"] == "Kelsey Mahon"
+    assert resolved.fields["address"] == "3822 6th St, Baltimore, MD 21225"
+    assert resolved.fields["agent_phone"] == "C: 410.456.6868\nO: 443.499.3839"

@@ -197,3 +197,15 @@ def test_open_house_draws_the_photo_in_the_band_the_design_shows() -> None:
     assert frame is not None
     assert frame.y == 1154916
     assert frame.y + frame.height == 313208 + 5308509
+
+
+def test_new_listing_with_open_house_removes_its_sample_house_layer() -> None:
+    """Its photo is two shapes, the same as New Listing's."""
+    page: dict[str, Any] = {
+        "pageElements": [
+            _shape("p1_i92", 0, 1575881, 10287000, 4853494),
+            _shape("p1_i93", 0, 806735, 10287000, 6515788),
+        ]
+    }
+
+    assert extra_deletions(page, "New Listing with Open House", "p1_i92") == ("p1_i93",)

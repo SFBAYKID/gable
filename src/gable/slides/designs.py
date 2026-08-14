@@ -67,6 +67,12 @@ HERO_OBJECT_IDS: Final[dict[str, str]] = {
 #: deleting it once left the logo washed out over the brickwork.
 HERO_EXTRA_DELETE: Final[dict[str, tuple[str, ...]]] = {
     "new listing": ("p1_i90",),
+    # Same shape as New Listing: `p1_i92` is the band the design shows and is
+    # where the photo belongs, while `p1_i93` carries the sample house on top of
+    # it. Replacing only `p1_i92` put the supplied photo behind the template's
+    # own brick colonial. Deleting `p1_i93` alone leaves the sunset backdrop in
+    # exactly that band, which is what the source renders.
+    "new listing with open house": ("p1_i93",),
 }
 
 

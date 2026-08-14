@@ -97,6 +97,13 @@ _TIME_RANGE_INSIDE: Final[re.Pattern[str]] = re.compile(
     re.IGNORECASE,
 )
 
+#: A weekday date and a time range in one box, on separate lines, as
+#: New Listing with Open House writes them.
+_SAMPLE_OPEN_HOUSE_DATE_AND_TIME: Final[re.Pattern[str]] = re.compile(
+    _SAMPLE_OPEN_HOUSE_DATE.pattern.rstrip("$") + r"\s+" + _TIME_RANGE_ONLY.pattern.lstrip("^"),
+    re.IGNORECASE,
+)
+
 PATTERNS: Final[dict[str, tuple[re.Pattern[str], ...]]] = {
     "address": (
         re.compile(r"^\[\s*PROPERTY ADDRESS\s*\]$", re.IGNORECASE),
@@ -292,6 +299,10 @@ PATTERNS: Final[dict[str, tuple[re.Pattern[str], ...]]] = {
         # time, so an unfilled box puts somebody else's open house on the flyer.
         _SAMPLE_OPEN_HOUSE_DATE,
         _TIME_RANGE_ONLY,
+        # New Listing with Open House puts both in ONE box, on two lines:
+        # "SUNDAY, MAY 24TH\n1 PM - 3 PM". Neither single-line pattern matches
+        # that, so the tag kept a previous listing's open house.
+        _SAMPLE_OPEN_HOUSE_DATE_AND_TIME,
     ),
 }
 
@@ -514,11 +525,15 @@ def _open_house_part(literal: str, value: str) -> str:
     found = _TIME_RANGE_INSIDE.search(value)
     if not found:
         return value
-    wants_time = bool(_TIME_RANGE_ONLY.match(literal.strip()) or "TIME" in literal.upper())
-    if wants_time:
-        return found.group(0).strip()
+    time_part = found.group(0).strip()
     remainder = (value[: found.start()] + " " + value[found.end() :]).strip(" ,-\u2013\u2014\t")
-    return " ".join(remainder.split()) or value
+    date_part = " ".join(remainder.split()) or value
+    # One box holding both, on two lines. Filling it with the whole string on a
+    # single line overflowed the tag it sits in, so the shape is preserved.
+    if _SAMPLE_OPEN_HOUSE_DATE_AND_TIME.match(literal.strip()):
+        return f"{date_part}\n{time_part}"
+    wants_time = bool(_TIME_RANGE_ONLY.match(literal.strip()) or "TIME" in literal.upper())
+    return time_part if wants_time else date_part
 
 
 def replacements(resolution: Resolution, values: dict[str, str]) -> dict[str, str]:
