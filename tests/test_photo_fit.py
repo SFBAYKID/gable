@@ -678,3 +678,60 @@ def test_side_trimming_stays_centred() -> None:
     with Image.open(io.BytesIO(fitted)) as out:
         middle = cast(tuple[int, int, int], out.getpixel((250, 200)))
         assert sum(middle) > 600, "the centre column must remain centred"
+
+
+def _alpha(image: Image.Image, x: int, y: int) -> int:
+    """One pixel's alpha, as an int Mypy can reason about."""
+    return cast("tuple[int, int, int, int]", image.getpixel((x, y)))[3]
+
+
+def test_a_tall_cut_out_keeps_its_whole_head_in_a_square_slot() -> None:
+    """New Listing with Open House draws a square well; the cut-outs are 2:3.
+
+    Chase, 2026-08-14: "The top of his head is cut off in the image and that is
+    not acceptable." A centre cover-crop took 150 pixels off the top of a
+    600x900 portrait to make it square.
+    """
+    source = Image.new("RGBA", (600, 900), (0, 0, 0, 0))
+    # A marker at the very top of the person, which a cover crop would remove.
+    for x in range(280, 320):
+        for y in range(0, 20):
+            source.putpixel((x, y), (255, 0, 0, 255))
+    raw = io.BytesIO()
+    source.save(raw, format="PNG")
+
+    fitted = Image.open(io.BytesIO(fit_bounded_portrait_locally(raw.getvalue(), 233, 233)))
+
+    assert fitted.size == (233, 233)
+    opaque = [(x, y) for x in range(233) for y in range(233) if _alpha(fitted, x, y) > 0]
+    assert opaque, "the portrait vanished"
+    # The crown survived: the topmost opaque pixel is the marker, not a cut edge.
+    assert min(y for _x, y in opaque) < 233 * 0.30
+
+
+def test_a_portrait_is_placed_on_the_slots_baseline() -> None:
+    """These designs stand the agent on the card's baseline."""
+    source = Image.new("RGBA", (600, 900), (10, 20, 30, 255))
+    raw = io.BytesIO()
+    source.save(raw, format="PNG")
+
+    fitted = Image.open(io.BytesIO(fit_bounded_portrait_locally(raw.getvalue(), 300, 300)))
+
+    assert fitted.size == (300, 300)
+    assert _alpha(fitted, 150, 299) == 255, "the portrait does not reach the bottom"
+    # A 2:3 cut-out in a square well fills the height, so the spare room is at
+    # the sides — and it is transparent, which is why nothing looks letterboxed.
+    assert _alpha(fitted, 2, 150) == 0, "the spare room should be transparent"
+
+
+def test_a_portrait_matching_its_slot_is_unchanged_in_shape() -> None:
+    """Under Contract's 2:3 well already matches the filed cut-outs exactly."""
+    source = Image.new("RGBA", (600, 900), (10, 20, 30, 255))
+    raw = io.BytesIO()
+    source.save(raw, format="PNG")
+
+    fitted = Image.open(io.BytesIO(fit_bounded_portrait_locally(raw.getvalue(), 200, 300)))
+
+    assert fitted.size == (200, 300)
+    assert _alpha(fitted, 100, 0) == 255
+    assert _alpha(fitted, 100, 299) == 255

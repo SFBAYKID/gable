@@ -520,10 +520,20 @@ def _fit_portrait_unlocked(
     target_height: int,
     max_source_edge_px: int,
 ) -> bytes:
-    """Cover-fit a portrait to its slot while the caller holds the memory guard.
+    """Fit a whole portrait inside its slot while the caller holds the guard.
 
-    Identical geometry to ``_fit_locally_unlocked``; the difference is that
-    transparency survives and the result is PNG.
+    A property photo is cover-cropped: it must fill its band edge to edge and
+    the lawn is expendable. A person is not. New Listing with Open House draws
+    a square 233x233pt portrait well, the filed cut-outs are 600x900, and a
+    cover crop took 150 pixels off the top and bottom — which is the top of
+    Kirby-Jay John's head, reported by Chase on 2026-08-14.
+
+    So the portrait is contained rather than cropped: scaled until it fits
+    inside the frame, then placed on a fully transparent canvas of exactly the
+    frame's size. The cut-out's own background is transparent, so the space
+    either side is invisible on the flyer — nothing is letterboxed, and nobody
+    loses their head. It is anchored to the bottom because every one of these
+    designs stands the agent on the card's baseline.
     """
     with Image.open(io.BytesIO(image_bytes)) as opened:
         if opened.width * opened.height > MAX_SOURCE_PIXELS:
@@ -536,18 +546,15 @@ def _fit_portrait_unlocked(
         upright = ImageOps.exif_transpose(opened)
         im = upright if upright.mode == "RGBA" else upright.convert("RGBA")
 
-        source_aspect = im.width / im.height
-        target_aspect = target_width / target_height
-        if source_aspect > target_aspect:
-            new_width = round(im.height * target_aspect)
-            left = (im.width - new_width) // 2
-            box = (left, 0, left + new_width, im.height)
-        else:
-            new_height = round(im.width / target_aspect)
-            top = (im.height - new_height) // 2
-            box = (0, top, im.width, top + new_height)
-
-        resized = im.crop(box).resize((target_width, target_height), Image.Resampling.LANCZOS)
+        scale = min(target_width / im.width, target_height / im.height)
+        inner_width = max(1, min(target_width, round(im.width * scale)))
+        inner_height = max(1, min(target_height, round(im.height * scale)))
+        inner = im.resize((inner_width, inner_height), Image.Resampling.LANCZOS)
+        resized = Image.new("RGBA", (target_width, target_height), (0, 0, 0, 0))
+        resized.paste(
+            inner,
+            ((target_width - inner_width) // 2, target_height - inner_height),
+        )
         out = io.BytesIO()
         # No quality argument: PNG is lossless, and a matte here is what put a
         # white rectangle over the address panel.
