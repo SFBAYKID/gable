@@ -42,6 +42,7 @@ from typing import Any, Final
 from gable.slides import fields
 from gable.slides.designs import HERO_OBJECT_IDS
 from gable.slides.elements import text_content
+from gable.slides.framing import clear_of_neighbours
 
 #: How much of the slide width a photo well spans. Measured across all 45
 #: designs rather than assumed: this began at 0.60 on the belief that the hero
@@ -639,7 +640,17 @@ def headshot_frames(
         # the frame. Verified on a rendered flyer 2026-08-11.
         if _is_overlaid(page, candidate, _MAX_HEADSHOT_OVERLAP_FRACTION):
             continue
-        candidates.append(candidate)
+        neighbours = [
+            _element_bounds(other)
+            for other in page.get("pageElements", [])
+            if other.get("objectId") != candidate.object_id
+            and "elementGroup" not in other
+            and _axis_aligned_positive(other)
+        ]
+        clipped = clear_of_neighbours(
+            (candidate.x, candidate.y, candidate.width, candidate.height), neighbours
+        )
+        candidates.append(HeroFrame(candidate.object_id, *clipped))
     return tuple(sorted(candidates, key=lambda candidate: candidate.area, reverse=True))
 
 
