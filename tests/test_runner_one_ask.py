@@ -141,3 +141,30 @@ def test_a_flyer_fitted_from_a_small_photo_invites_a_better_one(
     )
     assert "did my best to fit this image" in message
     assert "higher-quality version" in message
+
+
+# --- values are filled the way the design draws them ------------------------
+
+
+def test_square_footage_drops_a_unit_the_design_already_draws() -> None:
+    """Every design puts the number beside its own ft² icon and Sq FT label."""
+    from gable.pipeline.run_values import _measure_only
+
+    assert _measure_only("1450 sq ft") == "1450"
+    assert _measure_only("2,430 Sq FT") == "2,430"
+    assert _measure_only("1450") == "1450"
+
+
+def test_a_value_with_no_digits_is_left_as_the_person_typed_it() -> None:
+    from gable.pipeline.run_values import _measure_only
+
+    assert _measure_only("unknown") == "unknown"
+
+
+def test_the_agent_title_carries_no_credential_mark() -> None:
+    """New Listing draws its own superscript, so supplying one doubled it."""
+    from gable.pipeline.run_values import _title_word
+
+    assert _title_word("REALTOR®") == "REALTOR"
+    assert _title_word("Realtor ®") == "Realtor"
+    assert _title_word("Associate Broker") == "Associate Broker"

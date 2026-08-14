@@ -15,7 +15,8 @@ from __future__ import annotations
 
 from typing import Any
 
-from gable.slides.hero import HERO_OBJECT_IDS, find_hero_frame
+from gable.slides.designs import HERO_OBJECT_IDS, extra_deletions
+from gable.slides.hero import find_hero_frame
 
 SLIDE_WIDTH = 10287000
 SLIDE_HEIGHT = 12852400
@@ -136,3 +137,36 @@ def test_the_photo_still_reaches_the_bottom_of_the_well() -> None:
     well_bottom = 1791425 + 6781440
     assert frame.y + frame.height > guide_bottom
     assert frame.y + frame.height == well_bottom
+
+
+def test_new_listing_also_removes_its_second_photo_layer() -> None:
+    """Its photograph is two shapes; replacing one left two houses stacked."""
+    page: dict[str, Any] = {
+        "pageElements": [
+            _shape("p1_i90", 0, 144759, 10287000, 4853494),
+            _shape("p1_i92", 0, 1575881, 10287000, 4721003),
+        ]
+    }
+
+    assert extra_deletions(page, "New Listing", "p1_i92") == ("p1_i90",)
+
+
+def test_a_design_with_one_photo_layer_deletes_nothing_extra() -> None:
+    """Sold's second shape is the white panel behind the logo. Never delete it."""
+    page: dict[str, Any] = {"pageElements": [LOGO, GUIDE, WELL]}
+
+    assert extra_deletions(page, "Sold", "p1_i87") == ()
+    assert extra_deletions(page, "Under Contract", "p1_i88") == ()
+
+
+def test_an_absent_extra_layer_is_skipped_rather_than_requested() -> None:
+    """A redesigned template must not be sent a delete for a missing shape."""
+    page: dict[str, Any] = {"pageElements": [_shape("p1_i92", 0, 1575881, 10287000, 4721003)]}
+
+    assert extra_deletions(page, "New Listing", "p1_i92") == ()
+
+
+def test_the_well_is_never_returned_as_an_extra_deletion() -> None:
+    page: dict[str, Any] = {"pageElements": [_shape("p1_i90", 0, 144759, 10287000, 4853494)]}
+
+    assert extra_deletions(page, "New Listing", "p1_i90") == ()

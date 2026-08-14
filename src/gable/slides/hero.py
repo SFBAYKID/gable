@@ -40,6 +40,7 @@ from dataclasses import dataclass
 from typing import Any, Final
 
 from gable.slides import fields
+from gable.slides.designs import HERO_OBJECT_IDS
 from gable.slides.elements import text_content
 
 #: How much of the slide width a photo well spans. Measured across all 45
@@ -262,36 +263,6 @@ def _is_filled(element: dict[str, Any]) -> bool:
         return False
     return any(key in fill for key in ("solidFill", "gradientFill", "stretchedPictureFill"))
 
-
-#: The photo well for each Carmen-maintained design, where the geometric search
-#: cannot choose. Every PPTX import carries a second unfilled, untexted shape
-#: overlapping the photo band, so `find_hero_frame` sees two candidates and
-#: correctly refuses. The second shape is *not* disposable: deleting Sold's
-#: removed the white panel behind the Corner House logo and left it washed out
-#: over the brickwork.
-#:
-#: An earlier generation of hand-read ids was abandoned because one of three was
-#: wrong. These are different in the ways that caused that: there are six
-#: designs rather than forty-five, and each id was measured against that
-#: template's own render rather than read by eye — the rejected candidate in
-#: four cases contains 9-20% near-white pixels because it also covers the logo
-#: strip, while the chosen one is pure photograph.
-#:
-#: These name the shape to REPLACE — the one carrying the design's sample
-#: photograph. Where the new image is drawn can be a smaller rectangle inside
-#: it; see `_placement_guide`.
-#:
-#: This is a hint, never an authority. `find_hero_frame` re-measures the named
-#: shape and falls back to the geometric search when it is absent or implausible,
-#: so a redesigned template degrades to "ask" rather than to a wrong frame.
-HERO_OBJECT_IDS: Final[dict[str, str]] = {
-    "sold": "p1_i87",
-    "under contract": "p1_i88",
-    "open house": "p1_i104",
-    "new listing": "p1_i92",
-    "new listing with open house": "p1_i92",
-    "client review post": "p1_i90",
-}
 
 #: An imported well can extend behind the design's own furniture — Under
 #: Contract's runs 95,212 EMU up behind the Corner House logo. The source gets

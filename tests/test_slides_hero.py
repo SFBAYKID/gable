@@ -4,7 +4,8 @@ from __future__ import annotations
 
 from typing import Any
 
-from gable.slides.hero import HERO_OBJECT_IDS, find_hero_frame, headshot_frames
+from gable.slides.designs import HERO_OBJECT_IDS
+from gable.slides.hero import find_hero_frame, headshot_frames
 
 #: The live Sold page, measured 2026-08-13.
 SLIDE_WIDTH: float = 10_287_000.0

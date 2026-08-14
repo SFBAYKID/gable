@@ -110,7 +110,7 @@ def test_mike_sold_text_autofits_in_slides_and_still_reads_back(
         ),
         fitting.TextBox(
             "sold-agent-title",
-            "REALTOR®",
+            "REALTOR",
             23.95,
             80.30 * fitting.EMU_PER_POINT,
         ),
@@ -150,7 +150,7 @@ def test_mike_sold_text_autofits_in_slides_and_still_reads_back(
     assert rec.output_text == [
         "703 Perception Way, Aberdeen, MD 21001",
         "Mike Kulnich",
-        "REALTOR®",
+        "REALTOR",
         "410.456.3564",
         "mike@cornerhouserealty.com",
     ]
@@ -162,7 +162,9 @@ def test_mike_sold_text_autofits_in_slides_and_still_reads_back(
     sizes = {
         update["objectId"]: float(update["style"]["fontSize"]["magnitude"]) for update in updates
     }
-    assert sizes == {"sold-agent-title": 14.93, "sold-agent-phone": 13.13}
+    # The title shrinks less than it used to: it is filled as the word alone,
+    # because every design draws its own credential mark where it wants one.
+    assert sizes == {"sold-agent-title": 16.65, "sold-agent-phone": 13.13}
     assert inspected == [paused.run_id]
     assert store.run_attempt_count(db, item.response_row_id) == 1
     assert len(result.said) == 1

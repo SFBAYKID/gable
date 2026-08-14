@@ -38,6 +38,7 @@ from gable.pipeline.vision import Inspection
 from gable.pipeline.vision import inspect as inspect_flyer
 from gable.slides import fields as template_fields
 from gable.slides import preflight
+from gable.slides.designs import extra_deletions
 from gable.slides.elements import descendants, text_content
 from gable.slides.hero import find_hero_frame, headshot_frames
 from gable.slides.library import list_files as list_template_files
@@ -221,8 +222,16 @@ def place_hero_photo(
         if z_order is None:
             logger.error("hero photo placement could not preserve the measured layer order")
             return False
+        # A design whose sample photograph is split across more than one shape
+        # keeps showing the rest of it when only the well is replaced.
+        also_delete = extra_deletions(page, template_label, target_id)
+        if also_delete:
+            logger.info(
+                "removing %d extra sample photo layer(s) from %s", len(also_delete), template_label
+            )
         requests: list[dict[str, Any]] = [
             {"deleteObject": {"objectId": target_id}},
+            *({"deleteObject": {"objectId": extra}} for extra in also_delete),
             {
                 "createImage": {
                     "objectId": hero_id,

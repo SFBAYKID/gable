@@ -27,6 +27,48 @@ def _city_of(address: str) -> str:
     return parts[1] if len(parts) >= 2 else ""
 
 
+def _measure_only(square_feet: str) -> str:
+    """Return just the number, because the design draws its own unit.
+
+    Every design puts square footage beside a ft² icon and its own "Sq FT"
+    label, so a value carrying the unit renders as "1450 sq ft" next to a
+    square-foot symbol. A person answering Gable's question types the unit
+    naturally — "1450 sq ft" — and that is not something to correct back at
+    them, so it is normalised here instead.
+
+    Args:
+        square_feet: The value as supplied or researched.
+
+    Returns:
+        The digits and separators only, or the original text when it contains
+        no digits at all — better to show what someone typed than nothing.
+
+    Raises:
+        Nothing.
+    """
+    kept = "".join(
+        character for character in square_feet if character.isdigit() or character == ","
+    )
+    return kept.strip(",") or square_feet.strip()
+
+
+def _title_word(title: str) -> str:
+    """Return an agent title without its credential mark.
+
+    Args:
+        title: The proven title, e.g. `REALTOR®`.
+
+    Returns:
+        The same title with the registered and trademark symbols removed and
+        surrounding space tidied.
+
+    Raises:
+        Nothing.
+    """
+    stripped = title.replace("®", "").replace("™", "")
+    return " ".join(stripped.split())
+
+
 def for_intake(
     connection: Connection,
     intake: Intake,
@@ -45,7 +87,7 @@ def for_intake(
         or (known.get("list_price", "") if intake.accepts_public_list_price else ""),
         "beds": known.get("beds", ""),
         "baths": known.get("baths", ""),
-        "square_feet": known.get("square_feet", ""),
+        "square_feet": _measure_only(known.get("square_feet", "")),
         "agent_name": name or intake.agent_name,
         # A missing direct line stays missing. Preflight asks when the selected
         # design has a phone field; silently substituting the brokerage office
@@ -109,7 +151,13 @@ def assembled(
             "agent_name": agent_name,
             "agent_email": agent_email,
             "agent_phone": agent_phone,
-            "agent_title": agent_title,
+            # The word only. Every design already sets its own credential mark
+            # exactly where it wants one — New Listing draws a superscript ®
+            # beside REALTOR, Under Contract prints none — so supplying the
+            # symbol produced "Realtor® ®" on the first and added a mark the
+            # second never had. The design decides the styling; Gable supplies
+            # the word.
+            "agent_title": _title_word(agent_title),
         }
     )
     values["address"] = normalise_address(values.get("address", ""))

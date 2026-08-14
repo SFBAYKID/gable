@@ -178,7 +178,9 @@ def test_sold_title_is_validated_from_official_profile_before_the_photo_question
     result = runner.run(submission)
 
     assert result.status == "needs_photo"
-    assert captured["agent_title"] == "REALTOR®"
+    # The word only: every design draws its own credential mark where it wants
+    # one, so supplying the symbol doubled it on New Listing.
+    assert captured["agent_title"] == "REALTOR"
     assert calls == [("Mike Kulnich", "mike@cornerhouserealty.com")]
     events = db.execute(
         "SELECT detail FROM run_events WHERE run_id = ? ORDER BY id", (result.run_id,)
