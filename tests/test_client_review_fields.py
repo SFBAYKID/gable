@@ -77,3 +77,46 @@ def test_every_real_person_on_the_design_is_replaced() -> None:
     assert pairs["443-499-3839"] == "410.218.2786"
     assert pairs["sebastian@cornerhouserealty.com"] == "andy@cornerhouserealty.com"
     assert pairs["OLIVIA WILSON"] == "Sarah Whitfield"
+
+
+# --- reading the reviewer's name out of what an agent typed -----------------
+
+
+def test_a_named_attribution_is_read_rather_than_asked_about() -> None:
+    """"Sarah Whitfield said: ..." says whose words follow. That is not a guess."""
+    from gable.listings.review import parse_review
+
+    found = parse_review(
+        "Sarah Whitfield said: Andy made our first purchase painless. He answered "
+        "every question the same day and negotiated a price we did not think we could get."
+    )
+
+    assert found.client_name == "Sarah Whitfield"
+    assert found.quote.startswith("Andy made our first purchase painless.")
+    assert found.is_usable
+
+
+def test_the_agent_being_praised_is_never_taken_as_the_reviewer() -> None:
+    """"Gina was outstanding" names the agent, not the person reviewing her."""
+    from gable.listings.review import parse_review
+
+    found = parse_review(
+        "In a simple word, Gina was outstanding! My sister needed to sell, but she "
+        "suffers from dementia and the whole thing was handled with real care."
+    )
+
+    assert found.client_name == "", "a name in the body is not an attribution"
+
+
+def test_the_name_on_its_own_line_still_works() -> None:
+    """The shape the real submissions use."""
+    from gable.listings.review import parse_review
+
+    found = parse_review(
+        "Google review for SRES listing, 29 Maple\nRob Morgan\n\n"
+        "In a simple word, Gina was outstanding! My sister needed to sell and the "
+        "whole thing was handled with real care from start to finish."
+    )
+
+    assert found.client_name == "Rob Morgan"
+    assert found.quote.startswith("In a simple word")

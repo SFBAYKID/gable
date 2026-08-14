@@ -36,6 +36,16 @@ _NAME_LINE: Final[re.Pattern[str]] = re.compile(
     "^[A-Z][a-zA-Z'\u2019\\-]+(?:\\s+[A-Z][a-zA-Z'\u2019\\-]+){1,2}$"
 )
 
+#: "Sarah Whitfield said: ..." — the reviewer named inline, followed by their
+#: words. Unambiguous in a way that "Gina was outstanding" is not, because the
+#: sentence itself says whose words follow.
+_ATTRIBUTION: Final[re.Pattern[str]] = re.compile(
+    # \u2019 spelled as an escape, for the reason given on _NAME_LINE above.
+    "^(?P<name>[A-Z][a-zA-Z'\u2019\\-]+(?:\\s+[A-Z][a-zA-Z'\u2019\\-]+){1,2})"
+    r"\s+(?:said|wrote|says)\s*[:,-]?\s*(?P<quote>.+)$",
+    re.DOTALL,
+)
+
 #: Below this a "review" is a fragment rather than something worth setting in a
 #: quote panel.
 _MIN_QUOTE_CHARS: Final[int] = 40
@@ -97,6 +107,15 @@ def parse_review(text: str) -> Review:
         would find the agent being praised — "Gina was outstanding" — and put the
         agent's name where the client's belongs.
     """
+    # "Sarah Whitfield said: ..." is the one inline shape that names the
+    # reviewer without ambiguity — the words after it are explicitly hers, so
+    # reading it is not a guess. Anything vaguer still falls through to the
+    # name-on-its-own-line rule and then to a question.
+    attributed = _ATTRIBUTION.match(text.strip())
+    if attributed:
+        quote = " ".join(attributed.group("quote").split()).strip().strip('"“”')
+        return Review(client_name=attributed.group("name").strip(), quote=quote)
+
     lines = [line.strip() for line in text.splitlines()]
     name = ""
     name_index = -1
