@@ -56,11 +56,13 @@ def _title_word(title: str) -> str:
     """Return an agent title without its credential mark.
 
     Args:
-        title: The proven title, e.g. `REALTOR®`.
+        title: The proven title, e.g. `REALTOR®` or
+            `REALTOR®, The Kulnich Home Team`.
 
     Returns:
         The same title with the registered and trademark symbols removed and
-        surrounding space tidied.
+        surrounding space tidied. Nothing else is dropped: a title naming a team
+        keeps the team, because that is what the agent's own profile says.
 
     Raises:
         Nothing.
@@ -151,12 +153,14 @@ def assembled(
             "agent_name": agent_name,
             "agent_email": agent_email,
             "agent_phone": agent_phone,
-            # The word only. Every design already sets its own credential mark
-            # exactly where it wants one — New Listing draws a superscript ®
+            # Without its credential mark. Every design already sets one
+            # exactly where it wants it — New Listing draws a superscript ®
             # beside REALTOR, Under Contract prints none — so supplying the
             # symbol produced "Realtor® ®" on the first and added a mark the
-            # second never had. The design decides the styling; Gable supplies
-            # the word.
+            # second never had. The rest of the title is passed through as the
+            # profile states it: "REALTOR®, The Kulnich Home Team" becomes
+            # "REALTOR, The Kulnich Home Team", which is why a long title can
+            # be too wide for a slot drawn for one word.
             "agent_title": _title_word(agent_title),
         }
     )
