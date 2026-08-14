@@ -19,7 +19,9 @@ design.
 can be exercised across many agents without a person uploading the same image
 into forty threads. **It is not how a listing gets its photo.** In real use the
 photograph is the one thing a person chooses, and Gable asks for it in the
-thread; this flag exists so the renderer can be tested at breadth.
+thread; this flag exists so the renderer can be tested at breadth. The photo is
+recorded on the run, so answering a question it asks resumes with the same
+photograph rather than asking for the image next.
 """
 
 from __future__ import annotations
@@ -335,6 +337,19 @@ def main(argv: list[str] | None = None) -> int:
                 hero_photo_url=args.hero_photo_url,
             )
             result = runner.run(submission)
+            if args.hero_photo_url and result.needs_a_human:
+                # Keep the supplied photo with the run. Without this the run
+                # holds it only in memory, so answering the question it asked
+                # resumes a run that no longer has a photograph and it asks for
+                # the image next — which is not what the thread contract says
+                # happens after you answer.
+                store.set_status(
+                    connection,
+                    result.run_id,
+                    result.status,
+                    "recorded the photo supplied on the command line",
+                    photo_url=args.hero_photo_url,
+                )
         logger.info("run %s finished as %s", result.run_id, result.status)
         for spoken in result.said:
             print(spoken)
