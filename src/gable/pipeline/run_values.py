@@ -52,6 +52,41 @@ def _measure_only(square_feet: str) -> str:
     return kept.strip(",") or square_feet.strip()
 
 
+#: Longer than this and what the agent typed is marketing prose, not a note
+#: about the deal. Under Contract's callout panel is 160x99pt: a sentence fits
+#: there, a paragraph would be shrunk to something nobody can read.
+_MAX_NOTE_CHARS: Final[int] = 120
+
+#: What agents type into the details column when they have nothing to say.
+_EMPTY_NOTES: Final[frozenset[str]] = frozenset({"na", "n/a", "none", "no", "nothing", "-"})
+
+
+def _listing_note(intake: Intake) -> str:
+    """The submission's own short note about the deal, or nothing.
+
+    Only a design that draws a note panel has anywhere to put this, and only
+    `slides.fields` decides which designs those are. This just says whether the
+    agent wrote something worth printing.
+
+    Args:
+        intake: The parsed row.
+
+    Returns:
+        The note as one line, or empty when the agent left the column blank,
+        dismissed it, or wrote a full marketing paragraph. A review's prose is
+        never a note — it is the review, and `review_values` owns it.
+
+    Raises:
+        Nothing.
+    """
+    if "review" in intake.request_type.lower():
+        return ""
+    note = " ".join(intake.post_details.split())
+    if not note or note.strip(" .").casefold() in _EMPTY_NOTES:
+        return ""
+    return note if len(note) <= _MAX_NOTE_CHARS else ""
+
+
 def _title_word(title: str) -> str:
     """Return an agent title without its credential mark.
 
@@ -105,6 +140,7 @@ def for_intake(
         "agent_title": "",
         "social_handle": DEFAULT_SOCIAL_HANDLE,
         "neighborhood": _city_of(intake.address),
+        "listing_note": _listing_note(intake),
         **review_values(intake.request_type, intake.post_details or intake.extra_notes),
     }
 

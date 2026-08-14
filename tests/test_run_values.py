@@ -87,3 +87,78 @@ def test_a_listing_request_may_use_a_verified_public_list_price(tmp_path: Path) 
 
     assert values["price"] == "$515,000"
     connection.close()
+
+
+def _note_intake(request_type: str, post_details: str) -> Intake:
+    """An intake carrying one request type and one details column."""
+    return Intake(
+        agent_email="agent@example.com",
+        agent_name="Avery Agent",
+        request_type=request_type,
+        address="1 Main St, Baltimore, MD 21201",
+        post_details=post_details,
+        open_house="",
+        new_price="",
+        closing_price="",
+        extra_notes="",
+        side="Buyer",
+        notes="",
+    )
+
+
+def test_a_short_deal_note_reaches_the_designs_note_panel(tmp_path: Path) -> None:
+    connection = connect(tmp_path / "gable.db")
+    apply_migrations(connection)
+
+    values = for_intake(
+        connection,
+        _note_intake(
+            "Under Contract", "Under contract on the buyer side. Multiple offer situation."
+        ),
+        {},
+    )
+
+    assert values["listing_note"] == "Under contract on the buyer side. Multiple offer situation."
+    connection.close()
+
+
+def test_a_dismissed_details_column_is_not_printed_as_a_note(tmp_path: Path) -> None:
+    connection = connect(tmp_path / "gable.db")
+    apply_migrations(connection)
+
+    for written in ("", "Na", "n/a ", "None."):
+        values = for_intake(connection, _note_intake("Under Contract", written), {})
+        assert values["listing_note"] == "", written
+    connection.close()
+
+
+def test_marketing_prose_is_not_squeezed_into_a_note_panel(tmp_path: Path) -> None:
+    connection = connect(tmp_path / "gable.db")
+    apply_migrations(connection)
+    prose = (
+        "Move right in! This freshly updated 3-bedroom townhouse offers exceptional "
+        "value in sought-after Howard County, with fresh paint throughout and new carpet."
+    )
+
+    values = for_intake(connection, _note_intake("New Listing", prose), {})
+
+    assert values["listing_note"] == ""
+    connection.close()
+
+
+def test_a_reviews_prose_is_its_quote_and_never_a_note(tmp_path: Path) -> None:
+    connection = connect(tmp_path / "gable.db")
+    apply_migrations(connection)
+
+    values = for_intake(
+        connection,
+        _note_intake(
+            "Client Review Post",
+            "Rob Morgan\n\nGina was outstanding from the first showing through to settlement.",
+        ),
+        {},
+    )
+
+    assert values["listing_note"] == ""
+    assert values["client_name"] == "Rob Morgan"
+    connection.close()

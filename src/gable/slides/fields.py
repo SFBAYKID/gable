@@ -250,6 +250,17 @@ PATTERNS: Final[dict[str, tuple[re.Pattern[str], ...]]] = {
         # authoritative contact record supplies no title at all.
         re.compile(r"^REALTOR(?:®)?$", re.IGNORECASE),
     ),
+    "listing_note": (
+        # Under Contract's call-to-action panel, and the only free text block
+        # anywhere in that design's Under Contract band. Chase asked on
+        # 2026-08-14 for a submission's own note about the deal — "Under
+        # contract on the buyer side. Multiple offer situation." — to appear in
+        # that section, and this is where it fits. With no note supplied the
+        # value is empty, `replacements` skips it, and the design keeps its own
+        # words.
+        re.compile(r"^Ready to Buy\?\s+DM me to find your next home\.$", re.IGNORECASE),
+        re.compile(r"^\[\s*NOTE\s*\]$", re.IGNORECASE),
+    ),
     "social_handle": (
         # A stock handle from the design's own sample content. Pointing a real
         # flyer at somebody else's account is the same class of problem as
