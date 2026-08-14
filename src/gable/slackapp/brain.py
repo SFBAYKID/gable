@@ -308,31 +308,46 @@ TOOLS: Final[list[dict[str, Any]]] = [
         "function": {
             "name": "supply_listing_value",
             "description": (
-                "Record a listing detail the person states in answer to a question Gable "
-                "asked, then continue the paused run. Use this whenever they give a price, "
-                "square footage, bed or bath count, or an open-house date and time — "
-                "'List price is $200,000', '2000 sq feet', 'Sunday 2-4pm'. Only for a "
-                "value Gable asked for; never for a value nobody requested."
+                "Record the listing details the person states in answer to Gable's one "
+                "question, then continue the paused run. Use this whenever they give a "
+                "price, square footage, bed or bath count, or an open-house date and time "
+                "— 'List price is $200,000', '2000 sq feet', 'Sunday 2-4pm'. Gable asks "
+                "for everything at once, so ONE reply usually carries several answers: "
+                "'3 beds, 2 baths, $600,000' is a single call listing all three. Record "
+                "every value they gave in that one call and omit anything they did not "
+                "mention; never invent a value nobody stated."
             ),
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "field": {
-                        "type": "string",
-                        "enum": [
-                            "list_price",
-                            "square_feet",
-                            "beds",
-                            "baths",
-                            "open_house",
-                        ],
-                    },
-                    "value": {
-                        "type": "string",
-                        "description": "Exactly what they said, such as '$200,000' or '2,000'.",
+                    "values": {
+                        "type": "array",
+                        "description": "Every detail stated in this reply.",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "field": {
+                                    "type": "string",
+                                    "enum": [
+                                        "list_price",
+                                        "square_feet",
+                                        "beds",
+                                        "baths",
+                                        "open_house",
+                                    ],
+                                },
+                                "value": {
+                                    "type": "string",
+                                    "description": (
+                                        "Exactly what they said, such as '$200,000' or '2,000'."
+                                    ),
+                                },
+                            },
+                            "required": ["field", "value"],
+                        },
                     },
                 },
-                "required": ["field", "value"],
+                "required": ["values"],
             },
         },
     },
@@ -444,6 +459,43 @@ def _provider_unavailable() -> Decision:
             "was unavailable. I did not change the flyer. Try again."
         )
     )
+
+
+def stated_values(arguments: dict[str, Any]) -> list[tuple[str, str]]:
+    """Read every listing value out of one `supply_listing_value` call.
+
+    Gable asks for everything at once, so one reply routinely answers several
+    questions and the tool takes a list. The older single-field shape is still
+    accepted, because a decision persisted before this change must not be read
+    as an empty answer.
+
+    Args:
+        arguments: The tool call's arguments, exactly as the model returned them.
+
+    Returns:
+        Field-and-value pairs, in the order stated, with blanks and duplicate
+        fields dropped. Empty when nothing usable was supplied.
+
+    Raises:
+        Nothing. A malformed entry is skipped rather than discarding the values
+        beside it that the person did take the trouble to send.
+    """
+    entries = arguments.get("values")
+    if not isinstance(entries, list):
+        single = (str(arguments.get("field") or ""), str(arguments.get("value") or ""))
+        return [single] if all(single) else []
+    stated: list[tuple[str, str]] = []
+    seen: set[str] = set()
+    for entry in entries:
+        if not isinstance(entry, dict):
+            continue
+        name = str(entry.get("field") or "").strip()
+        value = str(entry.get("value") or "").strip()
+        if not name or not value or name in seen:
+            continue
+        seen.add(name)
+        stated.append((name, value))
+    return stated
 
 
 def think(

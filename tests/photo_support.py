@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import io
 import sqlite3
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -123,6 +124,7 @@ def _handoff(
     path: Path,
     seen: list[str],
     image: bytes | None = None,
+    record_caption: Callable[[sqlite3.Connection, str, str], int] | None = None,
 ) -> PhotoHandoff:
     supplied = image if image is not None else _jpeg()
 
@@ -148,6 +150,7 @@ def _handoff(
         download=lambda _url, _token, _limit: supplied,
         publish=lambda _root, _base, fitted: PUBLIC_URL if fitted else "",
         verify=lambda _url: (True, "image/jpeg"),
+        record_caption=record_caption or (lambda _connection, _address, _text: 0),
     )
 
 

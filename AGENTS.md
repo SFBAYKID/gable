@@ -395,6 +395,22 @@ reloads the current source and continues a paused listing. “Update the image�
 is ambiguous and gets a clarifying question. Polling, retry counters, template
 inventory, and service controls are implementation details, not user commands.
 
+**“Run it again” works after the link, too.** A delivered run is finished, but
+it is not closed: the request reopens it, reloads the form row, contact record
+and design, and builds it again with whatever is now known. Three shapes all
+work, and none of them opens a second attempt against the listing's limit:
+
+- *“Run it again.”* — rebuild from the current sources.
+- *“Run it again, the price is $600,000.”* — the value is recorded first, so the
+  rebuild uses it.
+- A **new image** with *“run it again”* — the photograph is replaced and the
+  flyer rebuilt. The words are required: an image dropped into a finished thread
+  with anything else said about it leaves the flyer alone, because an accidental
+  upload must not silently replace something Carmen has already approved.
+
+Each rebuild renders a new Slides file and links it; the previous one is left
+untouched rather than edited underneath her.
+
 The mention, thread-reply, and shared-photo boundaries accept only the two
 configured stable Slack user IDs for Carmen and Chase. A display name is never
 an access check.

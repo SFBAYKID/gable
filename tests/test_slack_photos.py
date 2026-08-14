@@ -558,3 +558,112 @@ def test_a_publish_failure_reports_server_repair_not_a_bad_image(tmp_path: Path)
     run = store.latest_run(connection, "response-1")
     assert run is not None and run.status == "needs_photo"
     connection.close()
+
+
+def test_values_sent_with_the_photo_are_recorded_before_the_run_resumes(
+    tmp_path: Path,
+) -> None:
+    """Gable asks for the photo and the values together, so one reply carries both.
+
+    The caption used to be discarded outright, and the flyer built with
+    placeholders for values the person had just supplied.
+    """
+    path = tmp_path / "gable.db"
+    _paused_database(path)
+    seen: list[str] = []
+    captions: list[tuple[str, str]] = []
+
+    def record(_connection: sqlite3.Connection, address: str, text: str) -> int:
+        # Ordering is the point: the values must be stored before the resume
+        # that builds with them.
+        assert seen == [], "the caption is read before the run is resumed"
+        captions.append((address, text))
+        return 2
+
+    handoff = _handoff(path, seen, record_caption=record)
+
+    handoff.handle(_event(text="3 beds, 2 baths"), FakeSlackClient())
+
+    assert [text for _address, text in captions] == ["3 beds, 2 baths"]
+    assert seen, "the run still resumed after the caption was read"
+
+
+def test_a_caption_with_no_number_costs_no_paid_call(tmp_path: Path) -> None:
+    path = tmp_path / "gable.db"
+    _paused_database(path)
+    calls: list[str] = []
+
+    def record(_connection: sqlite3.Connection, _address: str, text: str) -> int:
+        calls.append(text)
+        return 0
+
+    _handoff(path, [], record_caption=record).handle(
+        _event(text="here you go"), FakeSlackClient()
+    )
+
+    assert calls == []
+
+
+def test_a_caption_that_cannot_be_read_never_costs_the_photograph(
+    tmp_path: Path,
+) -> None:
+    """The upload is the thing that matters; reading its caption is a bonus."""
+    path = tmp_path / "gable.db"
+    run_id = _paused_database(path)
+    seen: list[str] = []
+
+    def explode(_connection: sqlite3.Connection, _address: str, _text: str) -> int:
+        raise RuntimeError("the conversational model was unavailable")
+
+    _handoff(path, seen, record_caption=explode).handle(
+        _event(text="3 beds, 2 baths"), FakeSlackClient()
+    )
+
+    connection = connect(path)
+    run = store.latest_run(connection, "response-1")
+    assert run is not None and run.status == "delivered"
+    assert seen == ["response-1", run_id]
+    connection.close()
+
+
+def _deliver(path: Path, run_id: str) -> None:
+    """Finish the run, as a completed flyer would."""
+    connection = connect(path)
+    store.set_status(connection, run_id, "delivered", "flyer delivered")
+    connection.close()
+
+
+def test_a_new_image_and_a_plain_request_rebuild_a_delivered_flyer(
+    tmp_path: Path,
+) -> None:
+    """Chase's rule: send a new image, say run it again, and Gable does."""
+    path = tmp_path / "gable.db"
+    run_id = _paused_database(path)
+    _deliver(path, run_id)
+    seen: list[str] = []
+
+    _handoff(path, seen).handle(
+        _event(text="run it again", client_msg_id="again-1"), FakeSlackClient()
+    )
+
+    assert seen == ["response-1", run_id], "the same run rebuilt, not a new attempt"
+    connection = connect(path)
+    assert store.run_attempt_count(connection, "response-1") == 1
+    connection.close()
+
+
+def test_an_image_dropped_into_a_finished_thread_changes_nothing(
+    tmp_path: Path,
+) -> None:
+    """Requiring the words is what stops an accidental upload rebuilding it."""
+    path = tmp_path / "gable.db"
+    run_id = _paused_database(path)
+    _deliver(path, run_id)
+    seen: list[str] = []
+
+    said = _handoff(path, seen).handle(
+        _event(text="nice one", client_msg_id="stray-1"), FakeSlackClient()
+    )
+
+    assert seen == [], "nothing was rebuilt"
+    assert "not waiting for a photo" in said

@@ -390,6 +390,7 @@ gable/
 │   │   ├── library.py           # current Generic Templates contents
 │   │   └── edit_common.py       # shared colours, guards, request type
 │   ├── slackapp/
+│   │   ├── answers.py           # record stated values, from a reply or a caption
 │   │   ├── app.py               # Socket Mode listener
 │   │   ├── batches.py           # ready-only multi-listing summary
 │   │   ├── brain.py             # reads intent, picks a tool, asks when unsure

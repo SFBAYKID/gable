@@ -569,3 +569,79 @@ def blanks_approved(connection: sqlite3.Connection, run_id: str) -> bool:
     if not row:
         return False
     return BUILD_WITH_BLANKS in str(row["approved_warning_codes"] or "").split(",")
+
+
+def reopen_for_rebuild(
+    connection: sqlite3.Connection,
+    run_id: str,
+    action_id: str,
+    thread_ts: str,
+) -> bool:
+    """Atomically return a finished run to a state its own thread can rebuild.
+
+    A delivered run is terminal, so `claim_paused_run` refuses it and "run it
+    again" answered "this listing is already being rechecked" — the one thing
+    Carmen is most likely to ask for after reading a flyer. This moves it back
+    to a human-owned pause inside the same transaction as its event claim, so a
+    duplicate Slack delivery cannot rebuild the same flyer twice.
+
+    Args:
+        connection: An open database connection.
+        run_id: The finished run being reopened.
+        action_id: Stable Slack identity of the request, for the claim.
+        thread_ts: The thread the request arrived in; it must be the run's own.
+
+    Returns:
+        True for the one caller that reopened it. False when the run is not
+        finished, belongs to another thread, or this request was already
+        handled.
+
+    Raises:
+        sqlite3.IntegrityError: if the claim is won and the transition is then
+            lost, which would mean two writers disagreed inside one savepoint.
+    """
+    clean_action_id = action_id.strip()
+    root = thread_ts.strip()
+    if not clean_action_id or not root:
+        return False
+    with _transition(connection):
+        run = connection.execute(
+            "SELECT status, slack_thread_ts FROM runs WHERE run_id = ?",
+            (run_id,),
+        ).fetchone()
+        if (
+            run is None
+            or str(run["status"]) not in {"delivered", "needs_review"}
+            or str(run["slack_thread_ts"] or "") != root
+        ):
+            return False
+        claimed = connection.execute(
+            """
+            INSERT OR IGNORE INTO slack_event_claims (
+                route, event_id, subject_id, thread_ts, fingerprint, claimed_at
+            ) VALUES ('run_action', ?, ?, ?, 'rebuild:again', ?)
+            """,
+            (clean_action_id, run_id, root, _now()),
+        )
+        if claimed.rowcount != 1:
+            return False
+        now = _now()
+        # needs_review is the paused state meaning "a person owns this now".
+        # The run sits here only until the caller claims it in the same request.
+        changed = connection.execute(
+            "UPDATE runs SET status = 'needs_review', updated_at = ?, failure_reason = '' "
+            "WHERE run_id = ? AND status IN ('delivered', 'needs_review')",
+            (now, run_id),
+        )
+        if changed.rowcount != 1:
+            raise sqlite3.IntegrityError("the rebuild request lost its run claim")
+        connection.execute(
+            "INSERT INTO run_events (run_id, at, status, detail) VALUES (?,?,?,?)",
+            (run_id, now, "needs_review", "reopened to build this flyer again"),
+        )
+        connection.execute(
+            "UPDATE slack_event_claims SET completed_at = ?, detail = ? "
+            "WHERE route = 'run_action' AND event_id = ? AND subject_id = ?",
+            (now, "run reopened for a rebuild", clean_action_id, run_id),
+        )
+    return True

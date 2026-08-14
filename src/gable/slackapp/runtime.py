@@ -36,6 +36,7 @@ from gable.pipeline.template_vision import inspect_source_template
 from gable.runtime import RuntimeComponents, serve
 from gable.sheets import repository as repo
 from gable.sheets.client import SheetClient
+from gable.slackapp.answers import record_stated
 from gable.slackapp.app import build_app
 from gable.slackapp.batches import summarize as summarize_batch
 from gable.slackapp.brain import Decision, think
@@ -246,6 +247,30 @@ def build_components(settings: Settings) -> RuntimeComponents:
             reconcile=reconcile_slack,
         )
 
+    def record_photo_caption(
+        caption_connection: Connection,
+        address: str,
+        text: str,
+    ) -> int:
+        """Store any listing values stated in the message carrying the photo.
+
+        Args:
+            caption_connection: The photo handoff's own open connection.
+            address: The freshly re-read property address to file them against.
+            text: The upload message's text.
+
+        Returns:
+            How many values were recorded.
+
+        Raises:
+            Nothing that should reach the upload path; the caller logs and
+            continues so a caption never costs Carmen her photograph.
+        """
+        decision = guarded_think(text)
+        if decision.tool != "supply_listing_value":
+            return 0
+        return record_stated(caption_connection, address, decision.arguments)
+
     photo_handoff = PhotoHandoff(
         db_path=settings.db_path,
         bot_token=settings.slack_bot_token,
@@ -257,6 +282,7 @@ def build_components(settings: Settings) -> RuntimeComponents:
         runner_for=runner_for_photo,
         load_current=refresh_for_photo,
         deliver_notification=deliver_photo_notification,
+        record_caption=record_photo_caption,
     )
 
     def execute_action(
@@ -341,16 +367,14 @@ def build_components(settings: Settings) -> RuntimeComponents:
                     )
                 # The address comes from the freshly re-read row rather than a
                 # cached copy, so a stated fact is filed against the property
-                # the run is actually about.
-                try:
-                    store.remember_supplied_fact(
-                        action_connection,
-                        refreshed_submission.intake.address,
-                        str(decision.arguments.get("field") or ""),
-                        str(decision.arguments.get("value") or ""),
-                    )
-                except ValueError:
-                    logger.exception("a supplied listing value was refused before storage")
+                # the run is actually about. One reply answers the one batched
+                # question, so it routinely carries several values; every one of
+                # them is recorded before the run continues.
+                if not record_stated(
+                    action_connection,
+                    refreshed_submission.intake.address,
+                    decision.arguments,
+                ):
                     return (
                         "I did not understand that as one of the details I asked for, so I "
                         "have not recorded it."
@@ -447,6 +471,16 @@ def build_components(settings: Settings) -> RuntimeComponents:
                     refreshed = store.template_audit(action_connection, run.template_file_id)
                     if refreshed is None or refreshed.status != "ready":
                         return verdict
+                # A delivered run is terminal, so the claim below would refuse
+                # it and "run it again" — the most natural thing to ask after
+                # reading a flyer — would answer that nothing was waiting.
+                if run.status == "delivered" and not store.reopen_for_rebuild(
+                    action_connection,
+                    run.run_id,
+                    action_id,
+                    thread_ts,
+                ):
+                    return ""
                 return resume_with_current_sources(
                     settings=settings,
                     connection=action_connection,

@@ -30,6 +30,8 @@ from gable.photos.store import PublishError, publish_local, verify_public
 from gable.pipeline import questions as run_questions
 from gable.pipeline.runner import RunResult
 from gable.sheets import repository as repo
+from gable.slackapp.answers import carries_a_value
+from gable.slackapp.intents import asks_to_run_again
 from gable.slackapp.status import Working
 from gable.voice import safe
 
@@ -265,6 +267,15 @@ class PhotoHandoff:
     publish: Callable[[Path, str, bytes], str] = publish_local
     verify: Callable[[str], tuple[bool, str]] = verify_public
     deliver_notification: NotificationDelivery | None = None
+    #: Records listing values stated in the upload's own message, before the run
+    #: resumes and builds with them. Gable asks for the photo and the missing
+    #: values in one message, so the natural reply is one message carrying both;
+    #: without this, the caption was silently discarded and the flyer built with
+    #: placeholders for values the person had just supplied. Injected so this
+    #: module stays free of the conversational model.
+    record_caption: Callable[[sqlite3.Connection, str, str], int] = (
+        lambda _connection, _address, _text: 0
+    )
 
     def handle(
         self,
@@ -366,6 +377,20 @@ class PhotoHandoff:
             # recovered at startup rather than silently dropping Carmen's photo.
             with run_questions.run_question_guard(run.run_id):
                 current = store.run_by_id(connection, run.run_id)
+                # A finished flyer plus a new image and a plain request to run
+                # it again is a replacement, not a stray upload. Requiring the
+                # words keeps an image dropped into a delivered thread by
+                # accident from silently rebuilding what Carmen already has.
+                if (
+                    current is not None
+                    and current.status == "delivered"
+                    and asks_to_run_again(str(event.get("text") or ""))
+                    and store.prepare_photo_replacement_action(
+                        connection, current.run_id, event_id, thread_ts
+                    )
+                    is not None
+                ):
+                    current = store.run_by_id(connection, current.run_id)
                 waiting_for_photo = current is not None and (
                     current.status == "needs_photo"
                     or store.has_pending_photo_question(
@@ -409,6 +434,20 @@ class PhotoHandoff:
                     "I found the listing thread but not its request details, so I stopped there.",
                     "stored request details were unavailable",
                 )
+
+            # Answers sent with the photo are recorded before the run resumes,
+            # so the build that follows uses them.
+            caption = str(event.get("text") or "").strip()
+            if caption and carries_a_value(caption):
+                try:
+                    recorded = self.record_caption(connection, stored.intake.address, caption)
+                except Exception:
+                    # A caption that cannot be read must never cost Carmen the
+                    # photograph she just sent.
+                    logger.exception("the values sent with a photo could not be recorded")
+                else:
+                    if recorded:
+                        logger.info("recorded %d value(s) stated with the photo", recorded)
 
             try:
                 progress("is reading the photo...")

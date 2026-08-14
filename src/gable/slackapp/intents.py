@@ -8,7 +8,51 @@ else remains the conversation model's responsibility.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Final
+
+#: Ways a person asks for the same flyer to be built again. Chase's own wording
+#: is "run it again", which the older set did not contain, so the request read
+#: as ordinary conversation and nothing happened. Word-folded before matching,
+#: so punctuation and capitalisation do not matter.
+RUN_AGAIN_PHRASES: Final[frozenset[str]] = frozenset(
+    {
+        "yes run again",
+        "run again",
+        "run it again",
+        "can you run it again",
+        "please run it again",
+        "run this again",
+        "rerun this project",
+        "can you rerun this project",
+        "rerun this flyer",
+        "can you rerun this flyer",
+        "rebuild this flyer",
+    }
+)
+
+
+def asks_to_run_again(text: str) -> bool:
+    """Whether a message plainly asks for the flyer to be built again.
+
+    Deliberately exact rather than fuzzy: this authorises replacing a delivered
+    flyer, so it matches whole known phrasings and lets anything else fall
+    through to the conversation model.
+
+    Args:
+        text: What the person said, as sent. A leading greeting is ignored.
+
+    Returns:
+        True for a recognised request.
+
+    Raises:
+        Nothing.
+    """
+    folded = _fold_words(text)
+    for greeting in ("hey gable ", "hi gable ", "hey ", "hi ", "gable "):
+        if folded.startswith(greeting):
+            folded = folded.removeprefix(greeting)
+            break
+    return folded in RUN_AGAIN_PHRASES
 
 
 @dataclass(frozen=True, slots=True)
@@ -127,15 +171,7 @@ def _rebuild_shortcut(
         if folded.startswith(greeting):
             folded = folded.removeprefix(greeting)
             break
-    generic_rebuilds = {
-        "yes run again",
-        "run again",
-        "rerun this project",
-        "can you rerun this project",
-        "rerun this flyer",
-        "can you rerun this flyer",
-        "rebuild this flyer",
-    }
+    generic_rebuilds = set(RUN_AGAIN_PHRASES)
     retired_overrides = {
         "run anyway",
         "use the current template as is",
