@@ -169,8 +169,10 @@ def test_new_file_is_measured_and_owns_a_recheck_thread(tmp_path: Path) -> None:
 
     presentations["new-1"] = _presentation(email_width=700)
     files[0] = TemplateFile("new-1", "New Listing", "two")
+    # A listing rebuild reloads the design and confirms it is safe to fill; it
+    # does not re-certify how the artwork looks. The design's own thread does.
     outcome = triage.recheck_file("new-1")
-    assert "did not find a structural, text-capacity, or visible layout problem" in outcome
+    assert "found no structural or text-capacity problem" in outcome
     refreshed = store.template_for_thread(connection, "thread-1")
     assert refreshed is not None and refreshed.modified_time == "two"
     assert refreshed.status == "ready"
@@ -558,7 +560,7 @@ def test_a_design_never_scanned_is_measured_rather_than_refused(tmp_path: Path) 
 
     outcome = triage.recheck_file("live-1")
 
-    assert "did not find a structural, text-capacity, or visible layout problem" in outcome
+    assert "found no structural or text-capacity problem" in outcome
     recorded = store.template_audit(connection, "live-1")
     assert recorded is not None and recorded.status == "ready"
     assert recorded.modified_time == "one"
@@ -631,3 +633,60 @@ def test_adopting_a_new_design_still_measures_its_character_capacity(
     assert recorded is not None and recorded.status == "needs_template"
     assert "agent name" in recorded.summary
     connection.close()
+
+
+def test_a_design_thread_recheck_still_inspects_how_the_artwork_looks(tmp_path: Path) -> None:
+    """Certifying the design is the design thread's question, and it still asks."""
+    connection = connect(tmp_path / "gable.db")
+    apply_migrations(connection)
+    files = [TemplateFile("base", "Baseline", "zero")]
+    said: list[str] = []
+    looked: list[str] = []
+
+    def look(file_id: str) -> Inspection:
+        looked.append(file_id)
+        return Inspection(False, True, problems=["The open house tag is cut off"])
+
+    triage = TemplateTriage(
+        connection,
+        lambda: list(files),
+        lambda _file_id: _presentation(),
+        _say_into(said),
+        look_at=look,
+    )
+    store.adopt_template_catalog(connection, [("base", "Baseline", "zero")])
+    files.append(TemplateFile("new-1", "New Listing", "one"))
+    assert triage.scan_new() == 1
+    looked.clear()
+
+    owned = store.template_for_thread(connection, "thread-1")
+    assert owned is not None
+    outcome = triage.recheck(owned.slack_thread_ts)
+
+    assert looked == ["new-1"]
+    assert "the open house tag is cut off" in outcome
+
+
+def test_a_listing_rebuild_pays_for_no_source_inspection(tmp_path: Path) -> None:
+    """The finished flyer is inspected either way, so this call is waste."""
+    connection = connect(tmp_path / "gable.db")
+    apply_migrations(connection)
+    looked: list[str] = []
+
+    def look(file_id: str) -> Inspection:
+        looked.append(file_id)
+        return Inspection(True, True)
+
+    triage = TemplateTriage(
+        connection,
+        lambda: [TemplateFile("live-1", "Open House", "one")],
+        lambda _file_id: _presentation(),
+        lambda _text, thread: thread or "thread-one",
+        look_at=look,
+    )
+
+    triage.recheck_file("live-1")
+
+    assert looked == []
+    recorded = store.template_audit(connection, "live-1")
+    assert recorded is not None and recorded.status == "ready"

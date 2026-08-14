@@ -385,7 +385,14 @@ class TemplateTriage:
                 ),
             )
         visual: Inspection | None = None
-        if not report.issues:
+        # A listing rebuild reloads the design's current bytes and confirms it
+        # is still structurally safe to fill. Certifying how the artwork LOOKS
+        # is the new-design question, and asking it here refused to rebuild
+        # Kirby-Jay John's flyer because the open-house tag on New Listing with
+        # Open House hangs off the right edge — which it does on purpose, and
+        # which the flyer that had already delivered showed. The flyer's own
+        # render is inspected either way, so this also saves a paid call.
+        if not report.issues and not for_listing:
             progress("is inspecting the updated template...")
             visual = self.look_at(current.file_id)
         message, status = self._message(
@@ -393,6 +400,7 @@ class TemplateTriage:
             report,
             updated=True,
             visual=visual,
+            visual_required=not for_listing,
         )
         store.record_template_audit(
             self.connection,
@@ -424,6 +432,7 @@ class TemplateTriage:
         *,
         updated: bool,
         visual: Inspection | None = None,
+        visual_required: bool = True,
     ) -> tuple[str, str]:
         """Choose one precise Slack outcome from a measured report."""
         issues = (*report.blockers, *report.warnings)
@@ -433,6 +442,15 @@ class TemplateTriage:
                 message = message.replace("the new ", "the updated ", 1)
             return safe(message), "needs_template"
         timing = "updated" if updated else "new"
+        if not visual_required:
+            return (
+                safe(
+                    f"I read the {timing} {name} design from Generic Templates and found "
+                    "no structural or text-capacity problem. I will inspect the finished "
+                    "flyer before I call it ready."
+                ),
+                "ready",
+            )
         if visual is None or not visual.checked:
             return (
                 safe(
