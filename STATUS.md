@@ -622,6 +622,7 @@ against the $500 campaign ceiling. `#calvo` received nothing.
 | The sentinel made plain ASCII, because Slides silently strips U+E000 and the second pass then matched nothing. | `c76c8b9` |
 | The visual gate told which sample text was deliberately left, so a correct flyer is not held for showing the design's own price. | `86551d6` |
 | A failed run records the kind of error, not just that one happened. | `7abfc8a` |
+| A filled measurement keeps the design's own unit and capitals. Found by re-testing the first four people after the other fixes. | `3919d0e` |
 
 ### Waiting on Chase
 
@@ -641,6 +642,21 @@ against the $500 campaign ceiling. `#calvo` received nothing.
   the profile), Kelsey Mahon (no headshot, and listed twice under two emails).
 - **Bobby Carr The Dog Walking Realtor** does not fit Open House at 34
   characters, and renders at roughly half the design's type size on the others.
+
+### Re-tested depth-first afterwards
+
+Reps 1–4 were exercised before some of these fixes landed, so each was run again
+design by design on the current code. That second pass found the measurement
+defect above — answering with "4 beds, 3 baths, 2,450 square feet" wrote the
+person's words over the design's own "5 BEDS" and "6,348 SQFT", and no listing
+had ever had those filled correctly. It also surfaced one more for Chase: on
+New Listing with Open House the design's portrait is a cut-out, so a rectangular
+headshot fills the wider frame and covers the start of "REALTOR" beneath it.
+
+The thread contract was then proven end to end on the fixed code: Annie's Open
+House asked once for beds, baths, square footage and price, one reply answered
+all four, and Gable built the flyer and reported only the footer defect that is
+in the design.
 
 ### Known limits of the test itself
 
