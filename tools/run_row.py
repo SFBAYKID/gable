@@ -15,13 +15,12 @@ Posts to `GABLE_SLACK_CHANNEL_ID` and nowhere else. Does not handle: rows whose
 identity already has three attempts recorded, which the runner refuses by
 design.
 
-`--hero-photo-url` starts a run with a photograph already published, so a design
-can be exercised across many agents without a person uploading the same image
-into forty threads. **It is not how a listing gets its photo.** In real use the
-photograph is the one thing a person chooses, and Gable asks for it in the
-thread; this flag exists so the renderer can be tested at breadth. The photo is
-recorded on the run, so answering a question it asks resumes with the same
-photograph rather than asking for the image next.
+`--hero-photo-url` supplies the photograph without a Slack upload: on a new run
+it starts with it in hand, and with `--resume` it answers a run already waiting
+for one, delivering into that run's own thread. **It is not how a listing gets
+its photo.** In real use the photograph is the one thing a person chooses and
+Gable asks for it in the thread; this exists so a design can be exercised across
+many agents without a person dragging the same image into forty threads.
 """
 
 from __future__ import annotations
@@ -156,9 +155,6 @@ def main(argv: list[str] | None = None) -> int:
         ),
     )
     args = parser.parse_args(argv)
-    if args.hero_photo_url and args.resume:
-        logger.error("--hero-photo-url starts a run; --resume reuses the run's own photo")
-        return 2
 
     try:
         settings = Settings.load(require_credentials=not args.dry_run)
@@ -293,10 +289,10 @@ def main(argv: list[str] | None = None) -> int:
                     existing.status,
                 )
                 return 2
-            if existing.status == "needs_photo":
+            if existing.status == "needs_photo" and not args.hero_photo_url:
                 logger.error(
                     "row %d is waiting for a property image; upload the new image in its "
-                    "existing Slack thread instead of using --resume",
+                    "existing Slack thread, or pass --hero-photo-url to answer it here",
                     args.row,
                 )
                 return 2
@@ -313,10 +309,19 @@ def main(argv: list[str] | None = None) -> int:
                 say,
                 post_once=post_once,
                 reconcile=reconcile,
-                hero_photo_url=existing.photo_url,
+                hero_photo_url=args.hero_photo_url or existing.photo_url,
                 origin_thread_ts=existing.slack_thread_ts,
             )
-            result = runner.resume(submission, existing.run_id)
+            result = runner.resume(
+                submission,
+                existing.run_id,
+                resume_fields=(
+                    {"photo_url": args.hero_photo_url, "photo_source": "carmen"}
+                    if args.hero_photo_url
+                    else None
+                ),
+                expected_status="needs_photo" if existing.status == "needs_photo" else None,
+            )
         else:
             existing = store.latest_run(connection, submission.response_row_id)
             if existing is not None and (existing.status in store.ACTIVE or existing.is_paused):

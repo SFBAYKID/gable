@@ -76,6 +76,7 @@ def _exercise_main(
     )
     connection = _Connection()
     build_calls: list[BuildCall] = []
+    resume_calls: list[tuple[object, object]] = []
 
     monkeypatch.setattr("tools.run_row.Settings.load", lambda **_kwargs: settings)
     monkeypatch.setattr("tools.run_row.configure_logging", lambda **_kwargs: None)
@@ -113,9 +114,17 @@ def _exercise_main(
             assert item is submission
             return SimpleNamespace(run_id="run-test", status=result_status, said=[])
 
-        def resume(self, item: object, run_id: str) -> SimpleNamespace:
+        def resume(
+            self,
+            item: object,
+            run_id: str,
+            *,
+            resume_fields: dict[str, object] | None = None,
+            expected_status: str | None = None,
+        ) -> SimpleNamespace:
             assert item is submission
             assert run_id == "run-existing"
+            resume_calls.append((resume_fields, expected_status))
             return SimpleNamespace(run_id=run_id, status=result_status, said=[])
 
     def _build_runner(*args: object, **kwargs: object) -> _Runner:
