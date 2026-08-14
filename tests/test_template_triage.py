@@ -51,7 +51,7 @@ def _text(object_id: str, text: str, width_pt: float) -> dict[str, Any]:
     }
 
 
-def _presentation(email_width: float = 700) -> dict[str, Any]:
+def _presentation(email_width: float = 700, name_width: float = 900) -> dict[str, Any]:
     return {
         "pageSize": {
             "width": {"magnitude": 10_000_000},
@@ -62,6 +62,7 @@ def _presentation(email_width: float = 700) -> dict[str, Any]:
                 "objectId": "page-1",
                 "pageElements": [
                     _text("address", "[PROPERTY ADDRESS]", 900),
+                    _text("name", "AGENT NAME", name_width),
                     _text("email", "Email", email_width),
                     {
                         "objectId": "hero",
@@ -580,4 +581,53 @@ def test_a_design_that_is_not_in_the_folder_at_all_is_still_refused(tmp_path: Pa
 
     assert "could not find this listing's design in Generic Templates" in outcome
     assert store.template_audit(connection, "gone-1") is None
+    connection.close()
+
+
+def test_a_listing_rebuild_is_not_refused_over_a_hypothetical_long_name(
+    tmp_path: Path,
+) -> None:
+    """Tambria Eaton's flyer was refused over a 28-character name nobody has."""
+    connection = connect(tmp_path / "gable.db")
+    apply_migrations(connection)
+    files = [TemplateFile("live-1", "Open House", "one")]
+    triage = TemplateTriage(
+        connection,
+        lambda: list(files),
+        lambda _file_id: _presentation(email_width=700, name_width=60),
+        lambda _text, thread: thread or "thread-one",
+        look_at=lambda _file_id: Inspection(True, True),
+    )
+
+    outcome = triage.recheck_file("live-1")
+
+    assert "agent name" not in outcome
+    recorded = store.template_audit(connection, "live-1")
+    assert recorded is not None and recorded.status == "ready"
+    connection.close()
+
+
+def test_adopting_a_new_design_still_measures_its_character_capacity(
+    tmp_path: Path,
+) -> None:
+    """The allowance is the standard for a design nobody has built on yet."""
+    connection = connect(tmp_path / "gable.db")
+    apply_migrations(connection)
+    files = [TemplateFile("base", "Baseline", "zero")]
+    said: list[str] = []
+    triage = TemplateTriage(
+        connection,
+        lambda: list(files),
+        lambda _file_id: _presentation(email_width=700, name_width=60),
+        _say_into(said),
+        look_at=lambda _file_id: Inspection(True, True),
+    )
+    store.adopt_template_catalog(connection, [("base", "Baseline", "zero")])
+    files.append(TemplateFile("new-1", "Open House", "one"))
+
+    assert triage.scan_new() == 1
+
+    recorded = store.template_audit(connection, "new-1")
+    assert recorded is not None and recorded.status == "needs_template"
+    assert "agent name" in recorded.summary
     connection.close()

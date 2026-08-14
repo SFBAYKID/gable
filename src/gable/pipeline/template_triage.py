@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections import Counter
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from sqlite3 import Connection
 from uuid import UUID, uuid5
 
@@ -298,7 +298,7 @@ class TemplateTriage:
                 modified_time="",
                 status="needs_template",
             )
-        return self._recheck(existing, progress)
+        return self._recheck(existing, progress, for_listing=True)
 
     def _recheck(
         self,
@@ -306,8 +306,17 @@ class TemplateTriage:
         progress: Callable[[str], None],
         *,
         notification_pending: bool = False,
+        for_listing: bool = False,
     ) -> str:
-        """Reload, measure, and persist one already-resolved source audit."""
+        """Reload, measure, and persist one already-resolved source audit.
+
+        Args:
+            existing: The audit being refreshed, real or provisional.
+            progress: Truthful native-status stage reporter.
+            notification_pending: Whether the verdict owes a durable Slack post.
+            for_listing: True when a listing thread asked, in which case the
+                new-design character allowances do not apply — see below.
+        """
         templates = self.list_templates()
         current = next(
             (item for item in templates if item.file_id == existing.file_id),
@@ -359,6 +368,22 @@ class TemplateTriage:
             )
             return message
         report = self._inspect(current)
+        if for_listing:
+            # The character allowances in TEMPLATE_CAPACITY_CHARS are the
+            # standard for adopting a NEW design: could this box hold a
+            # long-but-normal value from anyone on the roster. They are not a
+            # reason to refuse rebuilding a listing that has already been built
+            # on this very design — Tambria Eaton's Open House flyer was refused
+            # over a hypothetical 28-character agent name, and recording that as
+            # the design's verdict would then have blocked every Open House run.
+            # This listing's own values are measured again by the runner before
+            # anything is copied, which is the check that actually applies here.
+            report = replace(
+                report,
+                issues=tuple(
+                    issue for issue in report.issues if not issue.code.startswith("capacity_")
+                ),
+            )
         visual: Inspection | None = None
         if not report.issues:
             progress("is inspecting the updated template...")
