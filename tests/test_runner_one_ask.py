@@ -212,3 +212,37 @@ def test_a_resumed_run_asks_again_without_a_second_announcement(
 
     assert result.status == "needs_photo", "the run must survive, not fail"
     assert not any("request from" in said for said in rec.said), "one announcement only"
+
+
+def test_the_readback_checks_what_was_written_not_the_raw_value() -> None:
+    """A title filled as REALTOR was checked against "Realtor" and reported missing.
+
+    The flyer plainly showed it. Verification has to look for the text Gable
+    actually asked Slides to write.
+    """
+    from gable.pipeline.run_reporting import verify_rendered
+    from gable.pipeline.vision import Inspection
+    from gable.slides.fields import Resolution
+
+    resolution = Resolution(fields={"agent_title": "REALTOR"})
+    values = {"agent_title": "Realtor"}
+    pairs = {"REALTOR": "REALTOR"}
+
+    checked = verify_rendered(
+        "run-1",
+        "file-1",
+        read_slide_text=lambda _fid: ["REALTOR"],
+        thumbnail=lambda _fid: b"",
+        look_at=lambda _run, _image: Inspection(looks_right=True, confident=True),
+        judge_text=__import__(
+            "gable.pipeline.orchestrator", fromlist=["judge"]
+        ).judge,
+        pairs=pairs,
+        resolution=resolution,
+        values=values,
+        text_fit=__import__(
+            "gable.pipeline.run_reporting", fromlist=["TextFitResult"]
+        ).TextFitResult(),
+    )
+
+    assert checked.ok, f"unexpected problems: {checked.problems}"

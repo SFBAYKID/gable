@@ -160,8 +160,12 @@ def verify_rendered(
         Nothing. Both checks are expected to fail closed: an inspection that
         could not run is reported as a problem rather than as a pass.
     """
+    # Verify what was actually written, not the value before the design's own
+    # conventions were applied to it. A title filled as REALTOR to match the
+    # placeholder's capitals was checked against "Realtor" and reported as
+    # never having reached the flyer, on a flyer that plainly showed it.
     expected = {
-        name: values[name]
+        name: pairs[literal]
         for name, literal in resolution.fields.items()
         if literal in pairs and values.get(name, "").strip()
     }
