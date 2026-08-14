@@ -231,3 +231,33 @@ a current test. Resume a paused source, information, or review run through its
 owned Slack thread. `tools.run_row --resume` refuses `needs_photo`: upload the
 new property image in that owned thread so the rejected audit image cannot be
 silently reused.
+
+---
+
+## 9. Driving a campaign cell by hand (2026-08-14)
+
+One cell is one salesperson against one design. The house number identifies the
+cell so feedback can name it — "the 104 one" is Andy Jang's Open House.
+
+1. **Seed and start.** `tools/seed_test_rows.py` appends the row; it refuses any
+   tab not named `Testing*`. Then `python -m tools.run_row Testing_1 <row>` **on
+   the droplet**, so the run shares the listener's database.
+2. **Answer in the thread.** Text can go through any Slack client as Carmen or
+   Chase. The photograph has to be a real upload, because a bot's file share is
+   ignored by design.
+3. **Compare the render against its source design before judging it.** Chase's
+   standing instruction. A defect present in the source is Carmen's, not
+   Gable's, and the difference decides whether it is a bug at all. Render both
+   with `pages.getThumbnail` and look at them side by side.
+4. **When a design's photo lands wrong, do not reason about the geometry.**
+   Copy the design, delete one candidate shape, render, look. Three of the six
+   designs turned out to be replacing the wrong shape, and each was settled this
+   way in a minute. The API cannot tell you which shape carries the picture:
+   every one of them reports an empty fill.
+5. A cell passes only on a clean run with no intervention. A run that needed a
+   patch mid-flight is a failed run; the rerun after the fix is what counts.
+
+### Rerunning
+
+A submission allows three attempts, ever. Seed a fresh row rather than trying to
+reuse a spent one — byte-identical rows get distinct identities by design.

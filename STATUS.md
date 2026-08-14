@@ -1,6 +1,60 @@
 # Gable — status, and what's needed from Chase
 
-Last updated 2026-08-13 by the building agent.
+Last updated 2026-08-14 by the building agent.
+
+## 2026-08-14 every design driven end to end, four of six deliver
+
+Chase asked for one systematic campaign: every design against every
+salesperson, one batched question, then the link, fixing anything that looks
+wrong on the spot. Andy Jang was taken through all six designs overnight.
+
+**Four deliver a finished flyer from one round of questions:** Under Contract,
+New Listing, New Listing with Open House, Client Review Post. Each was verified
+by looking at the rendered flyer beside its own source design, which is now the
+standing check — Chase's instruction: always compare to the source design.
+
+**Two are blocked by defects in the artwork itself**, not by Gable, and cannot
+be fixed from a Slack thread:
+
+* **Sold** — "Thinking of Selling? / Reach Out / Today." overflows its navy
+  callout and "Today." lands on the footer bar.
+* **Open House** — the footer slogan "Local expertise. Exceptional results."
+  wraps below the page and is cut off.
+
+Both are present in the source designs; verified by rendering them. Gable's own
+work on both flyers is correct and the visual gate is right to refuse. **Chase's
+call:** fix the two designs, or decide that Gable may deliver when the only
+visual problem also exists in the source. The gate was deliberately not
+weakened without that decision.
+
+### What the campaign found in Gable, all fixed and each verified by a rerun
+
+Twelve defects, listed with their evidence in `DECISIONS.md`. The largest class
+was photo placement: **three of the six designs were replacing the wrong shape**,
+so a flyer showed the template's own house instead of the supplied one, or two
+houses stacked, or the Corner House logo sliced in half. Each was settled by
+copying the design and deleting one shape at a time rather than by reasoning
+about the geometry.
+
+The rest: an ask that crashed a resumed run, a flyer built with no photo when a
+design needs two layers removed, a correct flyer refused over a capitalisation
+mismatch in its own read-back, sample data from three designs that would have
+printed a real agent's name and a previous listing's open house on somebody
+else's flyer, and two designs refused outright over measurement gaps that are
+now closed.
+
+### What is needed from Chase
+
+1. The two design defects above.
+2. **Kelsey Mahon has no headshot** on file, under either of her addresses.
+   36 of 38 agents match; she is the only gap.
+3. **Price Reduction has no design** in Generic Templates, so those requests
+   stop. 24 of them exist in the submission history.
+4. Five Head Shots files match nobody on the roster: Andrew Hixson, Brittany
+   Litel, Chris Meldrom, Chris Yankosky, Douglas White.
+
+The remaining 37 salespeople have not been run yet. The design dimension is
+where every defect so far has lived; the rep dimension is data.
 
 ## 2026-08-13 a clean single-pass run, confirmed by Chase
 
