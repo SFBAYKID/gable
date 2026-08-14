@@ -585,3 +585,67 @@ def test_a_group_scales_the_type_but_a_box_transform_only_shapes_the_box() -> No
     assert round(box.font_size_pt, 2) == 14.09
     assert box.font_size_pt > fitting.MIN_READABLE_PT
     assert round(box.width_emu) == 2502813
+
+
+def test_a_title_no_design_has_room_for_falls_back_to_its_credential() -> None:
+    # Under Contract's live title slot: 80pt wide, 32pt type. Sara Wolz's proven
+    # title needs roughly seven times that width, and until 2026-08-14 the run
+    # stopped dead asking Chase to redraw the design.
+    presentation = _presentation(
+        _text("address", "[PROPERTY ADDRESS]", 430, font_pt=20),
+        _text("title", "Realtor", 80, font_pt=32),
+    )
+
+    report = _analyze(
+        presentation,
+        {
+            "address": "498 Old Mill Rd, Millersville, MD 21108",
+            "agent_title": "Listing Manager, Transaction Coordinator & Realtor",
+        },
+    )
+
+    assert report.blockers == ()
+    assert report.adjusted == {"agent_title": "Realtor"}
+    assert [issue.advisory for issue in report.warnings] == [
+        "This design's title line has room for one word, so it says Realtor rather "
+        "than the full Listing Manager, Transaction Coordinator & Realtor."
+    ]
+
+
+def test_a_title_that_fits_is_left_exactly_as_the_profile_states_it() -> None:
+    presentation = _presentation(
+        _text("address", "[PROPERTY ADDRESS]", 430, font_pt=20),
+        _text("title", "Realtor", 400, font_pt=12),
+    )
+
+    report = _analyze(
+        presentation,
+        {
+            "address": "498 Old Mill Rd, Millersville, MD 21108",
+            "agent_title": "Listing Manager, Transaction Coordinator & Realtor",
+        },
+    )
+
+    assert report.adjusted == {}
+    assert report.issues == ()
+
+
+def test_a_title_holding_no_credential_is_never_replaced_by_one() -> None:
+    # Inventing REALTOR for somebody whose profile does not claim it is a false
+    # statement about their licence, so a title Gable cannot shorten truthfully
+    # remains a stop.
+    presentation = _presentation(
+        _text("address", "[PROPERTY ADDRESS]", 430, font_pt=20),
+        _text("title", "Realtor", 80, font_pt=32),
+    )
+
+    report = _analyze(
+        presentation,
+        {
+            "address": "498 Old Mill Rd, Millersville, MD 21108",
+            "agent_title": "Associate Broker and Transaction Coordinator",
+        },
+    )
+
+    assert report.adjusted == {}
+    assert [issue.code for issue in report.blockers] == ["unreadable_agent_title"]

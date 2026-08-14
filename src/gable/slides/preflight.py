@@ -18,7 +18,7 @@ mask, and stops delivery when the automatic crop did not work.
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Final
 
 from gable.photos.fit import assess
@@ -101,6 +101,9 @@ class Report:
     issues: tuple[Issue, ...] = ()
     hero_width_px: int = 0
     hero_height_px: int = 0
+    #: Values the measurement itself changed, for the caller to fill with
+    #: instead of the ones it supplied. Empty unless something was adjusted.
+    adjusted: dict[str, str] = field(default_factory=dict)
 
     @property
     def blockers(self) -> tuple[Issue, ...]:
@@ -284,6 +287,90 @@ def _replacement_issue(
         ),
         blocking=True,
     )
+
+
+#: The membership credential these designs draw a title slot for. Every source
+#: in Generic Templates types either "Realtor" or "REALTOR" there, which is what
+#: the slot was measured and drawn to hold.
+_CREDENTIAL: Final[str] = "Realtor"
+
+#: A credential inside a longer professional title: "Listing Manager,
+#: Transaction Coordinator & Realtor®" or "REALTOR®, The Kulnich Home Team".
+_CREDENTIAL_IN_TITLE: Final[re.Pattern[str]] = re.compile(r"\brealtors?\b", re.IGNORECASE)
+
+
+def _fits_every_box(
+    template_label: str,
+    boxes: list[fitting.TextBox],
+    replacement: str,
+) -> bool:
+    """Whether one replacement is readable in every box that carries it."""
+    return all(
+        _replacement_issue(template_label, "agent_title", box, replacement) is None for box in boxes
+    )
+
+
+def _title_that_fits(
+    template_label: str,
+    resolution: fields.Resolution,
+    values: dict[str, str],
+    boxes: list[fitting.TextBox],
+) -> tuple[dict[str, str], Issue | None]:
+    """Shorten a job title to its credential when the full one cannot fit.
+
+    Two people on the roster carry a title no design has room for: Sara Wolz's
+    "Listing Manager, Transaction Coordinator & Realtor" needs about 627 percent
+    more width than Under Contract's title slot, and Gina Moore's "REALTOR, The
+    Kulnich Home Team" about 391 percent. Both were a hard stop, and neither is
+    fixable from Slack — the design would have to be redrawn.
+
+    Their own titles already contain the credential the slot was drawn for, so
+    the flyer prints that and the closing message says the longer title was
+    dropped. This changes what an agent's flyer says about them, so it is never
+    silent and never a guess: the shorter form is taken from the agent's own
+    proven title, not invented.
+
+    Args:
+        template_label: The design's name, for the sentence Carmen reads.
+        resolution: What the design's text means.
+        values: The values this run intends to fill.
+        boxes: Every measured text box on the design.
+
+    Returns:
+        The values that changed — empty when nothing did — and the advisory to
+        fold into the closing message, or None when there is nothing to say.
+
+    Raises:
+        Nothing.
+    """
+    title = values.get("agent_title", "").strip()
+    literal = resolution.fields.get("agent_title", "")
+    if not title or not literal:
+        return {}, None
+    shorter = _CREDENTIAL if _CREDENTIAL_IN_TITLE.search(title) else ""
+    if not shorter or shorter.casefold() == title.casefold():
+        return {}, None
+
+    matching = [box for box in boxes if box.text.strip() == literal.strip()]
+    # An unmeasurable box is reported on its own further down. Do not shorten a
+    # title on the strength of a measurement that was never taken.
+    if not matching:
+        return {}, None
+
+    def written(value: str) -> str:
+        """The exact text a fill would write, capitals and all."""
+        return fields.replacements(resolution, {"agent_title": value}).get(literal, value)
+
+    full_written, short_written = written(title), written(shorter)
+    fits = _fits_every_box(template_label, matching, full_written)
+    if fits or not _fits_every_box(template_label, matching, short_written):
+        return {}, None
+
+    note = (
+        f"This design's title line has room for one word, so it says {short_written} "
+        f"rather than the full {title}."
+    )
+    return {"agent_title": shorter}, Issue("shortened_agent_title", note, advisory=note)
 
 
 def _average_character_capacity(
@@ -554,6 +641,13 @@ def analyze(
                 )
             )
 
+    boxes = text_boxes(presentation)
+    adjusted, title_note = _title_that_fits(template_label, resolution, values, boxes)
+    if adjusted:
+        values = {**values, **adjusted}
+        if title_note is not None:
+            issues.append(title_note)
+
     pairs = fields.replacements(resolution, values)
     all_text = [text_content(element) for element in descendants(pages[0].get("pageElements", []))]
     for literal in pairs:
@@ -572,7 +666,6 @@ def analyze(
             )
             break
 
-    boxes = text_boxes(presentation)
     warned: set[str] = set()
     for literal, replacement in pairs.items():
         matching = [box for box in boxes if box.text.strip() == literal.strip()]
@@ -615,7 +708,7 @@ def analyze(
                 )
             )
 
-    return Report(tuple(issues), hero_width_px, hero_height_px)
+    return Report(tuple(issues), hero_width_px, hero_height_px, adjusted)
 
 
 def blocking_after_release(report: Report, allow_blank_fields: bool) -> tuple[Issue, ...]:

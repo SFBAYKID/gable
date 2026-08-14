@@ -383,6 +383,11 @@ class Runner:
         # A value that is about to be asked for in the same breath as the photo
         # must not stop preflight on the way there.
         gathering = allow_blank or bool(outstanding.values)
+        # A value the measurement itself changed — a job title too long for the
+        # slot the design drew, cut back to the credential inside it — must be
+        # what gets filled. Measuring one string and writing another would put
+        # the overflow back on the flyer.
+        values.update(measured.adjusted)
         blockers = preflight.blocking_after_release(measured, gathering)
         if blockers:
             issue = blockers[0]
@@ -596,33 +601,21 @@ class Runner:
                 logger.error("could not replace the sample headshot for run %s", run_id)
             else:
                 logger.info("the design has no recognised headshot slot for run %s", run_id)
+        # An image the design calls for and did not get. The photo is the point
+        # of the flyer, and a stranger's face is worse than none, so either one
+        # keeps the draft for a retry and never calls it finished.
+        unplaced = ""
         if not placed:
-            # The photo is the point of the flyer. Delivering without it, after
-            # being given one, is worse than stopping.
-            spoken = safe(
-                "I built the flyer but could not get the photo onto it. "
-                "I have not sent it as finished."
-            )
+            unplaced = "could not get the photo onto it"
+        elif headshot_failed:
+            unplaced = "could not replace the sample headshot with the agent's own photo"
+        if unplaced:
             return self._outcome(
                 run_id,
-                spoken,
+                safe(f"I built the flyer but {unplaced}. I have not sent it as finished."),
                 result,
                 status="needs_review",
-                detail="the hero photo could not be placed",
-                output_file_id=output_id,
-                output_url=output_url,
-            )
-        if headshot_failed:
-            spoken = safe(
-                "I built the flyer but could not replace the sample headshot with the "
-                "agent's own photo. I have not sent it as finished."
-            )
-            return self._outcome(
-                run_id,
-                spoken,
-                result,
-                status="needs_review",
-                detail="the agent headshot could not be placed",
+                detail=f"the flyer was left unfinished: it {unplaced}",
                 output_file_id=output_id,
                 output_url=output_url,
             )
@@ -666,19 +659,15 @@ class Runner:
             spoken = checked.spoken
             result.output_url = output_url
             if checked.needs_replacement_photo:
-                delivery = run_questions.prepare_and_deliver(
+                delivery = run_questions.request_replacement_photo(
                     self.connection,
                     run_id,
-                    run_questions.replacement_message(spoken),
-                    "needs_photo",
+                    spoken,
+                    detail,
                     self.say,
                     post_once=self.post_once,
                     reconcile=self.reconcile,
-                    question_label=run_questions.PHOTO_REPLACEMENT_QUESTION,
                     thread_ts=self.origin_thread_ts,
-                    confirmed_reason=store.PHOTO_REPLACEMENT_WAITING,
-                    confirmation_detail="replacement property photo request confirmed in Slack",
-                    transition_detail=f"replacement supplied photo required: {detail}",
                     output_file_id=output_id,
                     output_url=output_url,
                 )
