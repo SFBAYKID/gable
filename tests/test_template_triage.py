@@ -539,3 +539,45 @@ def test_template_notice_retries_once_after_history_proves_the_failed_write_abse
     assert len(posts) == 2 and posts[0] == posts[1]
     assert inspections == 1
     connection.close()
+
+
+def test_a_design_never_scanned_is_measured_rather_than_refused(tmp_path: Path) -> None:
+    """The live catalogue was empty, so a rebuild was refused over a scan nobody ran."""
+    connection = connect(tmp_path / "gable.db")
+    apply_migrations(connection)
+    files = [TemplateFile("live-1", "Open House", "one")]
+    triage = TemplateTriage(
+        connection,
+        lambda: list(files),
+        lambda _file_id: _presentation(email_width=700),
+        lambda _text, thread: thread or "thread-one",
+        look_at=lambda _file_id: Inspection(True, True),
+    )
+    assert store.template_audit(connection, "live-1") is None
+
+    outcome = triage.recheck_file("live-1")
+
+    assert "did not find a structural, text-capacity, or visible layout problem" in outcome
+    recorded = store.template_audit(connection, "live-1")
+    assert recorded is not None and recorded.status == "ready"
+    assert recorded.modified_time == "one"
+    connection.close()
+
+
+def test_a_design_that_is_not_in_the_folder_at_all_is_still_refused(tmp_path: Path) -> None:
+    """Measuring nothing is not better than saying where to put the file back."""
+    connection = connect(tmp_path / "gable.db")
+    apply_migrations(connection)
+    triage = TemplateTriage(
+        connection,
+        list,
+        lambda _file_id: _presentation(),
+        lambda _text, thread: thread or "thread-one",
+        look_at=lambda _file_id: Inspection(True, True),
+    )
+
+    outcome = triage.recheck_file("gone-1")
+
+    assert "could not find this listing's design in Generic Templates" in outcome
+    assert store.template_audit(connection, "gone-1") is None
+    connection.close()

@@ -276,9 +276,27 @@ class TemplateTriage:
         """
         existing = store.template_audit(self.connection, file_id)
         if existing is None:
-            return (
-                "I could not match this listing to a reviewed source template, so I "
-                "have not changed anything."
+            # The catalogue is baselined by a scheduled scan, and a listing can
+            # reach this point before that scan has ever run — which is exactly
+            # the state the live database was in on 2026-08-14, so Chase edited
+            # the Open House design, asked for a rebuild, and was told the
+            # design was not a reviewed source. A design Gable itself selected
+            # and built this flyer from is not an unknown file. Measure it now
+            # rather than refusing over a scan nobody has performed yet.
+            current = next(
+                (item for item in self.list_templates() if item.file_id == file_id),
+                None,
+            )
+            if current is None:
+                return (
+                    "I could not find this listing's design in Generic Templates, so I "
+                    "have not changed anything. Put it back in that folder and ask me again."
+                )
+            existing = store.TemplateAudit(
+                file_id=current.file_id,
+                name=current.name,
+                modified_time="",
+                status="needs_template",
             )
         return self._recheck(existing, progress)
 
