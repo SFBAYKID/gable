@@ -54,7 +54,12 @@ TEMPLATE_CAPACITY_CHARS: Final[dict[str, int]] = {
     "agent_email": 42,
     "client_name": 28,
     "review_quote": 280,
-    "agent_title": 24,
+    # The credential and nothing longer. A title that will not fit is cut back
+    # to the word the slot was drawn for before anything is written, so a design
+    # holding "REALTOR" holds everything Gable can put there. Demanding 24
+    # characters measured the old behaviour and blocked every Under Contract
+    # run the moment Carmen edited that design.
+    "agent_title": len("REALTOR"),
     "social_handle": 28,
     "neighborhood": 32,
     "website": 36,
