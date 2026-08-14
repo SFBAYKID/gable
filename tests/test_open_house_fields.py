@@ -155,3 +155,28 @@ def test_a_date_that_reads_naturally_is_not_trimmed() -> None:
     pairs = fields.replacements(resolution, {"open_house": "Saturday, Sep 6, 2026 1-3PM"})
 
     assert pairs["Sunday, Aug 2, 2026"] == "Saturday, Sep 6, 2026"
+
+
+def test_two_days_at_the_same_hours_write_that_time_once() -> None:
+    """Row 98 wrote "08/08/2026 11am-1pm , 08/09/2026 11am-1pm"."""
+    resolution = fields.resolve(["SUNDAY, MAY 24TH\n1 PM - 3 PM"])
+
+    pairs = fields.replacements(
+        resolution,
+        {"open_house": "08/08/2026 11am-1pm , 08/09/2026 11am-1pm"},
+    )
+
+    assert pairs["SUNDAY, MAY 24TH\n1 PM - 3 PM"] == "08/08/2026, 08/09/2026\n11am-1pm"
+
+
+def test_two_days_at_different_hours_keep_both_times() -> None:
+    """Dropping one would be a lie about when the house is open."""
+    resolution = fields.resolve(["SUNDAY, MAY 24TH\n1 PM - 3 PM"])
+
+    pairs = fields.replacements(
+        resolution,
+        {"open_house": "08/08/2026 11am-1pm , 08/09/2026 2-4pm"},
+    )
+
+    assert "2-4pm" in pairs["SUNDAY, MAY 24TH\n1 PM - 3 PM"]
+    assert "11am-1pm" in pairs["SUNDAY, MAY 24TH\n1 PM - 3 PM"]

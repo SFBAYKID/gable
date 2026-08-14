@@ -109,6 +109,10 @@ _SAMPLE_OPEN_HOUSE_DATE_AND_TIME: Final[re.Pattern[str]] = re.compile(
     re.IGNORECASE,
 )
 
+#: A comma left with space either side of it once the time between two dates was
+#: removed: "08/08/2026  ,  08/09/2026".
+_STRANDED_SEPARATOR: Final[re.Pattern[str]] = re.compile(r"\s+,\s*")
+
 #: A word left dangling at the end of a date once its time has been taken out
 #: into the design's own separate box.
 _TRAILING_JOINER: Final[re.Pattern[str]] = re.compile(
@@ -603,7 +607,19 @@ def _open_house_part(literal: str, value: str) -> str:
     if not found:
         return value
     time_part = found.group(0).strip()
-    remainder = (value[: found.start()] + " " + value[found.end() :]).strip(" ,-\u2013\u2014\t")
+    times = [match.group(0) for match in _TIME_RANGE_INSIDE.finditer(value)]
+    # Two days at the same hours \u2014 "08/08/2026 11am-1pm , 08/09/2026 11am-1pm" \u2014
+    # is one time written twice. Taking out only the first left the second in
+    # the date box, so the flyer read "08/08/2026 , 08/09/2026 11am-1pm" above
+    # its own "11am-1pm". Two DIFFERENT times are two facts: dropping one would
+    # be a lie about when the house is open, so that case is left as it was.
+    same_time = len({"".join(item.split()).casefold() for item in times}) == 1
+    remainder = (
+        _TIME_RANGE_INSIDE.sub(" ", value)
+        if same_time
+        else value[: found.start()] + " " + value[found.end() :]
+    ).strip(" ,-\u2013\u2014\t")
+    remainder = _STRANDED_SEPARATOR.sub(", ", remainder)
     # The word that joined the date to the time it no longer sits beside.
     # "08/01 and 08/02 from 12-2pm" left "08/01 and 08/02 from" in the date box,
     # with the "from" dangling at the end of the line.
