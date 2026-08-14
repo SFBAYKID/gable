@@ -16,7 +16,12 @@ from gable.listings.names import tidy_name
 from gable.sheets import repository as repo
 
 
-def opening_for(connection: Connection, intake: Intake, existing_thread_ts: str) -> str:
+def opening_for(
+    connection: Connection,
+    intake: Intake,
+    existing_thread_ts: str,
+    validated_name: str = "",
+) -> str:
     """The announcement a pause posts before its question, if it needs one.
 
     Every pause announces the listing and then asks inside that thread. Only
@@ -30,6 +35,9 @@ def opening_for(connection: Connection, intake: Intake, existing_thread_ts: str)
         connection: An open database connection, for the roster lookup.
         intake: The submission being paused.
         existing_thread_ts: The run's current Slack thread root, if it has one.
+        validated_name: Name already proven by the contact check, when the
+            caller has run it. Empty for the earliest pauses, which are the
+            contact failures themselves.
 
     Returns:
         The announcement, or empty when the run already owns a thread. The
@@ -43,7 +51,7 @@ def opening_for(connection: Connection, intake: Intake, existing_thread_ts: str)
         return ""
     # The submitted name stands in until the contact check proves one, because
     # the earliest pauses are the contact failures themselves.
-    return announce(connection, intake, "")
+    return announce(connection, intake, validated_name)
 
 
 def announce(connection: Connection, intake: Intake, validated_name: str = "") -> str:

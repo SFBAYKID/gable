@@ -413,6 +413,11 @@ class Runner:
                     run_id,
                     "asked for every outstanding value and the photo in one message",
                 )
+            # The announcement opens the thread, so it belongs only to the first
+            # ask. A run resumed inside its own thread must not carry one: the
+            # question store refuses a headline that would replace an existing
+            # root, and the run died reporting a failed processing step. Seen
+            # live when a date clarification resumed a run still owed its photo.
             return self._ask(
                 run_id,
                 intake,
@@ -420,7 +425,9 @@ class Runner:
                 [],
                 result,
                 status=outstanding.status(),
-                headline=people.announce(self.connection, intake, contact.name),
+                headline=people.opening_for(
+                    self.connection, intake, self.origin_thread_ts, contact.name
+                ),
             )
 
         # 6. Build only after all deterministic preflight checks pass.

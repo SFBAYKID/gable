@@ -184,3 +184,31 @@ def test_nothing_a_person_typed_is_recased() -> None:
 
     assert _as_written("address", "PROPERTY ADDRESS", "103 Doyle Place") == "103 Doyle Place"
     assert _as_written("agent_name", "AGENT NAME", "Andy Jang") == "Andy Jang"
+
+
+def test_a_resumed_run_asks_again_without_a_second_announcement(
+    db: sqlite3.Connection,
+) -> None:
+    """The announcement opens the thread, so it belongs only to the first ask.
+
+    Seen live: a date clarification resumed a run that still owed its photo,
+    the batched ask carried a headline into a thread that already had a root,
+    the question store refused the whole notification, and the run died
+    reporting a failed processing step.
+    """
+    submission = _submission(rid="rid-resume-headline")
+    _record(db, submission)
+    first = _runner(db, Recorder(), facts=Facts())
+    first.hero_photo_url = ""
+    paused = first.run(submission)
+    assert paused.status == "needs_photo"
+
+    rec = Recorder()
+    resumed = _runner(db, rec, facts=Facts())
+    resumed.hero_photo_url = ""
+    resumed.origin_thread_ts = "1786.0"
+
+    result = resumed.resume(submission, paused.run_id)
+
+    assert result.status == "needs_photo", "the run must survive, not fail"
+    assert not any("request from" in said for said in rec.said), "one announcement only"
