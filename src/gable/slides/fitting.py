@@ -188,6 +188,69 @@ class Fit:
         return required <= MIN_READABLE_PT or self.fitted_pt <= MIN_READABLE_PT
 
 
+def wrapped_line_count(
+    text: str,
+    font_size_pt: float,
+    usable_width_pt: float,
+    weight: int = 400,
+    family: str = "",
+) -> int:
+    """How many lines Slides will break this text into at this size.
+
+    The width estimate alone is a ribbon: it asks whether the total advance
+    width fits the box width times its line count, which assumes the text can
+    be cut anywhere. Slides breaks at spaces. Donald Clark's "4812 Reisterstown
+    Road, Baltimore, MD 21215" totals less than two 249-point lines and still
+    needs three of them, because "4812 Reisterstown Road," on its own is wider
+    than the box — so the ZIP landed on a third line, on top of the panel
+    below. The ribbon said it fitted; the flyer said otherwise.
+
+    Args:
+        text: The text, with any explicit line breaks it already carries.
+        font_size_pt: The size to measure at.
+        usable_width_pt: One line's width, safety margin already applied.
+        weight: Font weight, 400 regular and 700 bold.
+        family: Font family, for measured advance widths.
+
+    Returns:
+        The number of rendered lines, never fewer than one. A single word wider
+        than the box counts for as many lines as it needs, because Slides
+        breaks inside a word rather than letting it overflow.
+
+    Raises:
+        Nothing.
+    """
+    if usable_width_pt <= 0:
+        return 1
+    total = 0
+    for paragraph in text.splitlines() or [""]:
+        words = paragraph.split()
+        if not words:
+            total += 1
+            continue
+        used = 0
+        current = ""
+        for word in words:
+            candidate = f"{current} {word}" if current else word
+            if estimate_width_pt(candidate, font_size_pt, weight, family) <= usable_width_pt:
+                current = candidate
+                continue
+            if current:
+                used += 1
+            alone = estimate_width_pt(word, font_size_pt, weight, family)
+            if alone > usable_width_pt:
+                # Slides breaks inside a word rather than overflowing.
+                used += math.ceil(alone / usable_width_pt) - 1
+                current = ""
+                used += 1
+                continue
+            current = word
+        if current:
+            used += 1
+        total += max(1, used)
+    return max(1, total)
+
+
 def fit_for(
     object_id: str,
     text: str,
@@ -222,9 +285,12 @@ def fit_for(
         raise ValueError(msg)
 
     margin = MEASURED_SAFETY if typemetrics.measured(family, weight) else SAFETY
-    box_width_pt = (box_width_emu / EMU_PER_POINT) * max(1, lines) * margin
+    allowed = max(1, lines)
+    usable_width_pt = (box_width_emu / EMU_PER_POINT) * margin
+    box_width_pt = usable_width_pt * allowed
     needed = estimate_width_pt(text, current_pt, weight, family)
-    if needed <= box_width_pt:
+    wraps = wrapped_line_count(text, current_pt, usable_width_pt, weight, family)
+    if needed <= box_width_pt and wraps <= allowed:
         return Fit(
             object_id,
             text,
@@ -237,7 +303,16 @@ def fit_for(
 
     # Width scales linearly with font size, so the ratio gives the answer
     # directly rather than by searching.
-    scaled = current_pt * (box_width_pt / needed)
+    scaled = current_pt * (box_width_pt / needed) if needed > box_width_pt else current_pt
+    # The ratio answers the ribbon question. Word wrapping is not linear, so the
+    # result is then verified and stepped down until the text really does break
+    # into the number of lines the box has. Five per cent a step converges in a
+    # handful of passes and never below the readability floor, where the caller
+    # takes over and reports the box as too small.
+    while scaled > MIN_READABLE_PT and (
+        wrapped_line_count(text, scaled, usable_width_pt, weight, family) > allowed
+    ):
+        scaled *= 0.95
     # Never below readable. The floor used to be MIN_FONT_PT, which is 1.0, and
     # a rendered flyer put an email address at 3.0pt and a phone number at 6.8pt
     # — legible in the API, invisible on the flyer. Chase's feedback on the first

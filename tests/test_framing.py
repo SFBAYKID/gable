@@ -64,3 +64,57 @@ def test_several_neighbours_each_take_their_own_side() -> None:
 def test_a_zero_sized_neighbour_is_ignored() -> None:
     """A malformed element must not silently clip a real frame away."""
     assert clear_of_neighbours(FRAME, [(10.0, 10.0, 0.0, 0.0)]) == FRAME
+
+
+# --- text wraps on word boundaries, the way Slides does --------------------
+
+
+def test_a_long_address_is_sized_to_the_lines_it_really_needs() -> None:
+    """Donald Clark's ZIP landed on a third line, on top of the panel below.
+
+    The ribbon estimate said it fitted: the total advance width is under two
+    249-point lines. Slides breaks at spaces, and "4812 Reisterstown Road," on
+    its own is wider than the box.
+    """
+    from gable.slides import fitting
+
+    address = "4812 Reisterstown Road, Baltimore, MD 21215"
+    usable = 249 * fitting.MEASURED_SAFETY
+
+    assert fitting.wrapped_line_count(address, 23.76, usable, 400, "Open Sans") == 3
+
+    fit = fitting.fit_for("addr", address, 23.76, 249 * fitting.EMU_PER_POINT, 2, 400, "Open Sans")
+
+    assert fit.overflows
+    assert not fit.too_small_to_read
+    assert fitting.wrapped_line_count(address, fit.fitted_pt, usable, 400, "Open Sans") == 2
+
+
+def test_text_that_already_wraps_inside_its_box_is_left_alone() -> None:
+    from gable.slides import fitting
+
+    fit = fitting.fit_for(
+        "addr",
+        "32 S Prospect Ave, Catonsville, MD 21228",
+        12.0,
+        400 * fitting.EMU_PER_POINT,
+        2,
+        400,
+        "Open Sans",
+    )
+
+    assert not fit.overflows
+    assert fit.fitted_pt == 12.0
+
+
+def test_a_single_word_wider_than_its_box_counts_the_lines_it_breaks_into() -> None:
+    """Slides breaks inside a word rather than letting it overflow."""
+    from gable.slides import fitting
+
+    assert fitting.wrapped_line_count("A" * 60, 20.0, 60.0, 400, "Open Sans") > 1
+
+
+def test_an_explicit_line_break_is_counted_as_its_own_line() -> None:
+    from gable.slides import fitting
+
+    assert fitting.wrapped_line_count("Rd\nCity", 10.0, 400.0, 400, "Open Sans") == 2
