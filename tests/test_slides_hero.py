@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from gable.slides.hero import HERO_OBJECT_IDS, find_hero_frame
+from gable.slides.hero import HERO_OBJECT_IDS, find_hero_frame, headshot_frames
 
 #: The live Sold page, measured 2026-08-13.
 SLIDE_WIDTH: float = 10_287_000.0
@@ -105,3 +105,59 @@ def test_every_recorded_template_name_is_folded_for_lookup() -> None:
     """The keys must already be in the picker's folded form or they never match."""
     for key in HERO_OBJECT_IDS:
         assert key == " ".join(key.split()).casefold()
+
+
+def _text_box(object_id: str, x: float, y: float, width: float, height: float) -> dict[str, Any]:
+    """A text box drawn above a frame, as neighbouring copy imports."""
+    box = _well(object_id, x, y, width, height)
+    box["shape"] = {
+        "shapeType": "TEXT_BOX",
+        "text": {"textElements": [{"textRun": {"content": "Under Contract"}}]},
+    }
+    return box
+
+
+def test_a_neighbour_clipping_the_frame_edge_is_not_an_occlusion() -> None:
+    """The Under Contract defect: a title band grazing a cut-out's margin.
+
+    A portrait imports with a transparent margin, so the "Under Contract" band
+    and the "4 Bedrooms" line touch its bounding box while lying almost
+    entirely outside it. Measuring against the smaller element treated each as
+    something sitting on the well, and both designs lost their headshot.
+    """
+    portrait = _well("p1_i92", 7_590_000, 8_815_000, 2_695_000, 4_215_000)
+    band = _text_box("p1_i96", 298_000, 8_482_000, 8_374_000, 1_092_000)
+    page = {"pageElements": [portrait, band]}
+
+    frames = headshot_frames(page, SLIDE_WIDTH, SLIDE_HEIGHT)
+
+    assert [f.object_id for f in frames] == ["p1_i92"]
+
+
+def test_a_small_element_sitting_inside_the_well_still_rejects_it() -> None:
+    """The speech-tail case the tight tolerance exists for, unchanged.
+
+    An element lying wholly within the well means a face pasted there lands on
+    top of it. That is a background panel, not a photo slot.
+    """
+    portrait = _well("p1_i92", 7_590_000, 8_815_000, 2_695_000, 4_215_000)
+    tail = _well("p1_tail", 8_000_000, 9_500_000, 300_000, 300_000)
+    page = {"pageElements": [portrait, tail]}
+
+    assert headshot_frames(page, SLIDE_WIDTH, SLIDE_HEIGHT) == ()
+
+
+def test_a_frame_buried_under_artwork_is_still_rejected() -> None:
+    """Loosening the edge case must not accept a well covered by a big panel.
+
+    The covering panel is itself an unfilled shape of plausible size, so it
+    becomes its own candidate. What matters is that the buried portrait is
+    gone: a face pasted there would sit behind the panel.
+    """
+    portrait = _well("p1_i92", 7_590_000, 8_815_000, 2_695_000, 4_215_000)
+    panel = _well("p1_panel", 7_000_000, 8_500_000, 3_200_000, 4_600_000)
+    page = {"pageElements": [portrait, panel]}
+
+    found = [f.object_id for f in headshot_frames(page, SLIDE_WIDTH, SLIDE_HEIGHT)]
+
+    assert "p1_i92" not in found

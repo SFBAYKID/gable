@@ -609,6 +609,12 @@ def find_headshot_frame(
 #: sitting underneath artwork rather than being a free photo well.
 _MAX_OVERLAP_FRACTION: Final[float] = 0.25
 
+#: How much of an overlapping element must lie inside a frame before it counts
+#: as sitting *on* that frame rather than clipping its edge. A cut-out portrait
+#: has a transparent margin, so neighbouring text and title bands routinely
+#: touch its bounding box without ever covering the person.
+_MOSTLY_INSIDE_FRACTION: Final[float] = 0.50
+
 
 #: A replacement image is appended to the page, which puts it at the top of the
 #: z-order — above artwork that was originally drawn over its frame. So a face
@@ -665,12 +671,28 @@ def _is_overlaid(
         overlap_h = min(frame.y + frame.height, y + height) - max(frame.y, y)
         if overlap_w <= 0 or overlap_h <= 0:
             continue
-        # Measured against whichever element is smaller. A first attempt used
-        # the frame's own area and missed the case that motivated this: a small
-        # decorative speech-tail sitting on a large headshot well never covers a
-        # quarter of the well, but the well covers nearly all of it — and the
-        # face still lands on top of the tail.
-        smaller = min(frame.area, width * height)
-        if smaller > 0 and (overlap_w * overlap_h) / smaller > tolerance:
+        other_area = width * height
+        if other_area <= 0:
+            continue
+        overlap = overlap_w * overlap_h
+        # Two different questions, and using one answer for both was wrong.
+        #
+        # "Is something sitting ON this well?" is answered by how much of the
+        # *other* element lies inside the frame. A small decorative speech-tail
+        # sits entirely on a large well, never covers a quarter of it, and the
+        # face still lands on top of it — that is what the tight tolerance is
+        # for, and it only makes sense for an element that is mostly inside.
+        #
+        # "Is this well buried under artwork?" is answered by how much of the
+        # *frame* is covered, and it is the only sensible question for an
+        # element that merely clips the edge. Applying the tight tolerance to
+        # those rejected the headshot on New Listing and Under Contract: the
+        # "Under Contract" title band and the "4 Bedrooms" line each graze the
+        # cut-out's transparent margin by under 8% of the frame while lying
+        # almost entirely outside it. A neighbour is not an occlusion.
+        if overlap / other_area > _MOSTLY_INSIDE_FRACTION:
+            if overlap / other_area > tolerance:
+                return True
+        elif overlap / frame.area > _MAX_OVERLAP_FRACTION:
             return True
     return False
