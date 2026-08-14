@@ -277,27 +277,39 @@ def _is_filled(element: dict[str, Any]) -> bool:
 #: four cases contains 9-20% near-white pixels because it also covers the logo
 #: strip, while the chosen one is pure photograph.
 #:
-#: Under Contract was the exception, settled instead by following lawn colour to
-#: 66% of the slide, and that method picked the wrong shape. Corrected
-#: 2026-08-14 from `p1_i88` to `p1_i85` after a live run clipped the word
-#: "Realty" out of the logo. The test below pins the property that separates
-#: them, and it is geometric rather than pictorial: the hero sits IN FRONT of
-#: the logo in z-order, `p1_i88` starts 95,212 EMU above the logo's bottom edge,
-#: so filling it necessarily paints over the logo's last line. `p1_i85` starts
-#: 285,795 EMU below the logo and covers nothing behind it — which is exactly
-#: what the other five recorded wells do.
+#: These name the shape to REPLACE — the one carrying the design's sample
+#: photograph. Where the new image is drawn can be a smaller rectangle inside
+#: it; see `_placement_guide`.
 #:
 #: This is a hint, never an authority. `find_hero_frame` re-measures the named
 #: shape and falls back to the geometric search when it is absent or implausible,
 #: so a redesigned template degrades to "ask" rather than to a wrong frame.
 HERO_OBJECT_IDS: Final[dict[str, str]] = {
     "sold": "p1_i87",
-    "under contract": "p1_i85",
+    "under contract": "p1_i88",
     "open house": "p1_i104",
     "new listing": "p1_i92",
     "new listing with open house": "p1_i92",
     "client review post": "p1_i90",
 }
+
+#: An imported well can extend behind the design's own furniture — Under
+#: Contract's runs 95,212 EMU up behind the Corner House logo. The source gets
+#: away with it because Slides letterboxes a picture fill whose aspect does not
+#: match its shape, so the sample photograph never reaches the top of its own
+#: box. Gable crops to fill, so it does, and the first campaign run delivered a
+#: flyer with the word "Realty" sliced in half.
+#:
+#: These imports carry a second, smaller empty rectangle inside the well marking
+#: where the picture is actually meant to sit. When one is present the well is
+#: still the shape that gets deleted, and the guide is where the new image is
+#: drawn. Measured against all six live designs on 2026-08-14: only Under
+#: Contract has one, so the other five are unaffected.
+_GUIDE_MIN_CONTAINMENT: Final[float] = 0.95
+_GUIDE_MIN_AREA_FRACTION: Final[float] = 0.50
+#: The guide must start meaningfully lower than the well, since pulling the
+#: photo down out from behind the design's furniture is the whole purpose.
+_GUIDE_MIN_TOP_DROP: Final[float] = 0.01
 
 
 def _named_hero_frame(
@@ -335,6 +347,60 @@ def _named_hero_frame(
     return None
 
 
+def _placement_guide(
+    page: dict[str, Any],
+    well: HeroFrame,
+    slide_height: float,
+) -> HeroFrame | None:
+    """Return where the photo should be drawn inside a well, if marked.
+
+    Args:
+        page: A `slides[n]` entry from a presentations.get response.
+        well: The measured shape that will be deleted and replaced.
+        slide_height: Slide height in EMU, for the minimum drop.
+
+    Returns:
+        A frame carrying the WELL's object id — it is still the shape that gets
+        deleted — with the guide's bounds. None when no guide is marked, which
+        leaves the well's own bounds in use exactly as before.
+
+    Raises:
+        Nothing.
+    """
+    best: HeroFrame | None = None
+    for element in page.get("pageElements", []):
+        if "shape" not in element or "elementGroup" in element:
+            continue
+        if element.get("objectId") == well.object_id:
+            continue
+        if element.get("shape", {}).get("shapeType") == "TEXT_BOX":
+            continue
+        if _carries_text(element) or _is_filled(element):
+            continue
+        if not _axis_aligned_positive(element):
+            continue
+        x, y, width, height = _element_bounds(element)
+        if width <= 0 or height <= 0:
+            continue
+        guide = HeroFrame(element["objectId"], x, y, width, height)
+        if guide.area >= well.area:
+            continue
+        if guide.area < well.area * _GUIDE_MIN_AREA_FRACTION:
+            continue
+        if _overlap_area(well, guide) < guide.area * _GUIDE_MIN_CONTAINMENT:
+            continue
+        if guide.y - well.y < slide_height * _GUIDE_MIN_TOP_DROP:
+            continue
+        if best is None or guide.area > best.area:
+            best = guide
+    if best is None:
+        return None
+    # The well's identity, the guide's geometry: the sample photograph lives in
+    # the well and must still be deleted, but the new image is drawn where the
+    # design says the picture belongs.
+    return HeroFrame(well.object_id, best.x, best.y, best.width, best.height)
+
+
 def find_hero_frame(
     page: dict[str, Any],
     slide_width: float,
@@ -366,7 +432,7 @@ def find_hero_frame(
     if recorded:
         named = _named_hero_frame(page, slide_width, slide_height, recorded)
         if named is not None:
-            return named
+            return _placement_guide(page, named, slide_height) or named
 
     slide_area = slide_width * slide_height
     candidates: list[HeroFrame] = []

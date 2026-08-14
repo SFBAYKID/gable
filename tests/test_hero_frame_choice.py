@@ -1,9 +1,14 @@
-"""The recorded photo well must not paint over what sits behind it.
+"""Where the photo is drawn, versus which shape gets replaced.
 
-Measured from the live Generic Templates designs on 2026-08-14. Under Contract
-shipped a flyer with the word "Realty" sliced out of the Corner House logo: the
-recorded well started 95,212 EMU above the logo's bottom edge and sits in front
-of it in z-order, so filling it necessarily covered the logo's last line.
+Measured from the live Under Contract design on 2026-08-14, after it shipped a
+flyer with the word "Realty" sliced in half. The well carrying the sample
+photograph runs 95,212 EMU up behind the Corner House logo. The source gets
+away with that because Slides letterboxes a picture fill whose aspect does not
+match its shape, so the sample never reaches the top of its own box. Gable crops
+to fill, so it did.
+
+The design marks the real picture area with a second empty rectangle inside the
+well. The well is still what gets deleted; the guide is where the image goes.
 """
 
 from __future__ import annotations
@@ -12,66 +17,95 @@ from typing import Any
 
 from gable.slides.hero import HERO_OBJECT_IDS, find_hero_frame
 
-#: The real slide, in EMU.
 SLIDE_WIDTH = 10287000
 SLIDE_HEIGHT = 12852400
 
-#: Under Contract's page, in its real back-to-front order, trimmed to the
-#: elements that decide this: the logo, the true photo well, and the oversized
-#: guide that overlaps both the logo above and the title below.
-LOGO = {
-    "objectId": "p1_i84",
-    "shape": {"shapeProperties": {}},
-    "size": {"width": {"magnitude": 3729544}, "height": {"magnitude": 1715874}},
-    "transform": {"translateX": 3278728, "translateY": 170763, "scaleX": 1, "scaleY": 1},
-}
-TRUE_WELL = {
-    "objectId": "p1_i85",
-    "shape": {"shapeProperties": {}},
-    "size": {"width": {"magnitude": 10268207}, "height": {"magnitude": 5337953}},
-    "transform": {"translateX": 18793, "translateY": 2172432, "scaleX": 1, "scaleY": 1},
-}
-OVERSIZED_GUIDE = {
-    "objectId": "p1_i88",
-    "shape": {"shapeProperties": {}},
-    "size": {"width": {"magnitude": 10270918}, "height": {"magnitude": 6781440}},
-    "transform": {"translateX": 8400, "translateY": 1791425, "scaleX": 1, "scaleY": 1},
-}
-PAGE: dict[str, Any] = {"pageElements": [LOGO, TRUE_WELL, OVERSIZED_GUIDE]}
+
+def _shape(object_id: str, x: float, y: float, width: float, height: float) -> dict[str, Any]:
+    """One unfilled, untexted rectangle, as a PPTX import leaves it."""
+    return {
+        "objectId": object_id,
+        "shape": {"shapeProperties": {}},
+        "size": {"width": {"magnitude": width}, "height": {"magnitude": height}},
+        "transform": {"translateX": x, "translateY": y, "scaleX": 1, "scaleY": 1},
+    }
 
 
-def _top(element: dict[str, Any]) -> float:
-    """The element's top edge in EMU."""
-    return float(element["transform"]["translateY"])
+#: The logo box. Its bottom edge is the line the photo must not cross.
+LOGO = _shape("p1_i84", 3278728, 170763, 3729544, 1715874)
+LOGO_BOTTOM = 170763 + 1715874
+
+#: The inner rectangle marking where the picture belongs.
+GUIDE = _shape("p1_i85", 18793, 2172432, 10268207, 5337953)
+
+#: The well: holds the sample photograph, and runs up behind the logo.
+WELL = _shape("p1_i88", 8400, 1791425, 10270918, 6781440)
+
+PAGE: dict[str, Any] = {"pageElements": [LOGO, GUIDE, WELL]}
 
 
-def _bottom(element: dict[str, Any]) -> float:
-    """The element's bottom edge in EMU."""
-    transform = element["transform"]
-    height = float(element["size"]["height"]["magnitude"])
-    return _top(element) + height * float(transform["scaleY"])
-
-
-def test_under_contract_uses_the_well_that_clears_the_logo() -> None:
-    """The defect that shipped: the well began above the logo's bottom edge."""
+def test_the_well_is_replaced_but_the_photo_is_drawn_at_the_guide() -> None:
+    """Both halves matter: delete the sample, draw where the design says."""
     frame = find_hero_frame(PAGE, SLIDE_WIDTH, SLIDE_HEIGHT, "Under Contract")
 
     assert frame is not None
-    assert frame.object_id == "p1_i85"
-    assert frame.y >= _bottom(LOGO), "a well starting above the logo paints over it"
+    assert frame.object_id == "p1_i88", "the sample photograph lives in the well"
+    assert frame.y == 2172432, "the image is drawn at the guide, not the well"
+    assert frame.height == 5337953
 
 
-def test_the_oversized_guide_is_the_one_that_would_have_clipped_the_logo() -> None:
-    """States the defect directly, so the fix cannot be reverted by accident."""
-    assert _top(OVERSIZED_GUIDE) < _bottom(LOGO)
-    assert _bottom(LOGO) - _top(OVERSIZED_GUIDE) == 95212
-
-
-def test_the_name_is_matched_regardless_of_spacing_and_case() -> None:
-    frame = find_hero_frame(PAGE, SLIDE_WIDTH, SLIDE_HEIGHT, "  under   CONTRACT ")
+def test_the_drawn_photo_clears_the_logo() -> None:
+    """The defect that shipped, stated as the property that prevents it."""
+    frame = find_hero_frame(PAGE, SLIDE_WIDTH, SLIDE_HEIGHT, "Under Contract")
 
     assert frame is not None
-    assert frame.object_id == "p1_i85"
+    assert frame.y >= LOGO_BOTTOM, "a photo starting above the logo paints over it"
+    assert WELL["transform"]["translateY"] < LOGO_BOTTOM, "the well itself does run behind it"
+
+
+def test_a_design_with_no_guide_keeps_the_well_exactly() -> None:
+    """Five of the six live designs have no guide and must not change."""
+    page: dict[str, Any] = {"pageElements": [LOGO, WELL]}
+
+    frame = find_hero_frame(page, SLIDE_WIDTH, SLIDE_HEIGHT, "Under Contract")
+
+    assert frame is not None
+    assert frame.object_id == "p1_i88"
+    assert frame.y == 1791425
+    assert frame.height == 6781440
+
+
+def test_a_shape_that_is_not_contained_is_not_a_guide() -> None:
+    """A neighbour that merely overlaps must not move the photo."""
+    outside = _shape("p1_i77", 18793, 6000000, 10268207, 5337953)
+    page: dict[str, Any] = {"pageElements": [LOGO, outside, WELL]}
+
+    frame = find_hero_frame(page, SLIDE_WIDTH, SLIDE_HEIGHT, "Under Contract")
+
+    assert frame is not None
+    assert frame.y == 1791425, "only a contained guide may move the photo"
+
+
+def test_a_guide_no_lower_than_its_well_is_ignored() -> None:
+    """Pulling the photo down out from behind the furniture is the purpose."""
+    flush = _shape("p1_i85", 18793, 1791425, 9000000, 5337953)
+    page: dict[str, Any] = {"pageElements": [LOGO, flush, WELL]}
+
+    frame = find_hero_frame(page, SLIDE_WIDTH, SLIDE_HEIGHT, "Under Contract")
+
+    assert frame is not None
+    assert frame.y == 1791425
+
+
+def test_a_sliver_inside_the_well_is_not_a_guide() -> None:
+    """A thin rule or crop mark is not where the photograph belongs."""
+    sliver = _shape("p1_i85", 18793, 2172432, 10268207, 200000)
+    page: dict[str, Any] = {"pageElements": [LOGO, sliver, WELL]}
+
+    frame = find_hero_frame(page, SLIDE_WIDTH, SLIDE_HEIGHT, "Under Contract")
+
+    assert frame is not None
+    assert frame.y == 1791425
 
 
 def test_every_live_design_still_has_a_recorded_well() -> None:
