@@ -83,7 +83,8 @@ from gable.db.template_store import (
     template_catalog_adopted,
     template_for_thread,
 )
-from gable.listings.intake import Intake
+from gable.listings.address import tidy as tidy_address
+from gable.listings.intake import Intake, address_looks_usable
 
 __all__ = [
     "ACTIVE",
@@ -296,6 +297,14 @@ def load_submission(
     ).fetchone()
     if not row:
         return None
+    # An address a person gave outranks the one on the form, because Gable only
+    # ever asks when the form's own value cannot be read. Laid over the stored
+    # row rather than written into it, so re-reading the sheet — which every
+    # resume does — cannot quietly undo the correction.
+    stated = connection.execute(
+        "SELECT address FROM stated_addresses WHERE response_row_id = ?",
+        (response_row_id,),
+    ).fetchone()
     return StoredSubmission(
         response_row_id=row["response_row_id"],
         sheet_row=int(row["sheet_row"]),
@@ -304,7 +313,7 @@ def load_submission(
             agent_email=row["agent_email"],
             agent_name=row["agent_name"],
             request_type=row["request_type"],
-            address=row["address"],
+            address=str(stated["address"]) if stated else row["address"],
             post_details=row["post_details"],
             open_house=row["open_house"],
             new_price=row["new_price"],
@@ -517,6 +526,46 @@ def record_spend(
 SUPPLIABLE_FIELDS: Final[frozenset[str]] = frozenset(
     {"beds", "baths", "square_feet", "list_price", "open_house"}
 )
+
+
+def remember_stated_address(
+    connection: sqlite3.Connection,
+    response_row_id: str,
+    address: str,
+    stated_by: str = "",
+) -> None:
+    """Record the address a person gave for a submission Gable could not read.
+
+    Args:
+        connection: An open connection.
+        response_row_id: The submission the correction belongs to.
+        address: The address as stated.
+        stated_by: The Slack user id, for the audit trail.
+
+    Raises:
+        ValueError: When the address is blank, or still not one a flyer could
+            carry. Storing an unusable correction would only reproduce the same
+            pause with a value nobody can trace to the form.
+        sqlite3.Error: on a write failure.
+    """
+    tidied = tidy_address(address)
+    if not tidied.strip():
+        msg = "a stated address cannot be blank"
+        raise ValueError(msg)
+    if not address_looks_usable(tidied):
+        msg = f"{address!r} is still not a usable property address"
+        raise ValueError(msg)
+    connection.execute(
+        """
+        INSERT INTO stated_addresses (response_row_id, address, stated_by, stated_at)
+        VALUES (?,?,?,?)
+        ON CONFLICT(response_row_id) DO UPDATE SET
+            address=excluded.address, stated_by=excluded.stated_by,
+            stated_at=excluded.stated_at
+        """,
+        (response_row_id, tidied.strip(), stated_by, _now()),
+    )
+    connection.commit()
 
 
 def remember_supplied_fact(

@@ -27,7 +27,7 @@ from typing import Final
 
 #: Bumped whenever a migration is added. `apply_migrations` uses it to decide
 #: what still needs running.
-SCHEMA_VERSION: Final[int] = 11
+SCHEMA_VERSION: Final[int] = 12
 
 #: Each migration is (version, sql). They run in order and only once. Never edit
 #: one that has shipped — add another, the same rule as the decision log.
@@ -387,6 +387,29 @@ MIGRATIONS: Final[tuple[tuple[int, str], ...]] = (
             supplied_by TEXT NOT NULL DEFAULT '',
             supplied_at TEXT NOT NULL,
             PRIMARY KEY (address_key, field)
+        );
+        """,
+    ),
+    (
+        12,
+        """
+        -- The address a person gave when Gable could not read the one on the
+        -- form. Row 81 arrived as "1011 Winged Foot Drive" with no city, state
+        -- or ZIP, Gable asked what the address was, Chase answered it exactly,
+        -- and nothing happened: there was no way to accept the answer, so the
+        -- run sat at needs_info and Carmen would have waited forever.
+        --
+        -- It cannot live in supplied_facts, which is keyed by address_key —
+        -- the whole problem is that there is no usable address to key on. And
+        -- it cannot be written back to the form, which Gable never modifies.
+        -- So it belongs to the submission, and `load_submission` lays it over
+        -- the form's own value: re-reading the sheet cannot lose the correction
+        -- and the response tab stays untouched.
+        CREATE TABLE IF NOT EXISTS stated_addresses (
+            response_row_id TEXT PRIMARY KEY,
+            address         TEXT NOT NULL,
+            stated_by       TEXT NOT NULL DEFAULT '',
+            stated_at       TEXT NOT NULL
         );
         """,
     ),

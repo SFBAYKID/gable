@@ -310,8 +310,9 @@ TOOLS: Final[list[dict[str, Any]]] = [
             "description": (
                 "Record the listing details the person states in answer to Gable's one "
                 "question, then continue the paused run. Use this whenever they give a "
-                "price, square footage, bed or bath count, or an open-house date and time "
-                "— 'List price is $200,000', '2000 sq feet', 'Sunday 2-4pm'. Gable asks "
+                "property address, price, square footage, bed or bath count, or an "
+                "open-house date and time — 'It is 12 Main St, Bowie, MD 20721', "
+                "'List price is $200,000', '2000 sq feet', 'Sunday 2-4pm'. Gable asks "
                 "for everything at once, so ONE reply usually carries several answers: "
                 "'3 beds, 2 baths, $600,000' is a single call listing all three. Record "
                 "every value they gave in that one call and omit anything they did not "
@@ -329,6 +330,7 @@ TOOLS: Final[list[dict[str, Any]]] = [
                                 "field": {
                                     "type": "string",
                                     "enum": [
+                                        "address",
                                         "list_price",
                                         "square_feet",
                                         "beds",

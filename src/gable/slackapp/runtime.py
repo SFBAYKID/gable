@@ -50,6 +50,7 @@ from gable.slackapp.recovery import (
 )
 from gable.slackapp.resume import may_rebuild, resume_with_current_sources
 from gable.slackapp.source_refresh import SourceRefreshError, refresh_submission_sources
+from gable.slackapp.supplied import record_and_resume
 from gable.slides.library import list_files as list_template_files
 from gable.voice import is_clean, safe
 
@@ -339,61 +340,20 @@ def build_components(settings: Settings) -> RuntimeComponents:
                     reconcile=slack_reconcile,
                 )
             if decision.tool == "supply_listing_value":
-                # Answering the question Gable asked has to move the run, or the
-                # question is a dead end: Chase replied "List price is $200,000"
-                # and Gable thanked him, kept the run at needs_info, and stored
-                # nothing.
-                run = store.run_for_thread(action_connection, thread_ts)
-                if run is None:
-                    return (
-                        "I could not match this thread to a listing, so I have not recorded that."
-                    )
-                action_drive = build_google_service("drive", "v3", action_credentials)
-                action_sheets = build_google_service("sheets", "v4", action_credentials)
-                try:
-                    refreshed_submission = refresh_submission_sources(
-                        action_connection,
-                        run,
-                        SheetClient(spreadsheet_id=settings.sheet_id, service=action_sheets),
-                        action_drive,
-                        settings.drive_id,
-                        settings.drive_templates_folder_id,
-                    )
-                except SourceRefreshError:
-                    logger.exception("a listing's current form or contact source could not be read")
-                    return (
-                        "I could not refresh this listing from its form and contact record, "
-                        "so I have not recorded that and left the run paused."
-                    )
-                # The address comes from the freshly re-read row rather than a
-                # cached copy, so a stated fact is filed against the property
-                # the run is actually about. One reply answers the one batched
-                # question, so it routinely carries several values; every one of
-                # them is recorded before the run continues.
-                if not record_stated(
-                    action_connection,
-                    refreshed_submission.intake.address,
-                    decision.arguments,
-                ):
-                    return (
-                        "I did not understand that as one of the details I asked for, so I "
-                        "have not recorded it."
-                    )
-                # The value is recorded by this point; reopening a finished
-                # flyer is what lets the reply actually be used.
-                if not may_rebuild(action_connection, run, action_id, thread_ts):
-                    return ""
-                return resume_with_current_sources(
+                return record_and_resume(
                     settings=settings,
                     connection=action_connection,
-                    drive=action_drive,
+                    drive=build_google_service("drive", "v3", action_credentials),
+                    sheets=build_google_service("sheets", "v4", action_credentials),
                     slides=action_slides,
-                    stored=refreshed_submission,
-                    run=run,
+                    arguments=decision.arguments,
                     thread_ts=thread_ts,
+                    action_id=action_id,
                     progress=progress,
                     post_once=slack_post_once,
                     reconcile=slack_reconcile,
+                    may_rebuild=may_rebuild,
+                    resume=resume_with_current_sources,
                 )
             if decision.tool == "rebuild_flyer":
                 run = store.run_for_thread(action_connection, thread_ts)
