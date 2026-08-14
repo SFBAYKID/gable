@@ -29,7 +29,11 @@ def db(tmp_path: Path) -> sqlite3.Connection:
 def test_delivery_is_recorded_only_after_slack_confirms_its_message(
     db: sqlite3.Connection,
 ) -> None:
-    """A ready Drive file is still building until its link exists in Slack."""
+    """A ready Drive file is still building until its link exists in Slack.
+
+    Two posts now: the listing announces itself while the run is still pending,
+    which is what opens the thread the link then lands in.
+    """
     submission = _submission(rid="rid-delivery-order")
     _record(db, submission)
     runner = _runner(db, Recorder())
@@ -45,7 +49,7 @@ def test_delivery_is_recorded_only_after_slack_confirms_its_message(
     result = runner.run(submission)
 
     current = store.run_by_id(db, result.run_id)
-    assert status_during_post == ["building"]
+    assert status_during_post == ["pending", "building"]
     assert result.status == "delivered"
     assert current is not None
     assert current.status == "delivered"
@@ -286,14 +290,14 @@ def test_pixelated_mike_render_is_held_without_exposing_the_bad_flyer(
     assert current["status"] == "needs_review"
     assert current["output_url"].endswith("/edit"), "retain the rejected copy for audit"
     assert result.output_url == current["output_url"]
-    assert len(rec.said) == 1
-    assert "badly pixelated and blurry" in rec.said[0]
-    assert "kept the supplied image and draft" in rec.said[0]
-    assert "without starting over" in rec.said[0]
-    assert "send" not in rec.said[0].lower()
-    assert "larger" not in rec.said[0].lower()
-    assert "Open it" not in rec.said[0]
-    assert current["output_url"] not in rec.said[0]
+    assert len(rec.said) == 2  # the announcement, then the outcome
+    assert "badly pixelated and blurry" in rec.said[-1]
+    assert "kept the supplied image and draft" in rec.said[-1]
+    assert "without starting over" in rec.said[-1]
+    assert "send" not in rec.said[-1].lower()
+    assert "larger" not in rec.said[-1].lower()
+    assert "Open it" not in rec.said[-1]
+    assert current["output_url"] not in rec.said[-1]
 
 
 def test_mike_wrong_property_photo_requests_one_replacement_on_the_same_run(
@@ -347,14 +351,15 @@ def test_mike_wrong_property_photo_requests_one_replacement_on_the_same_run(
     assert current.output_url.endswith("/edit")
     assert current.failure_reason == store.PHOTO_REPLACEMENT_WAITING
     assert store.run_attempt_count(db, submission.response_row_id) == 1
-    assert len(result.said) == len(rec.said) == 1
+    assert len(result.said) == 1
+    assert len(rec.said) == 2  # announcement, then outcome
     assert result.questions == ["Can you send the correct property image?"]
-    assert "house number in the photo says 721" in rec.said[0]
-    assert "Can you send the correct property image?" in rec.said[0]
-    assert rec.said[0].startswith("&gt;I rendered it")
-    assert is_clean(rec.said[0])
-    assert "Open the flyer" not in rec.said[0]
-    assert current.output_url not in rec.said[0]
+    assert "house number in the photo says 721" in rec.said[-1]
+    assert "Can you send the correct property image?" in rec.said[-1]
+    assert rec.said[-1].startswith("&gt;I rendered it")
+    assert is_clean(rec.said[-1])
+    assert "Open the flyer" not in rec.said[-1]
+    assert current.output_url not in rec.said[-1]
     confirmation_events = db.execute(
         "SELECT detail FROM run_events WHERE run_id = ? AND status = 'needs_photo' ORDER BY id",
         (result.run_id,),
@@ -427,8 +432,8 @@ def test_an_unconfirmed_replacement_request_remains_durable_review(
     assert current.output_url.endswith("/edit")
     assert result.said == []
     assert result.questions == []
-    assert len(attempted) == 1
-    assert "correct property image" in attempted[0]
+    assert len(attempted) == 2  # the announcement, then the question
+    assert "correct property image" in attempted[-1]
     assert not db.execute(
         "SELECT 1 FROM run_events WHERE run_id = ? AND status = 'needs_photo'",
         (result.run_id,),
@@ -487,7 +492,7 @@ def test_replacement_question_survives_an_overlong_visual_finding(
     result = runner.run(submission)
 
     assert result.status == "needs_photo"
-    assert len(rec.said) == 1
-    assert "Can you send the correct property image?" in rec.said[0]
-    assert len(rec.said[0]) <= 600
-    assert is_clean(rec.said[0])
+    assert len(rec.said) == 2  # the announcement, then the outcome
+    assert "Can you send the correct property image?" in rec.said[-1]
+    assert len(rec.said[-1]) <= 600
+    assert is_clean(rec.said[-1])

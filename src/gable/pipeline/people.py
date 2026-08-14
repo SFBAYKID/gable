@@ -8,12 +8,18 @@ template has an explicit, certified slot contract.
 
 from __future__ import annotations
 
+import logging
+from collections.abc import Callable
 from sqlite3 import Connection
 
+from gable.db import store
 from gable.listings.address import tidy
 from gable.listings.intake import Intake
 from gable.listings.names import tidy_name
 from gable.sheets import repository as repo
+from gable.voice import safe
+
+logger = logging.getLogger("gable.people")
 
 
 def opening_for(
@@ -98,3 +104,60 @@ def announce(connection: Connection, intake: Intake, validated_name: str = "") -
     # types. `tidy` corrects nothing, so it still says what was submitted.
     address = tidy(intake.address)
     return f"{headline} — {address}" if address else headline
+
+
+def open_thread(
+    connection: Connection,
+    run_id: str,
+    intake: Intake,
+    validated_name: str,
+    say: Callable[[str, str | None], str],
+    existing_thread_ts: str = "",
+) -> str:
+    """Announce a listing so everything said about it lands in one thread.
+
+    A run that never has to ask anything used to reach delivery owning no
+    thread, and its finished link posted at channel level naming no property.
+    Announcing once every prerequisite has been resolved — but before the build
+    — means the thread exists whether the run ends in a question or a link.
+
+    Args:
+        connection: An open database connection, for the roster lookup.
+        run_id: The run being announced, so its thread root is recorded.
+        intake: The submission, for the announcement's wording.
+        validated_name: The name the contact check proved.
+        say: Posts a message and returns the thread timestamp it landed in.
+        existing_thread_ts: The run's current root, if it already owns one.
+
+    Returns:
+        The run's thread root: the existing one when it already had it, the new
+        one it just opened, or an empty string when the announcement was empty
+        or Slack could not be reached.
+
+    Raises:
+        Nothing. Slack being unavailable must not turn a verified flyer into a
+        failed run; without a thread the outcome still posts, in the channel,
+        which is the behaviour that existed before this.
+    """
+    if existing_thread_ts:
+        return existing_thread_ts
+    opening = announce(connection, intake, validated_name)
+    if not opening:
+        return ""
+    try:
+        thread_ts = say(safe(opening), None)
+    except Exception:
+        logger.exception("could not announce the listing for run %s", run_id)
+        return ""
+    if not thread_ts:
+        return ""
+    current = store.run_by_id(connection, run_id)
+    if current is not None:
+        store.set_status(
+            connection,
+            run_id,
+            current.status,
+            "announced the listing and opened its thread",
+            slack_thread_ts=thread_ts,
+        )
+    return thread_ts

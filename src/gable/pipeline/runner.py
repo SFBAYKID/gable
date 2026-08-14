@@ -427,6 +427,12 @@ class Runner:
                 ),
             )
 
+        # Announced whether this ends in a question or a link: a run that never
+        # had to ask owned no thread, and put its link at channel level.
+        self.origin_thread_ts = people.open_thread(
+            self.connection, run_id, intake, contact.name, self.say, self.origin_thread_ts
+        )
+
         # 6. Build only after all deterministic preflight checks pass.
         store.set_status(
             self.connection,

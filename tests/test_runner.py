@@ -501,9 +501,9 @@ def test_a_correctable_preflight_warning_builds_and_reports_one_outcome(
     assert result.status == "delivered"
     assert result.output_url
     assert rec.copied is True
-    assert len(rec.said) == 1
-    assert "sized the agent email down" in rec.said[0]
-    assert "?" not in rec.said[0]
+    assert len(rec.said) == 2  # the announcement, then the outcome
+    assert "sized the agent email down" in rec.said[-1]
+    assert "?" not in rec.said[-1]
 
 
 def test_a_structural_preflight_problem_cannot_be_overridden(db: sqlite3.Connection) -> None:
@@ -552,10 +552,10 @@ def test_every_correctable_layout_warning_is_folded_into_one_outcome(
 
     assert result.status == "delivered"
     assert rec.copied is True
-    assert len(rec.said) == 1
-    assert "sized the address down" in rec.said[0]
-    assert "center-cropped" in rec.said[0]
-    assert "?" not in rec.said[0]
+    assert len(rec.said) == 2  # the announcement, then the outcome
+    assert "sized the address down" in rec.said[-1]
+    assert "center-cropped" in rec.said[-1]
+    assert "?" not in rec.said[-1]
 
 
 def test_an_unresolved_proactive_template_audit_blocks_before_preflight_or_copy(
