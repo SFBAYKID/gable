@@ -324,7 +324,13 @@ def test_a_multi_slide_template_is_refused_before_only_one_page_can_be_checked()
     assert report.blockers[0].code == "slide_count"
 
 
-def test_a_new_template_that_cannot_fit_readable_content_is_blocked() -> None:
+def test_a_new_template_that_cannot_fit_readable_content_is_reported_not_blocked() -> None:
+    """The allowance asks about a value nobody has yet, so it advises.
+
+    Every real value is measured exactly against the same box before a flyer is
+    built. Blocking on the estimate stopped every listing on a design the moment
+    Carmen edited it.
+    """
     presentation = _presentation(
         _text("address", "[PROPERTY ADDRESS]", 900),
         _text("email", "Email", 100),
@@ -332,10 +338,11 @@ def test_a_new_template_that_cannot_fit_readable_content_is_blocked() -> None:
 
     report = preflight.certify(presentation, "New Listing", "Just Listed")
 
-    issue = next(item for item in report.blockers if item.code == "capacity_agent_email")
+    issue = next(item for item in report.warnings if item.code == "capacity_agent_email")
+    assert report.blockers == ()
     assert "safe test" in issue.say
     assert "readability limit" in issue.say
-    assert "updated template" in issue.say
+    assert "fit each real value" in issue.say
     assert not violations(issue.say)
 
 
@@ -349,9 +356,9 @@ def test_a_tall_name_box_is_not_treated_as_permission_to_wrap_the_name() -> None
 
     report = preflight.certify(presentation, "New Listing", "Just Listed")
 
-    issue = next(item for item in report.blockers if item.code == "capacity_agent_name")
+    issue = next(item for item in report.warnings if item.code == "capacity_agent_name")
     assert "readability limit" in issue.say
-    assert "Widen that section" in issue.say
+    assert "Widen that section if you can" in issue.say
 
 
 def test_new_template_capacity_that_can_autofit_is_not_a_warning() -> None:

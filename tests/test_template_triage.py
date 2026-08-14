@@ -165,7 +165,9 @@ def test_new_file_is_measured_and_owns_a_recheck_thread(tmp_path: Path) -> None:
     assert "agent email" in said[0]
     assert not violations(said[0])
     audit = store.template_for_thread(connection, "thread-1")
-    assert audit is not None and audit.status == "needs_template"
+    # A tight slot is advice, not a refusal: the design stays usable and every
+    # real value is measured against that box before a flyer is built.
+    assert audit is not None and audit.status == "ready"
 
     presentations["new-1"] = _presentation(email_width=700)
     files[0] = TemplateFile("new-1", "New Listing", "two")
@@ -240,12 +242,15 @@ def test_a_certified_template_is_rechecked_when_its_drive_revision_changes(
     assert triage.scan_new() == 1
 
     changed = store.template_audit(connection, "new-1")
-    assert changed is not None and changed.status == "needs_template"
+    assert changed is not None and changed.status == "ready"
     assert changed.modified_time == "revision-two"
     assert changed.slack_thread_ts == "thread-1"
     assert "updated New Listing design" in said[-1]
     assert "agent email" in said[-1]
-    assert visual_calls == 1
+    # Both revisions were inspected. A tight slot no longer refuses the design,
+    # so it no longer skips the visual certification either — the design still
+    # has to be looked at before Carmen is told it is ready.
+    assert visual_calls == 2
     connection.close()
 
 
@@ -630,7 +635,7 @@ def test_adopting_a_new_design_still_measures_its_character_capacity(
     assert triage.scan_new() == 1
 
     recorded = store.template_audit(connection, "new-1")
-    assert recorded is not None and recorded.status == "needs_template"
+    assert recorded is not None and recorded.status == "ready"
     assert "agent name" in recorded.summary
     connection.close()
 

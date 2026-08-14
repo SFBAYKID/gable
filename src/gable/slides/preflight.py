@@ -459,9 +459,17 @@ def certify(
                             f"section cannot hold the safe test of {expected} average "
                             f"characters without dropping below the "
                             f"{fitting.MIN_READABLE_PT:g}-point readability limit. Widen "
-                            "that section, then tell me to check the updated template again."
+                            "that section if you can. I will still fit each real value "
+                            "to it before I build."
                         ),
-                        blocking=True,
+                        # Advisory, not a gate. This asks whether a box could
+                        # hold a long-but-normal value from anyone on the
+                        # roster, which is worth telling Carmen when she files a
+                        # design. Every real value is measured exactly against
+                        # this box before any flyer is built, so making the
+                        # estimate block also stopped every listing on that
+                        # design the moment she edited it.
+                        blocking=False,
                     )
                 )
                 warned.add(field_name)

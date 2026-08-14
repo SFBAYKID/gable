@@ -191,7 +191,7 @@ class TemplateTriage:
         if duplicate:
             return self._duplicate_message(item.name, updated=updated), "needs_template"
         report = self._inspect(item)
-        visual = self.look_at(item.file_id) if not report.issues else None
+        visual = self.look_at(item.file_id) if not report.blockers else None
         return self._message(
             item.name,
             report,
@@ -392,7 +392,7 @@ class TemplateTriage:
         # Open House hangs off the right edge — which it does on purpose, and
         # which the flyer that had already delivered showed. The flyer's own
         # render is inspected either way, so this also saves a paid call.
-        if not report.issues and not for_listing:
+        if not report.blockers and not for_listing:
             progress("is inspecting the updated template...")
             visual = self.look_at(current.file_id)
         message, status = self._message(
@@ -435,9 +435,8 @@ class TemplateTriage:
         visual_required: bool = True,
     ) -> tuple[str, str]:
         """Choose one precise Slack outcome from a measured report."""
-        issues = (*report.blockers, *report.warnings)
-        if issues:
-            message = issues[0].say
+        if report.blockers:
+            message = report.blockers[0].say
             if updated:
                 message = message.replace("the new ", "the updated ", 1)
             return safe(message), "needs_template"
@@ -480,6 +479,11 @@ class TemplateTriage:
                 ),
                 "needs_template",
             )
+        # A measured tradeoff is worth saying and is not a reason to refuse the
+        # design. Carmen hears that a slot is tight; the listings built on it
+        # still get their own exact measurement before anything is copied.
+        if report.warnings:
+            return safe(report.warnings[0].say.replace("the new ", f"the {timing} ", 1)), "ready"
         prefix = "I read the updated" if updated else "I checked the new"
         message = safe(
             f"{prefix} {name} design from Generic Templates. I did not find a "
