@@ -8,6 +8,7 @@ needs a credential, without fetching the same public profile twice.
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from sqlite3 import Connection
@@ -16,6 +17,8 @@ from gable.agents import website
 from gable.db import store
 from gable.listings.intake import Intake
 from gable.sheets import repository as repo
+
+logger = logging.getLogger("gable.contact_gate")
 
 
 @dataclass(slots=True)
@@ -46,6 +49,11 @@ class ContactGate:
                     name, email, filed.phone if filed else ""
                 )
             except Exception:
+                # Carmen reads one sentence; whoever has to fix it needs the
+                # cause. A lookup that fails silently reads as "the website is
+                # down" whether it was a timeout, a spent Firecrawl budget, or a
+                # bug, and all three were guessed at once before this line.
+                logger.exception("the official profile lookup for %s could not complete", email)
                 self._official_result = website.ProfileLookup(
                     problem=(
                         "I could not complete the check against the official "
