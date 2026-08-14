@@ -137,3 +137,21 @@ def test_a_design_that_writes_no_unit_gets_the_number_alone() -> None:
 def test_a_count_with_no_number_is_left_exactly_as_supplied() -> None:
     """A value like Studio is not a number, and rewriting it would lose it."""
     assert fields._as_written("beds", "5 BEDS", "Studio") == "Studio"
+
+
+def test_a_date_keeps_no_joining_word_once_its_time_has_moved_boxes() -> None:
+    """Row 81 wrote "08/01 and 08/02 from 12-2pm" across the design's two boxes."""
+    resolution = fields.resolve(["Sunday, Aug 2, 2026", "2-4PM"])
+
+    pairs = fields.replacements(resolution, {"open_house": "08/01 and 08/02 from 12-2pm"})
+
+    assert pairs["Sunday, Aug 2, 2026"] == "08/01 and 08/02"
+    assert pairs["2-4PM"] == "12-2pm"
+
+
+def test_a_date_that_reads_naturally_is_not_trimmed() -> None:
+    resolution = fields.resolve(["Sunday, Aug 2, 2026", "2-4PM"])
+
+    pairs = fields.replacements(resolution, {"open_house": "Saturday, Sep 6, 2026 1-3PM"})
+
+    assert pairs["Sunday, Aug 2, 2026"] == "Saturday, Sep 6, 2026"

@@ -162,3 +162,16 @@ def test_a_reviews_prose_is_its_quote_and_never_a_note(tmp_path: Path) -> None:
     assert values["listing_note"] == ""
     assert values["client_name"] == "Rob Morgan"
     connection.close()
+
+
+def test_square_footage_is_grouped_the_way_every_design_writes_it(tmp_path: Path) -> None:
+    """A researched 3663 rendered beside a sample reading 6,348 SQFT."""
+    connection = connect(tmp_path / "gable.db")
+    apply_migrations(connection)
+    intake = _note_intake("Open House", "")
+
+    assert for_intake(connection, intake, {"square_feet": "3663"})["square_feet"] == "3,663"
+    assert for_intake(connection, intake, {"square_feet": "2,430"})["square_feet"] == "2,430"
+    assert for_intake(connection, intake, {"square_feet": "980 sq ft"})["square_feet"] == "980"
+    assert for_intake(connection, intake, {"square_feet": "Studio"})["square_feet"] == "Studio"
+    connection.close()

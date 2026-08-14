@@ -146,12 +146,18 @@ def test_a_flyer_fitted_from_a_small_photo_invites_a_better_one(
 
 
 def test_square_footage_drops_a_unit_the_design_already_draws() -> None:
-    """Every design puts the number beside its own ft² icon and Sq FT label."""
+    """Every design puts the number beside its own ft² icon and Sq FT label.
+
+    It also writes its own sample grouped — "6,348 SQFT", "2,430 Sq FT" — so a
+    researched figure arriving as bare digits is grouped to match rather than
+    rendering "3663 SQFT" beside a sample that reads 6,348.
+    """
     from gable.pipeline.run_values import _measure_only
 
-    assert _measure_only("1450 sq ft") == "1450"
+    assert _measure_only("1450 sq ft") == "1,450"
     assert _measure_only("2,430 Sq FT") == "2,430"
-    assert _measure_only("1450") == "1450"
+    assert _measure_only("1450") == "1,450"
+    assert _measure_only("980") == "980"
 
 
 def test_a_value_with_no_digits_is_left_as_the_person_typed_it() -> None:

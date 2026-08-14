@@ -48,8 +48,15 @@ def _measure_only(square_feet: str) -> str:
     """
     kept = "".join(
         character for character in square_feet if character.isdigit() or character == ","
-    )
-    return kept.strip(",") or square_feet.strip()
+    ).strip(",")
+    if not kept:
+        return square_feet.strip()
+    # Every design writes its own sample with thousands separators — "6,348
+    # SQFT", "2,430 Sq FT" — and a researched figure arrives as bare digits, so
+    # a real listing rendered "3663 SQFT" beside a sample that reads 6,348.
+    # Grouping a number is presentation, not a change to what anyone stated.
+    digits = kept.replace(",", "")
+    return f"{int(digits):,}" if digits.isdigit() else kept
 
 
 #: Longer than this and what the agent typed is marketing prose, not a note

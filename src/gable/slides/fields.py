@@ -109,6 +109,12 @@ _SAMPLE_OPEN_HOUSE_DATE_AND_TIME: Final[re.Pattern[str]] = re.compile(
     re.IGNORECASE,
 )
 
+#: A word left dangling at the end of a date once its time has been taken out
+#: into the design's own separate box.
+_TRAILING_JOINER: Final[re.Pattern[str]] = re.compile(
+    r"\s+(?:from|at|on|between|starting|beginning|@)\s*$", re.IGNORECASE
+)
+
 PATTERNS: Final[dict[str, tuple[re.Pattern[str], ...]]] = {
     "address": (
         re.compile(r"^\[\s*PROPERTY ADDRESS\s*\]$", re.IGNORECASE),
@@ -598,6 +604,10 @@ def _open_house_part(literal: str, value: str) -> str:
         return value
     time_part = found.group(0).strip()
     remainder = (value[: found.start()] + " " + value[found.end() :]).strip(" ,-\u2013\u2014\t")
+    # The word that joined the date to the time it no longer sits beside.
+    # "08/01 and 08/02 from 12-2pm" left "08/01 and 08/02 from" in the date box,
+    # with the "from" dangling at the end of the line.
+    remainder = _TRAILING_JOINER.sub("", remainder).strip(" ,-\u2013\u2014\t")
     date_part = " ".join(remainder.split()) or value
     # One box holding both, on two lines. Filling it with the whole string on a
     # single line overflowed the tag it sits in, so the shape is preserved.
