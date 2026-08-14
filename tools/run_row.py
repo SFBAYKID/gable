@@ -14,6 +14,12 @@ the photo handoff, and Carmen's upload has nothing to attach itself to:
 Posts to `GABLE_SLACK_CHANNEL_ID` and nowhere else. Does not handle: rows whose
 identity already has three attempts recorded, which the runner refuses by
 design.
+
+`--hero-photo-url` starts a run with a photograph already published, so a design
+can be exercised across many agents without a person uploading the same image
+into forty threads. **It is not how a listing gets its photo.** In real use the
+photograph is the one thing a person chooses, and Gable asks for it in the
+thread; this flag exists so the renderer can be tested at breadth.
 """
 
 from __future__ import annotations
@@ -138,7 +144,19 @@ def main(argv: list[str] | None = None) -> int:
             "the photo already attached to it, instead of starting a new one"
         ),
     )
+    parser.add_argument(
+        "--hero-photo-url",
+        default="",
+        help=(
+            "start with this already-published property photo instead of asking "
+            "for one. FOR TESTING A DESIGN ACROSS MANY AGENTS, not for real work: "
+            "it skips the step where a person chooses the photograph"
+        ),
+    )
     args = parser.parse_args(argv)
+    if args.hero_photo_url and args.resume:
+        logger.error("--hero-photo-url starts a run; --resume reuses the run's own photo")
+        return 2
 
     try:
         settings = Settings.load(require_credentials=not args.dry_run)
@@ -314,6 +332,7 @@ def main(argv: list[str] | None = None) -> int:
                 say,
                 post_once=post_once,
                 reconcile=reconcile,
+                hero_photo_url=args.hero_photo_url,
             )
             result = runner.run(submission)
         logger.info("run %s finished as %s", result.run_id, result.status)
