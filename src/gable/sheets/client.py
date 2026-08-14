@@ -10,7 +10,10 @@ retry loop turns one slow minute into a quota ban.
 
 from __future__ import annotations
 
+import http.client
 import random
+import socket
+import ssl
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -27,6 +30,22 @@ SCOPES: Final[tuple[str, ...]] = ("https://www.googleapis.com/auth/spreadsheets.
 #: Statuses worth retrying. Everything else is a real error and retrying it just
 #: delays the report.
 RETRYABLE: Final[frozenset[int]] = frozenset({429, 500, 502, 503, 504})
+
+#: Transport failures worth trying again, as distinct from an HTTP status.
+#: A read timeout is the commonest of them and until 2026-08-14 it was not
+#: retried at all: it fell to the catch-all below and broke the loop on the
+#: first attempt. That took the poller down for a whole pass and refused a
+#: manual run twice in a row, on a sheet of 110 rows that normally reads in
+#: under a second. Nothing here is a permanent condition, so all of them get the
+#: same jittered budget the retryable statuses do.
+RETRYABLE_TRANSPORT: Final[tuple[type[Exception], ...]] = (
+    TimeoutError,
+    ConnectionError,
+    socket.timeout,
+    socket.gaierror,
+    ssl.SSLError,
+    http.client.HTTPException,
+)
 
 MAX_ATTEMPTS: Final[int] = 5
 
@@ -112,6 +131,12 @@ class SheetClient:
                 if exc.resp.status not in RETRYABLE or attempt == MAX_ATTEMPTS - 1:
                     break
                 # Jittered, so several retries do not synchronise into a spike.
+                delay = (2**attempt) + random.uniform(0, 1)
+                time.sleep(delay)
+            except RETRYABLE_TRANSPORT as exc:
+                last = exc
+                if attempt == MAX_ATTEMPTS - 1:
+                    break
                 delay = (2**attempt) + random.uniform(0, 1)
                 time.sleep(delay)
             except Exception as exc:

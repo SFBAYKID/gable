@@ -89,3 +89,83 @@ def test_google_service_fails_closed_if_the_library_widens_its_hidden_retry(
 
     with pytest.raises(RuntimeError, match="retry behavior changed"):
         google_client.build_google_service("drive", "v3", object())
+
+
+# --- a read that times out is tried again ----------------------------------
+
+
+class _FlakyValues:
+    """A Sheets values resource that times out before it answers."""
+
+    def __init__(self, failures: int) -> None:
+        self.failures = failures
+        self.calls = 0
+
+    def get(self, **_kwargs: object) -> _FlakyValues:
+        return self
+
+    def execute(self) -> dict[str, list[list[str]]]:
+        self.calls += 1
+        if self.calls <= self.failures:
+            raise TimeoutError("The read operation timed out")
+        return {"values": [["Timestamp"], ["a"]]}
+
+
+class _FlakyService:
+    def __init__(self, values: _FlakyValues) -> None:
+        self._values = values
+
+    def spreadsheets(self) -> _FlakyService:
+        return self
+
+    def values(self) -> _FlakyValues:
+        return self._values
+
+
+def test_a_read_that_times_out_is_tried_again(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The poller lost a whole pass to one timeout, and a manual run lost two.
+
+    A read timeout used to fall to the catch-all and break the loop on its
+    first attempt, on a sheet of 110 rows that normally reads in under a second.
+    """
+    from gable.sheets.client import SheetClient
+
+    monkeypatch.setattr("gable.sheets.client.time.sleep", lambda _seconds: None)
+    values = _FlakyValues(failures=2)
+    client = SheetClient(spreadsheet_id="sheet-1", service=_FlakyService(values))
+
+    rows = client.read("'Form Responses 1'!A1:Z")
+
+    assert rows == [["Timestamp"], ["a"]]
+    assert values.calls == 3
+
+
+def test_a_read_that_never_answers_still_gives_up(monkeypatch: pytest.MonkeyPatch) -> None:
+    from gable.sheets.client import MAX_ATTEMPTS, SheetClient, SheetError
+
+    monkeypatch.setattr("gable.sheets.client.time.sleep", lambda _seconds: None)
+    values = _FlakyValues(failures=MAX_ATTEMPTS + 1)
+    client = SheetClient(spreadsheet_id="sheet-1", service=_FlakyService(values))
+
+    with pytest.raises(SheetError, match="TimeoutError"):
+        client.read("'Form Responses 1'!A1:Z")
+
+    assert values.calls == MAX_ATTEMPTS
+
+
+def test_an_error_retrying_cannot_fix_is_not_retried(monkeypatch: pytest.MonkeyPatch) -> None:
+    from gable.sheets.client import SheetClient, SheetError
+
+    class _Broken(_FlakyValues):
+        def execute(self) -> dict[str, list[list[str]]]:
+            self.calls += 1
+            raise ValueError("that range does not exist")
+
+    monkeypatch.setattr("gable.sheets.client.time.sleep", lambda _seconds: None)
+    values = _Broken(failures=0)
+    client = SheetClient(spreadsheet_id="sheet-1", service=_FlakyService(values))
+
+    with pytest.raises(SheetError):
+        client.read("'Nope'!A1:Z")
+
+    assert values.calls == 1
