@@ -90,7 +90,14 @@ def _listing_note(intake: Intake) -> str:
     if "review" in intake.request_type.lower():
         return ""
     note = " ".join(intake.post_details.split())
-    if not note or note.strip(" .").casefold() in _EMPTY_NOTES:
+    plain = note.strip(" .!").casefold()
+    if not note or plain in _EMPTY_NOTES:
+        return ""
+    # A note that only restates the request type says nothing the headline above
+    # it does not. Row 25's details column reads "Under Contract", and printing
+    # that in the panel under a headline reading "Under Contract" is worse than
+    # keeping the design's own call to action.
+    if plain in {intake.request_type.strip().casefold(), intake.category.strip().casefold()}:
         return ""
     return note if len(note) <= _MAX_NOTE_CHARS else ""
 

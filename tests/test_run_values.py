@@ -226,3 +226,14 @@ def test_a_reviewer_named_in_a_reply_is_the_one_the_design_prints(tmp_path: Path
     assert values["client_name"] == "Jenna Ellis"
     assert values["review_quote"] == "Ian is professional and experienced."
     connection.close()
+
+
+def test_a_note_that_only_repeats_the_request_type_is_not_printed(tmp_path: Path) -> None:
+    """Row 25's details column reads "Under Contract", under a headline that does."""
+    connection = connect(tmp_path / "gable.db")
+    apply_migrations(connection)
+
+    for written in ("Under Contract", "under contract!", "Under Contract."):
+        values = for_intake(connection, _note_intake("Under Contract", written), {})
+        assert values["listing_note"] == "", written
+    connection.close()
