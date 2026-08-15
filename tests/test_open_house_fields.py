@@ -215,7 +215,7 @@ def test_an_hour_range_without_am_or_pm_still_reaches_the_time_box() -> None:
 
 
 def test_a_range_of_days_is_not_mistaken_for_a_range_of_hours() -> None:
-    """ "Aug 8-9" is two days. Splitting it would leave "Aug" as the whole date."""
+    """A range of days: splitting it would leave "Aug" as the whole date."""
     resolution = fields.resolve(["Sunday, Aug 2, 2026", "2-4PM"])
 
     pairs = fields.replacements(resolution, {"open_house": "Aug 8-9"})
