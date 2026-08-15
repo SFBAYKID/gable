@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
+from dataclasses import replace
 from sqlite3 import Connection
 
 from gable.db import store
 from gable.listings.enrich import Facts, has_authoritative_source
 from gable.listings.intake import Intake
+from gable.pipeline.needs import internal_name
 from gable.pipeline.orchestrator import Outcome, Step, after_research, plan
 from gable.slides.fields import Resolution
 
@@ -47,12 +49,9 @@ def resolve(
     # is the reason the question was asked at all. Without this the answer was
     # acknowledged in Slack and then discarded: the run stayed at needs_info and
     # the next attempt asked for the same number again.
-    known = {
-        field: value
-        for field, value in store.recall_supplied_facts(connection, intake.address).items()
-        if field in required
-    }
-    step = plan(intake, known, required)
+    supplied = store.recall_supplied_facts(connection, intake.address)
+    known = {field: value for field, value in supplied.items() if field in required}
+    step = _without_answered(plan(intake, known, required), supplied)
     if step.outcome is not Outcome.RESEARCH:
         return step, known
 
@@ -72,7 +71,7 @@ def resolve(
         # missing, so a lookup triggered by an absent square footage must not
         # replace the price a person just gave with whatever a listing page says.
         known = {**found.as_dict(), **known}
-    step = after_research(intake, found, known, required)
+    step = _without_answered(after_research(intake, found, known, required), supplied)
     if allow_blank_fields and step.outcome is Outcome.ASK:
         # The gap was already put to a person and they chose to proceed. Asking
         # again with the same words is how a question becomes a dead end. The
@@ -80,3 +79,43 @@ def resolve(
         # values were left as placeholders.
         return Step(outcome=Outcome.BUILD, missing=step.missing), known
     return step, known
+
+
+def _without_answered(step: Step, supplied: Mapping[str, str]) -> Step:
+    """Drop the questions somebody has already answered from a step.
+
+    `plan` re-runs the coherence check, which reads the form's own columns and
+    knows nothing about what anyone supplied. Gable asked Jay Hinish's listing
+    for its open house date and time, was given it, and asked again — the first
+    ask was filtered and this second one was not.
+
+    Args:
+        step: What the planner decided.
+        supplied: Every value stated for this property, as stored.
+
+    Returns:
+        The same step with answered questions removed, or a BUILD when nothing
+        is left to ask. Any other outcome is returned untouched.
+
+    Raises:
+        Nothing.
+    """
+    if step.outcome is not Outcome.ASK or not supplied:
+        return step
+    keep = [
+        question
+        for question in step.questions
+        if not supplied.get(internal_name(question.field_name), "").strip()
+    ]
+    if len(keep) == len(step.questions):
+        return step
+    if not keep:
+        built: Step = replace(step, outcome=Outcome.BUILD, questions=[], missing=(), say="")
+        return built
+    narrowed: Step = replace(
+        step,
+        questions=keep,
+        say=keep[0].ask,
+        missing=tuple(q.field_name for q in keep if q.absent),
+    )
+    return narrowed

@@ -350,3 +350,86 @@ def test_an_approved_blank_stops_the_gate_asking_the_same_question_again(
     assert asked.outcome is Outcome.ASK
     assert released.outcome is Outcome.BUILD
     assert known.get("list_price", "") == "", "released means blank, never invented"
+
+
+# --- the gate does not re-ask what somebody answered -----------------------
+
+
+def test_an_open_house_already_answered_is_not_asked_for_again(tmp_path: Path) -> None:
+    """The gate re-runs the coherence check, which reads the form's own column.
+
+    Gable asked Jay Hinish's listing for its open house date and time, was
+    given it, and asked again.
+    """
+    from gable.db import store
+    from gable.db.schema import apply_migrations, connect
+    from gable.listings.intake import Intake
+    from gable.pipeline import research_gate
+    from gable.pipeline.orchestrator import Outcome
+    from gable.slides.fields import Resolution
+
+    connection = connect(tmp_path / "g.db")
+    apply_migrations(connection)
+    intake = Intake(
+        agent_email="a@example.com",
+        agent_name="Avery Agent",
+        request_type="Open House",
+        address="1 Main St, Baltimore, MD 21201",
+        post_details="",
+        open_house="",
+        new_price="",
+        closing_price="",
+        extra_notes="",
+        side="",
+        notes="",
+    )
+    store.remember_supplied_fact(
+        connection, intake.address, "open_house", "Saturday, Aug 22, 2026 1-3PM"
+    )
+
+    step, _known = research_gate.resolve(
+        connection,
+        intake,
+        Resolution(fields={"open_house": "Sunday, Aug 2, 2026"}),
+        lambda _address, _fields: Facts(),
+        lambda: None,
+    )
+
+    assert step.outcome is not Outcome.ASK
+    connection.close()
+
+
+def test_an_open_house_nobody_answered_is_still_asked_for(tmp_path: Path) -> None:
+    from gable.db.schema import apply_migrations, connect
+    from gable.listings.intake import Intake
+    from gable.pipeline import research_gate
+    from gable.pipeline.orchestrator import Outcome
+    from gable.slides.fields import Resolution
+
+    connection = connect(tmp_path / "g.db")
+    apply_migrations(connection)
+    intake = Intake(
+        agent_email="a@example.com",
+        agent_name="Avery Agent",
+        request_type="Open House",
+        address="1 Main St, Baltimore, MD 21201",
+        post_details="",
+        open_house="",
+        new_price="",
+        closing_price="",
+        extra_notes="",
+        side="",
+        notes="",
+    )
+
+    step, _known = research_gate.resolve(
+        connection,
+        intake,
+        Resolution(fields={"open_house": "Sunday, Aug 2, 2026"}),
+        lambda _address, _fields: Facts(),
+        lambda: None,
+    )
+
+    assert step.outcome is Outcome.ASK
+    assert "open house date and time" in [q.field_name for q in step.questions]
+    connection.close()
