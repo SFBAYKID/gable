@@ -49,6 +49,13 @@ PHOTO_INGRESS_ROUTE: Final[str] = "file_share"
 NOT_WAITING_FOR_A_PHOTO: Final[str] = (
     "This listing is not waiting for a photo, so I left the current flyer unchanged."
 )
+#: Returned instead of a message when the upload was declined and the message
+#: carried words of its own. Never spoken: it tells `process_file_share` that
+#: nothing has been said and the caller should answer the words as an ordinary
+#: reply. A sentinel rather than a text comparison, because the production
+#: handler posts through the durable outbox and returns an empty string, so the
+#: declining sentence never reaches the caller to be recognised.
+DECLINED_ANSWER_THE_WORDS: Final[str] = "gable:answer-the-words-instead"
 _SLACK_HOST_SUFFIXES: Final[tuple[str, ...]] = (".slack.com", ".slack-edge.com")
 _PHOTO_LOCK_STRIPES: Final[int] = 32
 _PHOTO_LOCKS: Final[tuple[threading.Lock, ...]] = tuple(
@@ -272,10 +279,10 @@ def process_file_share(
             # failure in this thread. Another line would only duplicate it.
             if not spoken.strip():
                 return True
-            if spoken == NOT_WAITING_FOR_A_PHOTO and str(event.get("text") or "").strip():
-                # Say nothing here. The words that came with the photo are an
-                # answer to whatever Gable last asked, and answering them is a
-                # better response than a line about the photo.
+            if spoken == DECLINED_ANSWER_THE_WORDS:
+                # Nothing has been said. The words that came with the photo are
+                # an answer to whatever Gable last asked, and answering them is
+                # a better response than a line about the photo.
                 return False
             outcome = safe(spoken)
         except Exception:
@@ -478,6 +485,22 @@ class PhotoHandoff:
                     # photo instead of taking a stale one.
                     accepted_in = _resume_state(connection, run)
             if not waiting_for_photo:
+                if (
+                    current is not None
+                    and current.status in store.PAUSED
+                    and str(event.get("text") or "").strip()
+                ):
+                    # The words beside the photo answer whatever was last asked.
+                    # Release the ingress claim, say nothing, and let the caller
+                    # answer them: one reply deserves one response, and it
+                    # should be about the question rather than the attachment.
+                    #
+                    # Only while the run is paused. A delivered flyer asked
+                    # nothing, so an image dropped into its thread is a stray
+                    # upload and "I left the current flyer unchanged" is the
+                    # reassurance that belongs there.
+                    finish("", "the run was not waiting for a photo; its words were answered")
+                    return DECLINED_ANSWER_THE_WORDS
                 return finish(
                     NOT_WAITING_FOR_A_PHOTO,
                     "the run was not waiting for a photo",

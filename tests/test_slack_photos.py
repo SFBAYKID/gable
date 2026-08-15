@@ -693,3 +693,45 @@ def test_a_flyer_parked_in_review_accepts_a_replacement_photo(tmp_path: Path) ->
 
     assert "not waiting for a photo" not in said
     assert "left the current flyer unchanged" not in said
+
+
+def test_a_declined_upload_with_words_says_nothing_and_asks_to_be_answered(
+    tmp_path: Path,
+) -> None:
+    """The first fix compared the declining sentence and never fired in production.
+
+    The real handler posts through the durable outbox and returns an empty
+    string, so the sentence never reached the caller to be recognised. Tambria
+    Eaton's address was refused twice for that reason. The signal is a sentinel
+    the outbox cannot swallow.
+    """
+    from gable.slackapp.photos import DECLINED_ANSWER_THE_WORDS
+
+    path = tmp_path / "gable.db"
+    run_id = _paused_database(path)
+    connection = connect(path)
+    store.set_status(
+        connection, run_id, "needs_info", "waiting for the address", slack_thread_ts=THREAD
+    )
+    connection.close()
+
+    said = _handoff(path, []).handle(
+        _event(text="1011 Winged Foot Dr, Westminster, MD 21158"),
+        FakeSlackClient(),
+    )
+
+    assert said == DECLINED_ANSWER_THE_WORDS
+
+
+def test_a_declined_upload_with_no_words_still_explains_itself(tmp_path: Path) -> None:
+    path = tmp_path / "gable.db"
+    run_id = _paused_database(path)
+    connection = connect(path)
+    store.set_status(
+        connection, run_id, "needs_info", "waiting for the address", slack_thread_ts=THREAD
+    )
+    connection.close()
+
+    said = _handoff(path, []).handle(_event(), FakeSlackClient())
+
+    assert "not waiting for a photo" in said

@@ -459,7 +459,7 @@ def test_a_declined_photo_leaves_the_words_beside_it_to_be_answered() -> None:
     """
     from typing import Any
 
-    from gable.slackapp.photos import NOT_WAITING_FOR_A_PHOTO, process_file_share
+    from gable.slackapp.photos import DECLINED_ANSWER_THE_WORDS, process_file_share
 
     posted: list[dict[str, object]] = []
 
@@ -472,7 +472,7 @@ def test_a_declined_photo_leaves_the_words_beside_it_to_be_answered() -> None:
         _client: Any,  # noqa: ANN401 - Slack client double
         _progress: Callable[[str], None],
     ) -> str:
-        return NOT_WAITING_FOR_A_PHOTO
+        return DECLINED_ANSWER_THE_WORDS
 
     handled = process_file_share(
         {
