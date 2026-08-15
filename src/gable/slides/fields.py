@@ -586,6 +586,47 @@ def _wants_time(literal: str) -> bool:
     return bool(_TIME_RANGE_ONLY.match(literal.strip()) or "TIME" in literal.upper())
 
 
+#: An hour range carrying no am or pm, at the very end of the value. On its own
+#: this is ambiguous — "Aug 8-9" is two days, not two o'clock — so `_bare_hours`
+#: only accepts it when what remains still reads as a date.
+_BARE_HOUR_RANGE_AT_END: Final[re.Pattern[str]] = re.compile(
+    r"\d{1,2}(?::\d{2})?\s*(?:-|–|—|to)\s*\d{1,2}(?::\d{2})?\s*$",  # noqa: RUF001
+    re.IGNORECASE,
+)
+
+#: What has to survive in the date half for a bare range to have been a time.
+_A_DAY_NUMBER: Final[re.Pattern[str]] = re.compile(r"\d")
+
+
+def _bare_hours(value: str) -> re.Match[str] | None:
+    """Find a trailing hour range written without am or pm.
+
+    "Saturday August 8, 11-1" is how people write an open house, and the strict
+    pattern requires a meridiem, so the whole string went into the date box and
+    the time box was emptied. The flyer then read "Saturday August 8, 11-1 | |
+    $325,000", with the design's own separators standing either side of a gap.
+
+    The reason the strict pattern is strict is that a bare range is genuinely
+    ambiguous: "Aug 8-9" is two days. So this splits only when the date half
+    still carries a day number afterwards. "Saturday August 8, 11-1" leaves
+    "Saturday August 8," and splits; "Aug 8-9" would leave "Aug" and does not.
+
+    Args:
+        value: The open-house details exactly as supplied.
+
+    Returns:
+        The match for the time half, or None when nothing can be split safely.
+
+    Raises:
+        Nothing.
+    """
+    found = _BARE_HOUR_RANGE_AT_END.search(value)
+    if found is None:
+        return None
+    remainder = value[: found.start()].strip(" ,-–—\t")  # noqa: RUF001
+    return found if _A_DAY_NUMBER.search(remainder) else None
+
+
 def _open_house_part(literal: str, value: str) -> str:
     """Give a design's date box the date and its time box the time.
 
@@ -606,7 +647,7 @@ def _open_house_part(literal: str, value: str) -> str:
     Raises:
         Nothing.
     """
-    found = _TIME_RANGE_INSIDE.search(value)
+    found = _TIME_RANGE_INSIDE.search(value) or _bare_hours(value)
     if not found:
         # No time was supplied at all. The date box takes the whole value; the
         # time box is emptied rather than repeating it. Sydney Kinney's open

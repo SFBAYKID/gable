@@ -197,3 +197,46 @@ def test_a_date_with_no_time_leaves_the_time_box_empty() -> None:
     # Emptied rather than repeated, and never left showing the design's own
     # "2-4PM" — that is a previous listing's real time.
     assert pairs["2-4PM"] == ""
+
+
+def test_an_hour_range_without_am_or_pm_still_reaches_the_time_box() -> None:
+    """Morgan Muse's flyer read "Saturday August 8, 11-1 | | $325,000".
+
+    The whole string went into the date box because the strict time pattern
+    needs a meridiem, so the time box was emptied and the design's own two
+    separators stood either side of a gap.
+    """
+    resolution = fields.resolve(["Sunday, Aug 2, 2026", "2-4PM"])
+
+    pairs = fields.replacements(resolution, {"open_house": "Saturday August 8, 11-1"})
+
+    assert pairs["Sunday, Aug 2, 2026"] == "Saturday August 8"
+    assert pairs["2-4PM"] == "11-1"
+
+
+def test_a_range_of_days_is_not_mistaken_for_a_range_of_hours() -> None:
+    """ "Aug 8-9" is two days. Splitting it would leave "Aug" as the whole date."""
+    resolution = fields.resolve(["Sunday, Aug 2, 2026", "2-4PM"])
+
+    pairs = fields.replacements(resolution, {"open_house": "Aug 8-9"})
+
+    assert pairs["Sunday, Aug 2, 2026"] == "Aug 8-9"
+    assert pairs["2-4PM"] == ""
+
+
+def test_two_days_and_a_bare_time_split_at_the_time() -> None:
+    resolution = fields.resolve(["Sunday, Aug 2, 2026", "2-4PM"])
+
+    pairs = fields.replacements(resolution, {"open_house": "August 8-9, 11-1"})
+
+    assert pairs["Sunday, Aug 2, 2026"] == "August 8-9"
+    assert pairs["2-4PM"] == "11-1"
+
+
+def test_a_bare_range_in_the_middle_is_left_alone() -> None:
+    """Only a trailing range is unambiguous enough to move."""
+    resolution = fields.resolve(["Sunday, Aug 2, 2026", "2-4PM"])
+
+    pairs = fields.replacements(resolution, {"open_house": "11-1 on Saturday"})
+
+    assert pairs["Sunday, Aug 2, 2026"] == "11-1 on Saturday"
