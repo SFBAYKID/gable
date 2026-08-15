@@ -145,3 +145,21 @@ def test_the_worst_defect_is_reported_first() -> None:
     assert len(found) == 2
     assert "90 points" in found[0]
     assert "20 points" in found[1]
+
+
+def test_a_photo_inherits_the_overhang_of_the_frame_it_replaced() -> None:
+    """Sold's photo well starts three points off the left edge, by design."""
+    design = _deck(_shape("well", -3.1, 0, 808.8, 480))
+    built = _deck(_shape("gableHero_abc", -3.1, 0, 808.8, 480))
+
+    assert layout.regressions(design, built) == []
+
+
+def test_a_photo_pushed_beyond_the_frame_it_replaced_is_still_reported() -> None:
+    design = _deck(_shape("well", -3.1, 0, 808.8, 480))
+    built = _deck(_shape("gableHero_abc", -40, 0, 808.8, 480))
+
+    found = layout.regressions(design, built)
+
+    assert len(found) == 1
+    assert "the property photo" in found[0]

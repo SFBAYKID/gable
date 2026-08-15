@@ -208,6 +208,47 @@ def regressions(source: dict[str, Any], built: dict[str, Any]) -> list[str]:
     return [sentence for _severity, sentence in sorted(found, key=lambda item: -item[0])]
 
 
+#: How far a created image may sit from the frame it replaced and still count
+#: as the same rectangle. Placement copies the measured frame's transform
+#: exactly, so this is float noise rather than a move.
+_SAME_FRAME_EMU: Final[float] = 2 * EMU_PER_POINT
+
+
+def _frame_it_replaced(box: Box, source_boxes: dict[str, Box]) -> Box | None:
+    """The design's own frame that this created image was drawn over.
+
+    A created object has a new id, so it looks as though it has no prior claim
+    on the layout. It has one: placement deletes the measured frame and creates
+    the image at that frame's exact position and size. Sold's photo well starts
+    three points off the left edge, so every flyer built on it was reported as
+    pushing the photo off the page — a defect belonging to the design.
+
+    Args:
+        box: A created image.
+        source_boxes: The design's own elements, by object id.
+
+    Returns:
+        The frame it stands in, or None when nothing in the design matches, in
+        which case the image really did appear from nowhere.
+
+    Raises:
+        Nothing.
+    """
+    if not box.is_created:
+        return None
+    return next(
+        (
+            candidate
+            for candidate in source_boxes.values()
+            if abs(candidate.x - box.x) <= _SAME_FRAME_EMU
+            and abs(candidate.y - box.y) <= _SAME_FRAME_EMU
+            and abs(candidate.width - box.width) <= _SAME_FRAME_EMU
+            and abs(candidate.height - box.height) <= _SAME_FRAME_EMU
+        ),
+        None,
+    )
+
+
 def _bleeds(
     built_boxes: list[Box],
     source_boxes: dict[str, Box],
@@ -220,7 +261,7 @@ def _bleeds(
         over = box.overflow(page_width, page_height)
         # A design's own overhang is the designer's decision. Only the amount
         # Gable added counts, and an object Gable created has no prior claim.
-        source = source_boxes.get(box.object_id)
+        source = source_boxes.get(box.object_id) or _frame_it_replaced(box, source_boxes)
         before = (
             source.overflow(page_width, page_height) if source is not None else (0.0, 0.0, 0.0, 0.0)
         )
