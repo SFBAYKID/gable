@@ -229,3 +229,39 @@ def test_a_layer_this_batch_deletes_is_not_named_in_the_reorder() -> None:
     moved = requests[0]["updatePageElementsZOrder"]["pageElementObjectIds"]
     assert "sample" not in moved, "a deleted shape cannot be reordered"
     assert moved == ["title"], "everything else above the well still comes forward"
+
+
+# --- a near-miss well is snapped to the page edge --------------------------
+
+
+def test_a_well_that_nearly_reaches_the_page_edge_is_snapped_to_it() -> None:
+    """Sold's well is 3.1 points past the left and 4.2 short of the right.
+
+    The replacement left a hairline of white down the right-hand side of a
+    full-bleed photograph, which the visual gate reported on Kirby-Jay John's
+    flyer.
+    """
+    from gable.pipeline.placement import _snapped_to_page
+    from gable.slides.hero import HeroFrame
+
+    pt = 12700
+    frame = HeroFrame("well", x=-3.1 * pt, y=0.0, width=808.8 * pt, height=479.7 * pt)
+
+    snapped = _snapped_to_page(frame, 810 * pt, 1012 * pt)
+
+    assert snapped.x == 0
+    assert round(snapped.width / pt, 1) == 810.0
+    assert snapped.y == 0
+    assert round(snapped.height / pt, 1) == 479.7
+
+
+def test_a_well_the_designer_inset_is_left_where_it_is() -> None:
+    from gable.pipeline.placement import _snapped_to_page
+    from gable.slides.hero import HeroFrame
+
+    pt = 12700
+    frame = HeroFrame("well", x=40 * pt, y=60 * pt, width=700 * pt, height=400 * pt)
+
+    snapped = _snapped_to_page(frame, 810 * pt, 1012 * pt)
+
+    assert snapped == frame

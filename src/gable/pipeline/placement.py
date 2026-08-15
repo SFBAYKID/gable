@@ -15,13 +15,14 @@ from __future__ import annotations
 import logging
 import uuid
 from collections.abc import Callable
+from dataclasses import replace
 from sqlite3 import Connection
-from typing import Any
+from typing import Any, Final
 
 from gable.db import store
 from gable.slides.designs import extra_deletions
 from gable.slides.elements import text_content
-from gable.slides.hero import find_hero_frame, headshot_frames
+from gable.slides.hero import HeroFrame, find_hero_frame, headshot_frames
 from gable.voice import safe
 
 logger = logging.getLogger("gable.live")
@@ -131,6 +132,42 @@ def template_clearance(
     )
 
 
+#: How near a page edge a photo well must be for the gap to read as a mistake
+#: rather than a margin. Six points is under a tenth of an inch: a hairline on
+#: a full-bleed photograph, and far tighter than any deliberate inset in these
+#: designs, the smallest of which is over twenty points.
+_EDGE_SNAP_EMU: Final[float] = 6 * 12700
+
+
+def _snapped_to_page(frame: HeroFrame, slide_w: float, slide_h: float) -> HeroFrame:
+    """Close a hairline gap between a photo well and the edge of the page.
+
+    Args:
+        frame: The measured well.
+        slide_w: Page width in EMU.
+        slide_h: Page height in EMU.
+
+    Returns:
+        The same frame with any edge within `_EDGE_SNAP_EMU` of the page moved
+        onto it. An edge further away is a margin the designer drew and is left
+        exactly where it is.
+
+    Raises:
+        Nothing.
+    """
+    left = 0.0 if abs(frame.x) <= _EDGE_SNAP_EMU else frame.x
+    top = 0.0 if abs(frame.y) <= _EDGE_SNAP_EMU else frame.y
+    right = (
+        slide_w if abs(frame.x + frame.width - slide_w) <= _EDGE_SNAP_EMU else frame.x + frame.width
+    )
+    bottom = (
+        slide_h
+        if abs(frame.y + frame.height - slide_h) <= _EDGE_SNAP_EMU
+        else frame.y + frame.height
+    )
+    return replace(frame, x=left, y=top, width=right - left, height=bottom - top)
+
+
 def place_hero_photo(
     slides: Any,  # noqa: ANN401 - googleapiclient resource, untyped upstream
     file_id: str,
@@ -204,6 +241,13 @@ def place_hero_photo(
         # band's height and centred — a narrow column of photograph with the
         # grey layout showing on both sides and the design's angled mask left
         # exposed. Caught on a finished flyer on 2026-08-12.
+        # A well drawn to bleed off the page rarely lands on the edge exactly.
+        # Sold's is 3.1 points past the left and 4.2 points short of the right,
+        # so the replacement left a hairline of white down the right-hand side
+        # of a full-bleed photograph — reported by the visual gate on Kirby-Jay
+        # John's flyer. Snapping a near-miss to the edge closes it. A frame that
+        # is genuinely inset is further than the tolerance and is not moved.
+        frame = _snapped_to_page(frame, slide_w, slide_h)
         frame_width_px = max(1, round(frame.width / slide_w * slide_px[0]))
         frame_height_px = max(1, round(frame.height / slide_h * slide_px[1]))
         placed_url = refit(url, frame_width_px, frame_height_px)
