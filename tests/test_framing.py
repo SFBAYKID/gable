@@ -118,3 +118,27 @@ def test_an_explicit_line_break_is_counted_as_its_own_line() -> None:
     from gable.slides import fitting
 
     assert fitting.wrapped_line_count("Rd\nCity", 10.0, 400.0, 400, "Open Sans") == 2
+
+
+def test_a_two_line_count_is_fitted_across_the_lines_the_design_drew() -> None:
+    r"""It is measured across two lines, not squeezed onto one.
+
+    New Listing writes its counts as "4\nBedrooms". Forcing that onto one line
+    shrank the label until it was unreadable.
+    """
+    from gable.slides import fitting
+
+    box = fitting.TextBox(
+        object_id="beds",
+        text="3\nBedrooms",
+        font_size_pt=20.0,
+        width_emu=100 * fitting.EMU_PER_POINT,
+        lines=2,
+        weight=400,
+        family="EB Garamond",
+    )
+
+    planned = fitting.plan_fits([box], dynamic={"3\nBedrooms"}, single_line={"3\nBedrooms"})
+
+    assert len(planned) == 1
+    assert not planned[0].too_small_to_read

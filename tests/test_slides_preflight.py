@@ -659,7 +659,7 @@ def test_a_title_holding_no_credential_is_never_replaced_by_one() -> None:
 
 
 def test_a_count_the_design_writes_on_two_lines_is_measured_on_two() -> None:
-    """New Listing draws its counts as "4\\nBedrooms"."""
+    r"""New Listing draws its counts as "4\nBedrooms"."""
     box = _text("beds", "4\nBedrooms", 100, font_pt=20)
     presentation = _presentation(_text("address", "[PROPERTY ADDRESS]", 900), box)
 

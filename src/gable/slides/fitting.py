@@ -400,7 +400,12 @@ def plan_fits(
                 box.text,
                 box.font_size_pt,
                 box.width_emu,
-                1 if box.text.strip() in one_line else box.lines,
+                # A break the designer typed is not wrapping. New Listing draws
+                # its counts as "4\nBedrooms", and forcing that onto one line
+                # shrank a two-line label until it was unreadable.
+                max(1, box.text.strip().count("\n") + 1)
+                if box.text.strip() in one_line
+                else box.lines,
                 box.weight,
                 box.family,
             )

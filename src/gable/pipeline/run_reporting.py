@@ -199,7 +199,11 @@ def verify_rendered(
         non_visual.insert(0, "the final text could not be read back for verification")
     if text_fit.unreadable:
         non_visual.append(
-            f"the {text_fit.unreadable[0].text[:24]} would have to be shrunk so far "
+            # Collapsed: the design writes some values across two lines, and a
+            # raw break inside a sentence reached Slack as "the 3\nBedrooms
+            # would have to be shrunk".
+            f"the {' '.join(text_fit.unreadable[0].text.split())[:24]} "
+            "would have to be shrunk so far "
             "it would be hard to read"
         )
 
