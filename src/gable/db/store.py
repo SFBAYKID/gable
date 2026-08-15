@@ -30,6 +30,7 @@ from gable.db.photo_store import (
 from gable.db.question_store import (
     QUESTION_NOTIFICATION_PENDING,
     PendingRunQuestion,
+    adopt_run_thread_for_notification,
     bind_run_question_thread,
     claim_run_notification_delivery,
     confirm_run_question,
@@ -105,6 +106,7 @@ __all__ = [
     "TemplateAudit",
     "abandoned_slack_events",
     "acknowledge_interrupted_run",
+    "adopt_run_thread_for_notification",
     "adopt_template_catalog",
     "approve_blank_fields",
     "bind_run_question_thread",

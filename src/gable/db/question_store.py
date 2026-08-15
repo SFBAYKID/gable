@@ -511,6 +511,56 @@ def _prepare_run_notification(
     return _from_row(row)
 
 
+def adopt_run_thread_for_notification(
+    connection: sqlite3.Connection,
+    question_id: str,
+    thread_ts: str,
+) -> bool:
+    """Record that a thread-less notification belongs under its run's own thread.
+
+    Narrower than `bind_run_question_thread` on purpose, and the difference is
+    the whole point. Binding also writes `headline_ts`, which the delivery path
+    reads as "this notification has already been posted, and that timestamp is
+    its confirmation" — using it here would mark the outcome delivered without
+    ever saying it. This writes the thread and nothing else, so the message is
+    still owed and still gets posted, as a reply where it belongs.
+
+    Args:
+        connection: The open database.
+        question_id: The notification adopting its run's thread.
+        thread_ts: That run's existing Slack thread.
+
+    Returns:
+        True when the row now carries the thread. False when the notification
+        is no longer actionable, or already answers to a different thread —
+        neither is this function's to overrule.
+
+    Raises:
+        ValueError: if `thread_ts` is blank, which would erase the association
+            rather than record one.
+    """
+    root_ts = thread_ts.strip()
+    if not root_ts:
+        raise ValueError("a notification cannot adopt an empty thread")
+    with _transition(connection):
+        row = connection.execute(
+            "SELECT thread_ts FROM run_questions "
+            "WHERE question_id = ? AND confirmed_at = '' AND satisfied_at = ''",
+            (question_id,),
+        ).fetchone()
+        if row is None:
+            return False
+        existing = str(row["thread_ts"] or "").strip()
+        if existing:
+            return existing == root_ts
+        connection.execute(
+            "UPDATE run_questions SET thread_ts = ? "
+            "WHERE question_id = ? AND confirmed_at = '' AND satisfied_at = '' AND thread_ts = ''",
+            (root_ts, question_id),
+        )
+    return True
+
+
 def bind_run_question_thread(
     connection: sqlite3.Connection,
     question_id: str,

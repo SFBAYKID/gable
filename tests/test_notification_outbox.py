@@ -82,6 +82,62 @@ def test_a_root_delivery_outcome_uses_truthful_states_and_confirms_once(
     assert calls == [(None, pending.question_client_id)]
 
 
+def test_an_outcome_recorded_without_a_thread_is_posted_into_its_run_s_thread(
+    db: sqlite3.Connection,
+) -> None:
+    """The Sold review that could never resolve, from 2026-08-14 to the next day.
+
+    The run had already announced itself, so the outcome could not claim a new
+    thread and the bind was refused on every pass — once a minute, for a day.
+    It belongs under the announcement, which is also where a reader expects it.
+    """
+    run = _run(db, "rid-thread-less-outcome")
+    db.execute(
+        "UPDATE runs SET slack_thread_ts = ? WHERE run_id = ?",
+        ("1786720900.051499", run.run_id),
+    )
+    db.commit()
+    pending = store.prepare_run_outcome(
+        db,
+        run.run_id,
+        "needs_review",
+        "I rendered it, but the word “Today.” overlaps the footer bar.\nI have not sent it.",
+    )
+    assert pending.thread_ts == ""
+    posted: list[str | None] = []
+
+    def post_once(_text: str, thread_ts: str | None, _client_id: str) -> str:
+        posted.append(thread_ts)
+        return "1786720912.991259"
+
+    assert notify_pending_run_questions(db, (pending,), _unexpected_post, post_once) == 1
+
+    # Under the announcement, not as a second root message in the channel.
+    assert posted == ["1786720900.051499"]
+    current = store.run_by_id(db, run.run_id)
+    assert current is not None
+    assert current.status == "needs_review"
+    assert current.slack_thread_ts == "1786720900.051499"
+    assert store.pending_run_questions(db) == ()
+
+
+def test_an_outcome_for_a_run_that_never_announced_still_becomes_the_root(
+    db: sqlite3.Connection,
+) -> None:
+    """A local run with no Slack root must not be left unreachable."""
+    run = _run(db, "rid-no-root-yet")
+    pending = store.prepare_run_outcome(db, run.run_id, "needs_review", "I could not read it.")
+
+    def post_once(_text: str, thread_ts: str | None, _client_id: str) -> str:
+        assert thread_ts is None
+        return "fresh-root"
+
+    assert notify_pending_run_questions(db, (pending,), _unexpected_post, post_once) == 1
+    current = store.run_by_id(db, run.run_id)
+    assert current is not None
+    assert current.slack_thread_ts == "fresh-root"
+
+
 def test_an_accepted_link_with_a_lost_ack_recovers_in_the_running_process(
     tmp_path: Path,
 ) -> None:

@@ -338,6 +338,49 @@ def post_persisted_notification(
     return ""
 
 
+def _inside_its_run_thread(
+    connection: Connection,
+    pending: store.PendingRunQuestion,
+) -> store.PendingRunQuestion:
+    """Give a thread-less notification the thread its own run already opened.
+
+    A run announces itself once and everything it says afterwards belongs under
+    that announcement. An outcome persisted without a thread contradicts that:
+    the delivery path below reads no thread and no headline as "this is the
+    first thing said about this work", so it tries to post the outcome as a new
+    root message in the channel and then bind it as the run's thread. For a run
+    that has already announced itself the bind is refused — the run holds a
+    different thread — and the row can never resolve. One real Sold review sat
+    that way from 2026-08-14 until it was found the next day.
+
+    Refusing was right. A bare "I rendered it, but..." posted at channel level,
+    detached from the listing it belongs to, is worse than a stuck row. The
+    error was reaching that branch at all.
+
+    Args:
+        connection: The open database.
+        pending: The notification about to be delivered.
+
+    Returns:
+        The same notification, carrying its run's thread when it had none and
+        the run has one. Unchanged in every other case, including a run that
+        genuinely has no thread yet.
+
+    Raises:
+        Nothing.
+    """
+    if pending.thread_ts.strip() or pending.headline.strip():
+        return pending
+    run = store.run_by_id(connection, pending.run_id)
+    root = (run.slack_thread_ts or "").strip() if run is not None else ""
+    if not root:
+        return pending
+    if not store.adopt_run_thread_for_notification(connection, pending.question_id, root):
+        return pending
+    logger.info("delivering a thread-less notification under its run's own thread")
+    return replace(pending, thread_ts=root)
+
+
 def _deliver_pending_locked(
     connection: Connection,
     pending: store.PendingRunQuestion,
@@ -384,6 +427,8 @@ def _deliver_pending_locked(
     current = pending
     said: list[str] = []
     try:
+        current = _inside_its_run_thread(connection, current)
+
         if current.headline and not current.thread_ts:
             headline_ts = post(
                 current.headline,
