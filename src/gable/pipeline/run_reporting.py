@@ -223,7 +223,7 @@ def verify_rendered(
     elif not seen.confident:
         spoken = safe("I rendered it, but the visual inspection was inconclusive.")
     else:
-        spoken = seen.say or verdict.say or safe(f"I rendered it, but {problems[0]}")
+        spoken = safe(_every_problem(seen.say or verdict.say, problems))
     return Verified(
         problems=tuple(problems),
         spoken=spoken,
@@ -232,6 +232,42 @@ def verify_rendered(
         # fixed by a new photograph, so they stay in review.
         needs_replacement_photo=not non_visual and seen.needs_source_replacement,
     )
+
+
+def _every_problem(lead: str, problems: list[str]) -> str:
+    """Say all of what the checks found, not only the first thing.
+
+    An Open House run on 2026-08-15 found two: the supplied photo showed a
+    house number that contradicted the address, and the date line read
+    "Satuday". Gable said the first and kept the second, because the lead
+    sentence comes from a judge that names one problem. Carmen would have
+    replaced the photo, waited, and only then been told about the spelling —
+    a whole round trip for something Gable already knew.
+
+    Args:
+        lead: The judge's own sentence, which already reads well. May be empty.
+        problems: Every problem found, most important first.
+
+    Returns:
+        One message. The lead sentence, then any problem it did not already
+        mention, each as its own paragraph. House style forbids lists, and a
+        paragraph per problem reads better than one long sentence anyway.
+
+    Raises:
+        Nothing.
+    """
+    said = lead.strip()
+    if not said:
+        return f"I rendered it, but {problems[0]}" if problems else ""
+    spoken = said.lower()
+    rest = [
+        problem.strip()
+        for problem in problems[1:]
+        # Substring rather than equality: the lead is a sentence built around
+        # the problem text, not the problem text itself.
+        if problem.strip() and problem.strip().lower().rstrip(".") not in spoken
+    ]
+    return paragraphs(said, *rest)
 
 
 #: The exact run-event detail `live.refit_hero` records when a photo was too
