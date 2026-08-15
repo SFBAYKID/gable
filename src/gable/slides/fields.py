@@ -581,6 +581,11 @@ def _as_written(name: str, literal: str, value: str) -> str:
     return value
 
 
+def _wants_time(literal: str) -> bool:
+    """Whether this box is the design's time box rather than its date box."""
+    return bool(_TIME_RANGE_ONLY.match(literal.strip()) or "TIME" in literal.upper())
+
+
 def _open_house_part(literal: str, value: str) -> str:
     """Give a design's date box the date and its time box the time.
 
@@ -603,7 +608,12 @@ def _open_house_part(literal: str, value: str) -> str:
     """
     found = _TIME_RANGE_INSIDE.search(value)
     if not found:
-        return value
+        # No time was supplied at all. The date box takes the whole value; the
+        # time box is emptied rather than repeating it. Sydney Kinney's open
+        # house came through as "7/11/2026" and the flyer printed that date
+        # twice, once in each box. Leaving the design's own "2-4PM" showing
+        # would be worse still — that is a previous listing's real time.
+        return "" if _wants_time(literal) else value
     time_part = found.group(0).strip()
     times = [match.group(0) for match in _TIME_RANGE_INSIDE.finditer(value)]
     # Two days at the same hours \u2014 "08/08/2026 11am-1pm , 08/09/2026 11am-1pm" \u2014
@@ -627,8 +637,7 @@ def _open_house_part(literal: str, value: str) -> str:
     # single line overflowed the tag it sits in, so the shape is preserved.
     if _SAMPLE_OPEN_HOUSE_DATE_AND_TIME.match(literal.strip()):
         return f"{date_part}\n{time_part}"
-    wants_time = bool(_TIME_RANGE_ONLY.match(literal.strip()) or "TIME" in literal.upper())
-    return time_part if wants_time else date_part
+    return time_part if _wants_time(literal) else date_part
 
 
 def replacements(resolution: Resolution, values: dict[str, str]) -> dict[str, str]:

@@ -54,13 +54,18 @@ def test_the_date_box_takes_the_date_and_the_time_box_the_time() -> None:
     assert pairs["2-4PM"] == "1-3PM"
 
 
-def test_details_with_no_time_fill_both_boxes_rather_than_leaving_a_sample() -> None:
-    """A blank box would show a previous listing's real open house."""
+def test_details_with_no_time_empty_the_time_box_rather_than_repeating_the_date() -> None:
+    """Both boxes used to take the whole string, and it read as a duplicate.
+
+    The old reasoning was that a blank box would leave the design's own "2-4PM"
+    showing. It does not: an explicit empty replacement clears the box, so the
+    previous listing's time is gone either way.
+    """
     resolved = fields.resolve(OPEN_HOUSE_TEXT)
     pairs = fields.replacements(resolved, {"open_house": "This Sunday afternoon"})
 
     assert pairs["Sunday, Aug 2, 2026"] == "This Sunday afternoon"
-    assert pairs["2-4PM"] == "This Sunday afternoon"
+    assert pairs["2-4PM"] == ""
 
 
 def test_brand_copy_is_not_mistaken_for_a_date_or_a_time() -> None:
@@ -180,3 +185,15 @@ def test_two_days_at_different_hours_keep_both_times() -> None:
 
     assert "2-4pm" in pairs["SUNDAY, MAY 24TH\n1 PM - 3 PM"]
     assert "11am-1pm" in pairs["SUNDAY, MAY 24TH\n1 PM - 3 PM"]
+
+
+def test_a_date_with_no_time_leaves_the_time_box_empty() -> None:
+    """Sydney Kinney's flyer printed "7/11/2026" in both boxes."""
+    resolution = fields.resolve(["Sunday, Aug 2, 2026", "2-4PM"])
+
+    pairs = fields.replacements(resolution, {"open_house": "7/11/2026"})
+
+    assert pairs["Sunday, Aug 2, 2026"] == "7/11/2026"
+    # Emptied rather than repeated, and never left showing the design's own
+    # "2-4PM" — that is a previous listing's real time.
+    assert pairs["2-4PM"] == ""
