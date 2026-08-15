@@ -137,7 +137,6 @@ and update the ones your change made false.** In the same commit, not later.
 | If you changed… | Update, in the same commit |
 |---|---|
 | A design decision, or a tradeoff | `ARCHITECTURE.md` — the affected section **and** a new row in `DECISIONS.md` |
-| A module, a package, or a file's home | The `CLAUDE.md` §6 layout tree |
 | Anything the runtime agent says or does | `AGENTS.md` |
 | A variable the code reads | `.env.example`, with the comment explaining it |
 | Setup, deploy, or operations | `README.md` |
@@ -339,108 +338,6 @@ not the line count.
 ---
 
 ## 6. Repository layout
-
-```
-gable/
-├── CLAUDE.md                    # this file
-├── ARCHITECTURE.md              # system design and data model
-├── DECISIONS.md                 # append-only decision log, with reasons
-├── AGENTS.md                    # runtime agent behavior and Slack contract
-├── README.md                    # setup and operations
-├── TESTING.md                   # repeatable unit, integration and live checks
-├── .env.example                 # every variable, documented, no real values
-├── .gitignore                   # .env, *.json keys, __pycache__, .venv
-├── pyproject.toml
-├── Makefile                     # deploy, lint, test, run
-├── slack/
-│   └── manifest.json            # paste into api.slack.com
-├── assets/
-│   └── gable-icon-512.png       # Slack app icon
-├── deploy/                      # systemd unit + droplet provisioning steps
-├── spikes/                      # findings only; the spike tooling is deleted
-├── tools/
-│   ├── check_connections.py     # prove every .env credential works, live
-│   ├── adopt_backfill.py        # mark existing rows as history, build none
-│   ├── adopt_rows.py            # assert and adopt named historical rows only
-│   ├── preview_poll.py           # read-only preview of work polling would open
-│   ├── reconcile_image_reservation.py # evidence-gated pre-inference release
-│   ├── run_row.py               # start one row by tab and number, resume it,
-│   │                            #   or drive a design across agents with one photo
-│   ├── seed_test_rows.py        # append test rows to a Testing tab, by header only
-│   └── template_smoke_test.py   # recoverable live new-template path
-├── src/gable/
-│   ├── config.py                # frozen settings dataclass, env parsing
-│   ├── logging_setup.py         # structured logging + secret redaction
-│   ├── agents/
-│   │   ├── contacts.py          # read-only roster workbook mirrored atomically
-│   │   └── website.py           # official-domain fallback for workbook blanks
-│   ├── sheets/
-│   │   ├── client.py            # Google Sheets API wrapper
-│   │   ├── identity.py          # whole-tab identity and source-row aliases
-│   │   └── repository.py        # tab reads/writes, idempotency
-│   ├── db/
-│   │   ├── schema.py            # tables and migrations (SQLite)
-│   │   ├── store.py             # submissions, facts, roster, spend + reexports
-│   │   ├── question_store.py    # durable Slack question and outcome outbox
-│   │   ├── run_store.py         # attempts, states, latest counts, event writes
-│   │   └── template_store.py    # source catalogue and triage verdicts
-│   ├── listings/
-│   │   ├── intake.py            # the eleven columns that matter, found by header
-│   │   ├── headers.py           # how a header is compared, never a position
-│   │   ├── address.py           # casing and punctuation, nothing invented
-│   │   ├── enrich.py            # look up beds, baths, square footage
-│   │   └── review.py            # a client review, read out of what was typed
-│   ├── photos/
-│   │   ├── fit.py               # exact crop plus safe small-source composition
-│   │   ├── headshots.py         # the agent's face, from Drive, republished
-│   │   └── store.py             # publish to the droplet over http
-│   ├── slides/
-│   │   ├── edits.py             # one tool per change Carmen can ask for
-│   │   ├── geometry.py          # move, resize, delete — the transform traps
-│   │   ├── elements.py          # recurse through imported element groups
-│   │   ├── selection.py         # the design named for the form's request type
-│   │   ├── fields.py            # what a design's text means
-│   │   ├── fitting.py           # shrink text that does not fit its box
-│   │   ├── typemetrics.py       # measured advance widths for the designs' faces
-│   │   ├── manifest.py          # what a design needs before it renders
-│   │   ├── hero.py              # measure the photo and headshot frames
-│   │   ├── preflight.py         # source structure, exact fit and crop checks
-│   │   ├── replacement.py       # sentinel two-pass fills and reply proof
-│   │   ├── library.py           # current Generic Templates contents
-│   │   └── edit_common.py       # shared colours, guards, request type
-│   ├── slackapp/
-│   │   ├── answers.py           # record stated values, from a reply or a caption
-│   │   ├── app.py               # Socket Mode listener
-│   │   ├── batches.py           # ready-only multi-listing summary
-│   │   ├── brain.py             # reads intent, picks a tool, asks when unsure
-│   │   ├── context.py           # bounded owned-thread turns + listing facts
-│   │   ├── editing.py           # execute edits on the thread's Slides file
-│   │   ├── outbox.py            # conservative proof of lost Slack acknowledgements
-│   │   ├── photos.py            # Slack upload to fitted same-run resume
-│   │   ├── recovery.py          # interrupted runs and accepted-but-unfinished uploads
-│   │   ├── routing.py           # keep ordinary replies inside Gable-owned threads
-│   │   ├── runtime.py           # production Slack + poller assembly
-│   │   ├── source_refresh.py    # re-read the exact sources behind a paused run
-│   │   ├── status.py            # a working indicator that cannot break the work
-│   │   └── style.py             # the house style, enforced
-│   ├── pipeline/
-│   │   ├── contact_gate.py      # pre-Slack agent values + one cached site lookup
-│   │   ├── needs.py             # one batched ask, and the structural stops' wording
-│   │   ├── questions.py         # persist, post, confirm and retry run notices
-│   │   ├── runner.py            # one complete listing, every exit recorded
-│   │   ├── resume_claim.py      # which single worker owns a paused run
-│   │   ├── live.py              # concrete Google, photo, research and vision seams
-│   │   ├── placement.py         # put a photo on a design without disturbing it
-│   │   ├── schedule.py          # when to poll: busy hours vs quiet
-│   │   ├── poller.py            # watch loop and historical backfill guard
-│   │   ├── template_triage.py   # proactive source audit and recheck
-│   │   ├── template_vision.py   # spend-gated source render inspection
-│   │   ├── vision.py            # strict source-versus-render visual verdict
-│   │   └── orchestrator.py      # pure listing decisions
-│   ├── runtime.py               # Slack-free process lifecycle
-│   └── cli.py                   # local invocation without Slack
-└── tests/
-```
 
 Nothing in `src/gable/` imports from `slackapp/` except `slackapp/` itself. The
 pipeline must be runnable from `cli.py` with Slack entirely absent — this is how
