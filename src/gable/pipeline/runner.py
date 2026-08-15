@@ -406,6 +406,13 @@ class Runner:
         # into the one post-build outcome, after the rendered vision gate.
         advisories = [safe(issue.advisory) for issue in measured.warnings if issue.advisory]
 
+        # Asked WITH the photograph rather than one step after it; see
+        # `manifest.needs_a_whole_address` for the round trip that cost.
+        if template_manifest.needs_a_whole_address(
+            template_manifest.manifest_for(template_label), values
+        ):
+            outstanding.add_value("address")
+
         # A listing flyer without its photograph is not a draft. The template
         # has already been checked, so the upload can resume this same run and
         # compare the photo against the measured frame before anything builds.
@@ -706,16 +713,13 @@ class Runner:
         # process-lifetime outbox retries without rebuilding the flyer.
         # A value nobody supplied kept the design's placeholder rather than
         # stopping the flyer, so the delivery message says which ones.
-        left_blank = [
-            needs.readable(name) for name in resolution.fields if not values.get(name, "").strip()
-        ]
         message = run_reporting.delivery_message(
             self.connection,
             run_id,
             output_url=output_url,
             run_notes=run_notes,
             advisories=advisories,
-            left_blank=left_blank,
+            left_blank=run_reporting.unfilled(resolution.fields, values),
             price_missing_note=price_note(intake, "price" in resolution.fields),
         )
         return self._outcome(

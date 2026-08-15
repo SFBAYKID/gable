@@ -244,3 +244,29 @@ def validate(manifest: Manifest, values: dict[str, str]) -> list[Problem]:
             )
 
     return sorted(problems, key=lambda p: not p.blocking)
+
+
+def needs_a_whole_address(manifest: Manifest, values: dict[str, str]) -> bool:
+    """Whether this design has an address slot the supplied value cannot fill.
+
+    Asked before the photograph rather than after it. An address that carries a
+    ZIP but no state passes `intake.address_looks_usable` and is then refused
+    here, and discovering that one step after the upload costs a person a whole
+    extra round trip for a question that could have ridden the first.
+
+    Args:
+        manifest: The selected design's fields.
+        values: The values this run intends to fill.
+
+    Returns:
+        True when the design shows an address and the one in hand is not a
+        shape it can print. False when the design has no address slot at all,
+        which is a client review, or when the address is already whole.
+
+    Raises:
+        Nothing.
+    """
+    if manifest.find("address") is None:
+        return False
+    supplied = values.get("address", "").strip()
+    return bool(supplied) and not ADDRESS_SHAPE.match(supplied)

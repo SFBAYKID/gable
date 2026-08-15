@@ -286,3 +286,32 @@ def test_an_absent_value_has_always_been_allowed_to_ride_the_one_ask() -> None:
     absent = Question("square_feet", "What is the square footage?", absent=True)
 
     assert joins_one_ask(absent)
+
+
+def test_an_address_missing_its_state_is_asked_for_with_the_photo() -> None:
+    """Kim Hixson's "8517 Oglethorpe Street, New Carrollton 20784" has a ZIP.
+
+    It passes the coherence check because it carries one, and the manifest then
+    refuses it one step after the upload — a second round trip for a question
+    that could have ridden the first.
+    """
+    from gable.slides import manifest as template_manifest
+
+    design = template_manifest.manifest_for("Sold")
+
+    assert template_manifest.needs_a_whole_address(
+        design, {"address": "8517 Oglethorpe Street, New Carrollton 20784"}
+    )
+    assert not template_manifest.needs_a_whole_address(
+        design, {"address": "8517 Oglethorpe St, New Carrollton, MD 20784"}
+    )
+
+
+def test_a_design_with_no_address_slot_is_never_asked_for_one() -> None:
+    from gable.slides import manifest as template_manifest
+
+    review = template_manifest.manifest_for("Client Review Post")
+
+    assert not template_manifest.needs_a_whole_address(
+        review, {"address": "Google Review, SRES Listing 29 Maple"}
+    )

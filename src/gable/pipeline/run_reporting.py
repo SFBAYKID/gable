@@ -9,6 +9,7 @@ from sqlite3 import Connection
 from typing import Any, Final
 
 from gable.db import store
+from gable.pipeline.needs import readable as name_for
 from gable.pipeline.orchestrator import QualityVerdict
 from gable.pipeline.vision import Inspection
 from gable.slides import fields as template_fields
@@ -426,3 +427,22 @@ def layout_failure(source: dict[str, Any], built: dict[str, Any]) -> Unfinished 
         safe(f"I built the flyer, but {moved[0][0].lower()}{moved[0][1:]}"),
         f"layout regression against the source design: {moved[0]}",
     )
+
+
+def unfilled(fields: dict[str, str], values: dict[str, str]) -> list[str]:
+    """Name every recognised field this run had no value for.
+
+    A value nobody supplied keeps the design's own placeholder rather than
+    stopping a finished flyer, so the delivery message says which ones.
+
+    Args:
+        fields: The design's resolved fields, name to the literal carrying it.
+        values: What this run had to fill them with.
+
+    Returns:
+        The field names in Carmen's words, in the design's own order.
+
+    Raises:
+        Nothing.
+    """
+    return [name_for(name) for name in fields if not values.get(name, "").strip()]
