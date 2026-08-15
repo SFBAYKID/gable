@@ -16,7 +16,15 @@ from gable.agents import website as agent_website
 from gable.db import store
 from gable.listings.enrich import Facts
 from gable.listings.intake import Intake, needs_two_agents, price_note
-from gable.pipeline import audit, needs, people, research_gate, run_reporting, run_values
+from gable.pipeline import (
+    audit,
+    needs,
+    people,
+    research_gate,
+    resume_claim,
+    run_reporting,
+    run_values,
+)
 from gable.pipeline import questions as run_questions
 from gable.pipeline.contact_gate import ContactGate
 from gable.pipeline.orchestrator import Outcome, agent_slots, judge, plan
@@ -178,8 +186,9 @@ class Runner:
             resume_fields: Photo provenance or other run fields that must be
                 committed atomically with the paused-run claim.
             expected_status: Optional exact paused state required by the claim.
-                Photo uploads use ``needs_photo`` so a stale file event cannot
-                resume a run that has since paused for another reason.
+                A photo upload passes the state it was accepted in, so a stale
+                file event cannot resume a run that has since paused for
+                another reason.
 
         Returns:
             What the resumed run did.
@@ -187,44 +196,19 @@ class Runner:
         Raises:
             Nothing. The same failure boundary as a new run records problems.
         """
-        fields = {"failure_reason": "", **(resume_fields or {})}
-        if expected_status == "needs_photo" and self.origin_thread_ts:
-            with run_questions.run_question_guard(run_id):
-                claimed = store.claim_run_for_photo(
-                    self.connection,
-                    run_id,
-                    self.origin_thread_ts,
-                    fields,
-                )
-        else:
-            claimed = store.claim_paused_run(
-                self.connection,
-                run_id,
-                fields,
-                expected_status=expected_status,
-            )
-        if not claimed:
-            current = store.run_by_id(self.connection, run_id)
-            result = RunResult(
-                run_id=run_id,
-                status=current.status if current is not None else "failed",
-            )
-            event_id = str((resume_fields or {}).get("photo_event_id") or "")
-            if (
-                expected_status == "needs_photo"
-                and event_id
-                and current is not None
-                and current.photo_event_id == event_id
-            ):
-                # Two deliveries of the same Slack file may both perform the
-                # idempotent preparation. The one atomic DB claim owns the
-                # build; the loser is a silent duplicate, not a contradictory
-                # "already rechecked" message beside the eventual ready link.
+        claim = resume_claim.claim_for_resume(
+            self.connection,
+            run_id,
+            {"failure_reason": "", **(resume_fields or {})},
+            expected_status=expected_status,
+            origin_thread_ts=self.origin_thread_ts,
+            photo_event_id=str((resume_fields or {}).get("photo_event_id") or ""),
+        )
+        if not claim.won:
+            result = RunResult(run_id=run_id, status=claim.status)
+            if claim.duplicate:
                 return result
-            spoken = safe(
-                "This listing is already being rechecked or is no longer waiting, so I "
-                "did not start another copy of the same work."
-            )
+            spoken = safe(resume_claim.ALREADY_WORKING)
             result.said.append(spoken)
             self.say(spoken, self.origin_thread_ts or None)
             return result

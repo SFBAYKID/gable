@@ -186,6 +186,26 @@ def download_private_image(
     return downloaded
 
 
+def _resume_state(connection: sqlite3.Connection, run: store.RunRow) -> str:
+    """The paused state this run is in right now, for the resume claim.
+
+    Args:
+        connection: The open database.
+        run: The run as it was read before the pending photo question, if any,
+            was satisfied.
+
+    Returns:
+        Its current status, or the status already in hand when the row cannot
+        be re-read. Either way a paused state, because the caller only reaches
+        here after establishing that the run is waiting.
+
+    Raises:
+        Nothing.
+    """
+    current = store.run_by_id(connection, run.run_id)
+    return current.status if current is not None else run.status
+
+
 def _submission(stored: store.StoredSubmission) -> repo.Submission:
     """Restore the repository type expected by ``Runner.resume``."""
     return repo.Submission(
@@ -375,6 +395,7 @@ class PhotoHandoff:
             # records that the upload was accepted first: preparation is
             # content-addressed and safe to repeat, and an abandoned claim is
             # recovered at startup rather than silently dropping Carmen's photo.
+            accepted_in = ""
             with run_questions.run_question_guard(run.run_id):
                 current = store.run_by_id(connection, run.run_id)
                 # A finished flyer plus a new image and a plain request to run
@@ -393,6 +414,21 @@ class PhotoHandoff:
                     current = store.run_by_id(connection, current.run_id)
                 waiting_for_photo = current is not None and (
                     current.status == "needs_photo"
+                    # A flyer parked in review is one Gable built and refused to
+                    # send, holding its draft and saying so. An Open House run
+                    # on 2026-08-15 stopped because the supplied photo showed a
+                    # house number contradicting the address — a problem whose
+                    # only remedy is another photo — and then refused the
+                    # replacement, because review is not needs_photo. That is a
+                    # dead end: the one thing that fixes the run is the one
+                    # thing the run will not take, and the only way out is to
+                    # start the row over.
+                    #
+                    # Nothing is at risk here that is not at risk for
+                    # needs_photo. Review means unsent by definition, so there
+                    # is no finished flyer to overwrite and no need for the
+                    # words that guard a delivered one.
+                    or current.status == "needs_review"
                     or store.has_pending_photo_question(
                         connection,
                         current.run_id,
@@ -414,6 +450,13 @@ class PhotoHandoff:
                         # restart. Whatever that pass reported still stands.
                         return ""
                     store.satisfy_pending_photo_question(connection, run.run_id, thread_ts)
+                    # The state this upload was accepted in, read inside the
+                    # guard and after the question it answers is satisfied,
+                    # because satisfying one moves the run. The resume claim
+                    # below requires this exact state, so a run that pauses for
+                    # some other reason during the source refresh refuses the
+                    # photo instead of taking a stale one.
+                    accepted_in = _resume_state(connection, run)
             if not waiting_for_photo:
                 return finish(
                     "This listing is not waiting for a photo, so I left the current "
@@ -508,7 +551,10 @@ class PhotoHandoff:
                     "photo_event_id": event_id,
                     "ai_enhanced": 0,
                 },
-                expected_status="needs_photo",
+                # The state this upload was accepted in, not a fixed one.
+                # Pinning it to needs_photo made a review-state replacement
+                # fail the claim after the upload was accepted and stored.
+                expected_status=accepted_in,
             )
             # The run speaks for itself. Adding a line here after it has posted
             # its outcome and its link gives one event four messages, and the

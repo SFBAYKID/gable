@@ -428,6 +428,7 @@ gable/
 │   │   ├── needs.py             # one batched ask, and the structural stops' wording
 │   │   ├── questions.py         # persist, post, confirm and retry run notices
 │   │   ├── runner.py            # one complete listing, every exit recorded
+│   │   ├── resume_claim.py      # which single worker owns a paused run
 │   │   ├── live.py              # concrete Google, photo, research and vision seams
 │   │   ├── placement.py         # put a photo on a design without disturbing it
 │   │   ├── schedule.py          # when to poll: busy hours vs quiet

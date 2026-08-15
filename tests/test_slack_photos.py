@@ -665,3 +665,31 @@ def test_an_image_dropped_into_a_finished_thread_changes_nothing(
 
     assert seen == [], "nothing was rebuilt"
     assert "not waiting for a photo" in said
+
+
+def test_a_flyer_parked_in_review_accepts_a_replacement_photo(tmp_path: Path) -> None:
+    """The dead end found on 2026-08-15, on an Open House run for Morgan Muse.
+
+    The visual gate stopped the flyer because the supplied photo showed a house
+    number contradicting the address — a problem only another photo can fix —
+    and Gable then answered the replacement with "This listing is not waiting
+    for a photo, so I left the current flyer unchanged." The one thing that
+    fixes the run was the one thing the run would not take.
+    """
+    path = tmp_path / "gable.db"
+    run_id = _paused_database(path)
+    connection = connect(path)
+    store.set_status(
+        connection,
+        run_id,
+        "needs_review",
+        "the supplied photo shows a house number that conflicts with the address",
+        slack_thread_ts=THREAD,
+    )
+    connection.close()
+    seen: list[str] = []
+
+    said = _handoff(path, seen).handle(_event(), FakeSlackClient())
+
+    assert "not waiting for a photo" not in said
+    assert "left the current flyer unchanged" not in said

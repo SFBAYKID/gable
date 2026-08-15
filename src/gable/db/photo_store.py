@@ -139,8 +139,28 @@ def claim_run_for_photo(
     run_id: str,
     thread_ts: str,
     fields: Mapping[str, str | int] | None = None,
+    expected_status: str = "needs_photo",
 ) -> bool:
-    """Atomically claim a confirmed photo wait or its unresolved request."""
+    """Atomically claim a confirmed photo wait or its unresolved request.
+
+    Args:
+        connection: An open connection.
+        run_id: The paused run this upload belongs to.
+        thread_ts: The owned thread the upload arrived in.
+        fields: Photo provenance committed with the claim.
+        expected_status: The paused state the caller saw when it accepted the
+            upload. Defaults to `needs_photo`, which is the ordinary case: the
+            run asked for a photograph and one arrived. A run whose flyer was
+            built and parked in review passes `needs_review`, because a photo
+            the visual gate rejected is replaced from there and pinning this to
+            `needs_photo` made that claim fail after the upload was stored.
+
+    Returns:
+        True when this call owns the run.
+
+    Raises:
+        sqlite3.Error: on a write failure.
+    """
     root = thread_ts.strip()
     if not root:
         return False
@@ -150,7 +170,7 @@ def claim_run_for_photo(
             connection,
             run_id,
             fields,
-            expected_status="needs_photo",
+            expected_status=expected_status,
         )
     now = _now()
     try:

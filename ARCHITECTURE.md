@@ -552,6 +552,14 @@ other result stays `needs_review`. The replacement question is written to the
 same durable outbox as the initial image question, and only Slack confirmation
 moves the run to `needs_photo`.
 
+A run left in `needs_review` still accepts a replacement photo uploaded to its
+thread, without any question having been asked. Review means built and withheld,
+so there is no finished flyer to overwrite, and the state is reached precisely
+when the photo is the problem — refusing one there was a dead end, because the
+only remedy was the only thing the run would not take. The resume claim requires
+the exact state the upload was accepted in, so a run that pauses for a different
+reason during the source refresh still refuses a stale image.
+
 ### 4.8 Deliver (`slackapp/`)
 
 Post only to the configured Gable channel, inside the listing's owned thread.

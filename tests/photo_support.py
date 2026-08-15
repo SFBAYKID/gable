@@ -103,13 +103,14 @@ class FakeRunner:
     ) -> RunResult:
         """Record a same-run resume without rendering Google Slides."""
         self.seen.extend([submission.response_row_id, run_id])
-        assert expected_status == "needs_photo"
+        assert expected_status in {"needs_photo", "needs_review"}
         fields = resume_fields or {}
         claimed = store.claim_run_for_photo(
             self.connection,
             run_id,
             THREAD,
             fields,
+            expected_status=expected_status or "needs_photo",
         )
         assert claimed
         store.set_status(self.connection, run_id, "delivered", "test delivered")
