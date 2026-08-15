@@ -447,3 +447,73 @@ def test_a_failed_photo_fit_says_so_instead_of_going_quiet() -> None:
     said = str(posted[0]["text"])
     assert "could not fit" in said
     assert "unchanged" in said, "it must be clear the flyer was not damaged"
+
+
+def test_a_declined_photo_leaves_the_words_beside_it_to_be_answered() -> None:
+    """Tambria Eaton's reply gave the address Gable asked for and attached a photo.
+
+    The run was waiting for the address, not a photo, so the upload was declined
+    and the address went with it — Gable said "This listing is not waiting for a
+    photo" and never recorded the answer. An upload the run cannot use does not
+    make the words beside it meaningless.
+    """
+    from typing import Any
+
+    from gable.slackapp.photos import NOT_WAITING_FOR_A_PHOTO, process_file_share
+
+    posted: list[dict[str, object]] = []
+
+    def say(**kwargs: object) -> dict[str, str]:
+        posted.append(kwargs)
+        return {"ts": "said-ts"}
+
+    def handler(
+        _event: dict[str, Any],
+        _client: Any,  # noqa: ANN401 - Slack client double
+        _progress: Callable[[str], None],
+    ) -> str:
+        return NOT_WAITING_FOR_A_PHOTO
+
+    handled = process_file_share(
+        {
+            "channel": "C0B02721MNK",
+            "thread_ts": "thread-ts",
+            "text": "1011 Winged Foot Dr, Westminster, MD 21158",
+        },
+        say,
+        _ShareClient(),
+        handler,
+    )
+
+    assert handled is False, "the caller must still answer the words"
+    assert posted == [], "and nothing is said here, so the answer is the whole reply"
+
+
+def test_a_declined_photo_with_no_words_still_says_why() -> None:
+    """Silence would leave a bare upload looking ignored."""
+    from typing import Any
+
+    from gable.slackapp.photos import NOT_WAITING_FOR_A_PHOTO, process_file_share
+
+    posted: list[dict[str, object]] = []
+
+    def say(**kwargs: object) -> dict[str, str]:
+        posted.append(kwargs)
+        return {"ts": "said-ts"}
+
+    def handler(
+        _event: dict[str, Any],
+        _client: Any,  # noqa: ANN401 - Slack client double
+        _progress: Callable[[str], None],
+    ) -> str:
+        return NOT_WAITING_FOR_A_PHOTO
+
+    handled = process_file_share(
+        {"channel": "C0B02721MNK", "thread_ts": "thread-ts"},
+        say,
+        _ShareClient(),
+        handler,
+    )
+
+    assert handled is True
+    assert posted == [{"text": NOT_WAITING_FOR_A_PHOTO, "thread_ts": "thread-ts"}]

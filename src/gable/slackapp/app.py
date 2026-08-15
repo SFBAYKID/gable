@@ -495,29 +495,36 @@ def build_app(
                 bot_user_id=str(context.get("bot_user_id") or ""),
                 bot_id=str(context.get("bot_id") or ""),
             )
-            if route is MessageRoute.FILE_SHARE:
-                if not replay_guard.first_delivery(event, route="human_message"):
-                    return
-                process_file_share(event, say, client, file_share_handler)
+            if route not in {MessageRoute.FILE_SHARE, MessageRoute.THREAD_REPLY}:
                 return
-            if route is MessageRoute.THREAD_REPLY:
-                if not replay_guard.first_delivery(event, route="human_message"):
-                    return
-                scoped_history = _scoped_history_provider(
-                    history_provider,
-                    allowed_user_ids,
-                    str(context.get("bot_user_id") or ""),
-                    str(context.get("bot_id") or ""),
-                )
-                answer_thread_reply(
-                    event,
-                    say,
-                    client,
-                    thinker,
-                    action_handler,
-                    scoped_history,
-                    context_provider,
-                )
+            if not replay_guard.first_delivery(event, route="human_message"):
+                return
+            # A message carrying a file used to end here whatever it said. One
+            # reply gave the address Gable had just asked for and attached the
+            # photo; the run was not waiting for a photo, so the upload was
+            # declined and the address went with it. An upload the run cannot
+            # use does not make the words beside it meaningless, so a declined
+            # photo falls through to the reply path rather than ending the
+            # message.
+            if route is MessageRoute.FILE_SHARE and process_file_share(
+                event, say, client, file_share_handler
+            ):
+                return
+            scoped_history = _scoped_history_provider(
+                history_provider,
+                allowed_user_ids,
+                str(context.get("bot_user_id") or ""),
+                str(context.get("bot_id") or ""),
+            )
+            answer_thread_reply(
+                event,
+                say,
+                client,
+                thinker,
+                action_handler,
+                scoped_history,
+                context_provider,
+            )
         except Exception:
             logger.exception("message handler failed")
 

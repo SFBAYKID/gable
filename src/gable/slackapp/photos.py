@@ -41,6 +41,14 @@ MAX_UPLOAD_BYTES: Final[int] = 25 * 1024 * 1024
 # The durable claim family for one answering upload. Startup recovery reads it
 # to find uploads this process accepted but never finished.
 PHOTO_INGRESS_ROUTE: Final[str] = "file_share"
+#: Said when an upload reaches a run that is not waiting for one, and also the
+#: signal that the message's own words still deserve an ordinary answer. A
+#: person who replies "1011 Winged Foot Dr, Westminster, MD 21158" and attaches
+#: the photo has answered the question that was asked; routing the whole message
+#: to the photo path and declining it threw that answer away silently.
+NOT_WAITING_FOR_A_PHOTO: Final[str] = (
+    "This listing is not waiting for a photo, so I left the current flyer unchanged."
+)
 _SLACK_HOST_SUFFIXES: Final[tuple[str, ...]] = (".slack.com", ".slack-edge.com")
 _PHOTO_LOCK_STRIPES: Final[int] = 32
 _PHOTO_LOCKS: Final[tuple[threading.Lock, ...]] = tuple(
@@ -223,7 +231,7 @@ def process_file_share(
     say: Any,  # noqa: ANN401 - Bolt injection, untyped upstream
     client: Any,  # noqa: ANN401 - Slack WebClient, untyped upstream
     handler: FileShareHandler | None,
-) -> None:
+) -> bool:
     """Fit a shared photo under the native waiting state and report its outcome.
 
     Fitting and rendering is the longest user-triggered path. The native status
@@ -236,6 +244,12 @@ def process_file_share(
         client: Slack Web API client used for native status.
         handler: The real photo workflow, or ``None`` in isolated checks.
 
+    Returns:
+        True when the upload was dealt with. False only when the run was not
+        waiting for a photo AND the message carried words of its own, which the
+        caller should answer as an ordinary reply — nothing has been said yet in
+        that case, so the reply is the whole response rather than a second one.
+
     Raises:
         Nothing. Every outcome, including failure, is said out loud.
     """
@@ -245,7 +259,7 @@ def process_file_share(
             text=safe("I received the photo, but photo processing is not available right now."),
             thread_ts=thread,
         )
-        return
+        return True
     with Working(
         client,
         str(event.get("channel") or ""),
@@ -257,7 +271,12 @@ def process_file_share(
             # An empty outcome means the run already posted its link or precise
             # failure in this thread. Another line would only duplicate it.
             if not spoken.strip():
-                return
+                return True
+            if spoken == NOT_WAITING_FOR_A_PHOTO and str(event.get("text") or "").strip():
+                # Say nothing here. The words that came with the photo are an
+                # answer to whatever Gable last asked, and answering them is a
+                # better response than a line about the photo.
+                return False
             outcome = safe(spoken)
         except Exception:
             logger.exception("the photo workflow failed")
@@ -266,6 +285,7 @@ def process_file_share(
                 "send it again, or tell me which listing it belongs to."
             )
         say(text=outcome, thread_ts=thread)
+    return True
 
 
 @dataclass(frozen=True, slots=True)
@@ -459,8 +479,7 @@ class PhotoHandoff:
                     accepted_in = _resume_state(connection, run)
             if not waiting_for_photo:
                 return finish(
-                    "This listing is not waiting for a photo, so I left the current "
-                    "flyer unchanged.",
+                    NOT_WAITING_FOR_A_PHOTO,
                     "the run was not waiting for a photo",
                 )
             try:
