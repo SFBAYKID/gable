@@ -117,6 +117,64 @@ def test_unique_root_match_recovers_after_acknowledgement_loss() -> None:
     assert client.auth_calls == 1
 
 
+#: The exact pair observed on 2026-08-15. The left string is what the outbox
+#: stored; the right is what ``conversations.history`` returned for the very
+#: message Slack had accepted. They differ only in the line break.
+STORED_WITH_A_LINE_BREAK = (
+    "I rendered it, but the word “Today.” runs below the selling callout box "
+    "and overlaps the footer bar.\nI have not sent it as finished."
+)
+RETURNED_BY_SLACK = (
+    "I rendered it, but the word “Today.” runs below the selling callout box "
+    "and overlaps the footer bar. I have not sent it as finished."
+)
+
+
+def test_a_line_break_slack_returned_as_a_space_still_reconciles() -> None:
+    """The defect that kept one real row pending for a day, logging every minute.
+
+    Reconciliation answers FOUND, ABSENT or UNKNOWN, and only UNKNOWN has no way
+    out: it neither confirms nor permits a repost. A message Slack had plainly
+    accepted landed there because the stored text kept a newline the returned
+    text did not.
+    """
+    client = SlackHistory([_message(RETURNED_BY_SLACK)])
+
+    result = SlackOutboxReconciler(client, CHANNEL)(
+        STORED_WITH_A_LINE_BREAK,
+        None,
+        CREATED,
+        NOTIFICATION_ID,
+    )
+
+    assert result.state is ReconcileState.FOUND
+    assert result.timestamp == client.messages[0]["ts"]
+
+
+def test_paragraph_breaks_reconcile_the_same_way() -> None:
+    """Every message carries these now, so every message depended on this."""
+    stored = "I resized and fitted the photo.\n\nNobody gave me the price."
+    client = SlackHistory([_message("I resized and fitted the photo. Nobody gave me the price.")])
+
+    result = SlackOutboxReconciler(client, CHANNEL)(stored, None, CREATED, NOTIFICATION_ID)
+
+    assert result.state is ReconcileState.FOUND
+
+
+def test_collapsing_whitespace_does_not_make_two_outcomes_interchangeable() -> None:
+    """Text still has to say the same thing; only its spacing is forgiven."""
+    client = SlackHistory([_message("I rendered it, but I have not sent it as finished.")])
+
+    result = SlackOutboxReconciler(client, CHANNEL)(
+        "I rendered it and sent it as finished.",
+        None,
+        CREATED,
+        NOTIFICATION_ID,
+    )
+
+    assert result.state is ReconcileState.UNKNOWN
+
+
 def test_same_visible_link_label_with_a_different_target_stays_pending() -> None:
     text = "Your flyer is ready. <https://slides.test/right|Open the flyer>"
     wrong = "Your flyer is ready. <https://slides.test/wrong|Open the flyer>"

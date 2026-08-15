@@ -52,13 +52,27 @@ class SlackIdentity:
 
 
 def canonical_visible_text(text: str) -> str:
-    """Canonicalize only Slack transformations that preserve the full message.
+    r"""Canonicalize only Slack transformations that preserve the full message.
 
     HTTP(S) destinations remain part of the proof: two flyers whose visible
     label is ``Open the flyer`` are not the same outcome. Slack may auto-wrap a
     bare telephone number or email address; that wrapper is removed only when
-    its label is exactly the underlying value. Entity escaping and line endings
-    are transport details; whitespace within each line is retained.
+    its label is exactly the underlying value.
+
+    **Every run of whitespace collapses to one space, line breaks included.**
+    This used to keep each line intact, on the reasoning that a line break is
+    part of the message. Slack disagrees: a run outcome posted on 2026-08-14
+    came back from ``conversations.history`` with its ``\n`` rendered as a
+    single space, so the stored text and the accepted text could never compare
+    equal. The row stayed pending for over a day, logging an error a minute,
+    and no later pass could ever resolve it — reconciliation returned UNKNOWN
+    rather than FOUND or ABSENT, which is the one verdict with no way out.
+    That defect reaches every message now that Gable writes in paragraphs.
+
+    Collapsing costs nothing that matters. The notification id carried in the
+    message's own block is what identifies it; this text check only corroborates
+    that the accepted message says what the outbox meant to say, and two
+    outcomes that differ solely in where a line wraps are the same outcome.
     """
     normalized = html.unescape(text or "").replace("\r\n", "\n").replace("\r", "\n")
 
@@ -69,7 +83,9 @@ def canonical_visible_text(text: str) -> str:
 
     normalized = _DESCRIPTIVE_CONTACT_LINK.sub(unwrap_contact, normalized)
     normalized = _CONTACT_AUTOLINK.sub(r"\1", normalized)
-    return "\n".join(line.rstrip() for line in normalized.split("\n")).strip()
+    # str.split() with no argument splits on every whitespace run, so tabs and
+    # the paragraph breaks voice.paragraphs writes normalise the same way.
+    return " ".join(normalized.split())
 
 
 class SlackOutboxReconciler:
