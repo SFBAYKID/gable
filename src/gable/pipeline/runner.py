@@ -25,7 +25,7 @@ from gable.sheets import repository as repo
 from gable.slides import fields as template_fields
 from gable.slides import fitting, preflight
 from gable.slides import manifest as template_manifest
-from gable.voice import safe
+from gable.voice import paragraphs, safe
 
 logger = logging.getLogger("gable.runner")
 
@@ -525,10 +525,7 @@ class Runner:
         # produce, so this is deterministic rather than a judgement.
         readback = run_reporting.read_back(self.read_slide_text, output_id)
         if readback is None:
-            spoken = safe(
-                "I filled the design, but Google Slides did not let me read it back to "
-                "verify the values. I have not sent it as finished."
-            )
+            spoken = safe(run_reporting.UNREADABLE_FLYER)
             return self._outcome(
                 run_id,
                 spoken,
@@ -565,12 +562,7 @@ class Runner:
             # phone number 410.456.6868 is not this listing's on it does not
             # match what I was given" — one message built from a template that
             # expects a bare field name and a value that is already a sentence.
-            spoken = safe(
-                f"I filled the design but the {wrong[0]} on it does not match what I was "
-                "given, so I have not sent it as finished."
-                if wrong
-                else f"I built the flyer but the {stray[0]}, so I have not sent it as finished."
-            )
+            spoken = safe(run_reporting.mismatch(wrong[0] if wrong else "", stray))
             return self._outcome(
                 run_id,
                 spoken,
@@ -609,7 +601,12 @@ class Runner:
         if unplaced:
             return self._outcome(
                 run_id,
-                safe(f"I built the flyer but {unplaced}. I have not sent it as finished."),
+                safe(
+                    paragraphs(
+                        f"I built the flyer, but I {unplaced}.",
+                        "I have not sent it as finished.",
+                    )
+                ),
                 result,
                 status="needs_review",
                 detail=f"the flyer was left unfinished: it {unplaced}",
@@ -690,12 +687,11 @@ class Runner:
                 result.questions.extend(delivery.questions)
                 return result
             message = safe(
-                "\n".join(
-                    [
-                        spoken,
-                        "I have not sent it as finished. I kept the supplied image and draft "
-                        "so this run can be retried without starting over.",
-                    ]
+                paragraphs(
+                    spoken,
+                    "I have not sent it as finished.",
+                    "I kept the supplied image and draft, so this run can be retried "
+                    "without starting over.",
                 )
             )
             return self._outcome(

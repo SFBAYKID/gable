@@ -14,7 +14,7 @@ from gable.pipeline.orchestrator import QualityVerdict
 from gable.pipeline.vision import Inspection
 from gable.slides import fields as template_fields
 from gable.slides import fitting, layout, preflight
-from gable.voice import safe
+from gable.voice import paragraphs, safe
 
 logger = logging.getLogger("gable.runner")
 
@@ -324,16 +324,14 @@ def delivery_message(
             "higher-quality version, send it here and I will run it again."
         )
     return safe(
-        "\n".join(
-            [
-                f"Your flyer is ready. <{output_url}|Open the flyer>",
-                *run_notes,
-                *([photo] if photo else []),
-                *([fit] if fit else []),
-                *advisories,
-                *([blank_note(left_blank)] if left_blank else []),
-                *([price_missing_note] if price_missing_note else []),
-            ]
+        paragraphs(
+            f"Your flyer is ready. <{output_url}|Open the flyer>",
+            *run_notes,
+            photo,
+            fit,
+            *advisories,
+            blank_note(left_blank) if left_blank else "",
+            price_missing_note,
         )
     )
 
@@ -450,3 +448,33 @@ def unfilled(fields: dict[str, str], values: dict[str, str]) -> list[str]:
         Nothing.
     """
     return [name_for(name) for name in fields if not values.get(name, "").strip()]
+
+
+#: Said when Slides accepted the fill and then would not return the text, so
+#: nothing can be verified. Two thoughts, two paragraphs.
+UNREADABLE_FLYER: Final[str] = paragraphs(
+    "I filled the design, but Google Slides did not let me read it back to verify the values.",
+    "I have not sent it as finished.",
+)
+
+
+def mismatch(wrong: str, stray: list[str]) -> str:
+    """Say that a filled value is not the one that was supplied.
+
+    Args:
+        wrong: The field whose value on the flyer does not match, in Carmen's
+            words. Empty when the problem is a leftover sample instead.
+        stray: Sample text still showing, most important first.
+
+    Returns:
+        One house-style message: what is wrong, then what was done about it.
+
+    Raises:
+        Nothing.
+    """
+    found = (
+        f"I filled the design, but the {wrong} on it does not match what I was given."
+        if wrong
+        else f"I built the flyer, but the {stray[0]}."
+    )
+    return paragraphs(found, "I have not sent it as finished.")

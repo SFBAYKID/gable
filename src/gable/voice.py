@@ -323,6 +323,27 @@ def shorten(text: str, limit: int = MAX_REPLY_CHARS) -> str:
     return " ".join(kept)
 
 
+def paragraphs(*parts: str) -> str:
+    """Join what Gable has to say as separate paragraphs, not one block.
+
+    Chase, 2026-08-15, reading a refusal that ran two sentences together: "His
+    writing needs to be not one big block." A finding, what Gable did about it,
+    and what happens next are three different thoughts, and a reader takes them
+    in far faster with air between them than packed into a paragraph.
+
+    Args:
+        *parts: The things to say, in order. Blank ones are dropped, so a
+            caller can pass an optional note without guarding it.
+
+    Returns:
+        The parts separated by a blank line, each already trimmed.
+
+    Raises:
+        Nothing.
+    """
+    return "\n\n".join(part.strip() for part in parts if part and part.strip())
+
+
 def safe(text: str) -> str:
     """Return `text` if it obeys the house style, or the closest thing that does.
 

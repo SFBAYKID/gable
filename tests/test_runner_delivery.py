@@ -496,3 +496,58 @@ def test_replacement_question_survives_an_overlong_visual_finding(
     assert "Can you send the correct property image?" in rec.said[-1]
     assert len(rec.said[-1]) <= 600
     assert is_clean(rec.said[-1])
+
+
+# --- Gable writes in paragraphs, not one block -----------------------------
+
+
+def test_a_refusal_separates_the_finding_from_what_was_done_about_it() -> None:
+    """Chase, 2026-08-15: his writing needs to be not one big block."""
+    from gable.pipeline import run_reporting
+
+    said = run_reporting.mismatch("agent phone", [])
+
+    assert said.count("\n\n") == 1
+    assert said.startswith("I filled the design, but the agent phone")
+    assert said.endswith("I have not sent it as finished.")
+
+
+def test_every_delivery_note_is_its_own_paragraph(tmp_path: Path) -> None:
+    from gable.db.schema import apply_migrations, connect
+    from gable.pipeline import run_reporting
+
+    connection = connect(tmp_path / "g.db")
+    apply_migrations(connection)
+
+    message = run_reporting.delivery_message(
+        connection,
+        "run-1",
+        output_url="http://example.test/edit",
+        run_notes=["I looked the property up."],
+        advisories=["I center-cropped the photo to the frame."],
+        left_blank=[],
+        price_missing_note="The closing price was not on the form.",
+    )
+
+    assert message.count("\n\n") == 3
+    assert "\n\n" in message
+    assert message.startswith("Your flyer is ready.")
+
+
+def test_nothing_extra_leaves_a_blank_line_behind(tmp_path: Path) -> None:
+    from gable.db.schema import apply_migrations, connect
+    from gable.pipeline import run_reporting
+
+    connection = connect(tmp_path / "g.db")
+    apply_migrations(connection)
+
+    message = run_reporting.delivery_message(
+        connection,
+        "run-1",
+        output_url="http://example.test/edit",
+        run_notes=[],
+        advisories=[],
+        left_blank=[],
+    )
+
+    assert "\n" not in message
