@@ -243,6 +243,33 @@ def _field_for_literal(resolution: fields.Resolution, literal: str) -> str:
     return "text"
 
 
+def _allowed_lines(field_name: str, replacement: str, box_lines: int) -> int:
+    r"""How many lines this value may occupy in its box.
+
+    A single-line field must not WRAP — half an email address on a second line
+    is broken, and a name that wraps lands on the title beneath it. A line break
+    the designer typed is not wrapping. New Listing draws its counts as
+    "4\nBedrooms", so forcing that field onto one line measured a two-line
+    label as though it had to fit across one, and refused the design for being
+    one per cent too narrow.
+
+    Args:
+        field_name: The field being filled.
+        replacement: The exact text that will be written.
+        box_lines: How many lines the box can hold.
+
+    Returns:
+        The line budget: the value's own explicit breaks for a single-line
+        field, the box's capacity for anything else.
+
+    Raises:
+        Nothing.
+    """
+    if field_name not in SINGLE_LINE_FIELDS:
+        return box_lines
+    return max(1, replacement.count("\n") + 1)
+
+
 def _replacement_issue(
     template_label: str,
     field_name: str,
@@ -273,7 +300,7 @@ def _replacement_issue(
         replacement,
         box.font_size_pt,
         box.width_emu,
-        1 if field_name in SINGLE_LINE_FIELDS else box.lines,
+        _allowed_lines(field_name, replacement, box.lines),
         box.weight,
         box.family,
     )

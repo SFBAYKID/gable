@@ -656,3 +656,27 @@ def test_a_title_holding_no_credential_is_never_replaced_by_one() -> None:
 
     assert report.adjusted == {}
     assert [issue.code for issue in report.blockers] == ["unreadable_agent_title"]
+
+
+def test_a_count_the_design_writes_on_two_lines_is_measured_on_two() -> None:
+    """New Listing draws its counts as "4\\nBedrooms"."""
+    box = _text("beds", "4\nBedrooms", 100, font_pt=20)
+    presentation = _presentation(_text("address", "[PROPERTY ADDRESS]", 900), box)
+
+    report = _analyze(presentation, {"address": "1 Main St, Baltimore, MD 21201", "beds": "3"})
+
+    assert [issue.code for issue in report.blockers] == []
+
+
+def test_a_name_is_still_refused_the_second_line_it_would_wrap_onto() -> None:
+    """Annie Nowicki's name wrapped onto the Realtor title beneath it."""
+    name = _text("name", "AGENT NAME", 60, font_pt=30)
+    name["size"]["height"]["magnitude"] = 90 * fitting.EMU_PER_POINT
+    presentation = _presentation(_text("address", "[PROPERTY ADDRESS]", 900), name)
+
+    report = _analyze(
+        presentation,
+        {"address": "1 Main St, Baltimore, MD 21201", "agent_name": "Bartholomew Fitzwilliam"},
+    )
+
+    assert [issue.code for issue in report.blockers] == ["unreadable_agent_name"]
