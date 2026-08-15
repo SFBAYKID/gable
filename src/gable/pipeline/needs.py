@@ -23,6 +23,7 @@ Does not handle: posting or persistence.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Final
 
@@ -36,6 +37,34 @@ _READABLE: Final[dict[str, str]] = {
     "new_price": "new price",
     "open_house": "open house date and time",
 }
+
+
+def internal_name(readable_name: str) -> str:
+    """Turn the words a person would use back into the stored field name.
+
+    The inverse of `readable`. A question names what it wants in Carmen's
+    words — "open house date and time" — while a supplied fact is stored under
+    the field it fills. Without a way back, an answer that was recorded could
+    not be matched to the question that asked for it, and Gable asked Jay
+    Hinish's listing for its open house three times running.
+
+    Args:
+        readable_name: The words a question used.
+
+    Returns:
+        The stored field name, or the same words with spaces turned into
+        underscores when nothing maps — which is what the plain fields already
+        look like.
+
+    Raises:
+        Nothing.
+    """
+    cleaned = readable_name.strip()
+    for field_name, words in _READABLE.items():
+        if words == cleaned:
+            return field_name
+    return cleaned.replace(" ", "_")
+
 
 #: Contradictions a person can answer in the same breath as the photograph, so
 #: they ride the one batched ask instead of costing their own round trip.
@@ -222,3 +251,29 @@ def missing_design(request_type: str) -> str:
         "folder, so I have not built anything. Add one with that exact "
         "name and I will use it."
     )
+
+
+def still_unanswered(questions: list[Question], supplied: Mapping[str, str]) -> list[str]:
+    """The questions nobody has answered yet, in Carmen's words.
+
+    A question names what it wants the way a person would — "open house date
+    and time" — and a supplied fact is stored under the field it fills. Without
+    the mapping between them an answer that was recorded could not be matched
+    to the question that asked for it, and Gable asked Jay Hinish's listing for
+    its open house three times running.
+
+    Args:
+        questions: What the run still wants.
+        supplied: Field name to the value somebody stated, as stored.
+
+    Returns:
+        The field names still worth asking about, in order.
+
+    Raises:
+        Nothing.
+    """
+    return [
+        question.field_name
+        for question in questions
+        if not supplied.get(internal_name(question.field_name), "").strip()
+    ]

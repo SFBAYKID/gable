@@ -296,7 +296,10 @@ class Runner:
                 return self._ask(run_id, intake, stopping[0].ask, stopping, result)
             if not allow_blank:
                 outstanding.add_values(
-                    [question.field_name for question in step.questions],
+                    needs.still_unanswered(
+                        step.questions,
+                        store.recall_supplied_facts(self.connection, intake.address),
+                    )
                 )
         if step.outcome is Outcome.SKIP:
             store.set_status(self.connection, run_id, "skipped", step.detail)

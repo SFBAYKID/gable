@@ -68,3 +68,37 @@ def test_a_missing_design_is_named_by_the_file_carmen_must_add() -> None:
 
 def test_a_blank_request_type_still_produces_a_usable_sentence() -> None:
     assert "this request type" in needs.missing_design("   ")
+
+
+# --- a question nobody has answered is the only one still asked ------------
+
+
+def test_an_answered_question_is_not_asked_again() -> None:
+    """Gable asked Jay Hinish's listing for its open house three times."""
+    from gable.listings.intake import Question
+    from gable.pipeline.needs import still_unanswered
+
+    asked = [
+        Question("open house date and time", "When is it?", absent=True),
+        Question("price", "What is it?", absent=True),
+    ]
+
+    left = still_unanswered(asked, {"open_house": "Saturday, Aug 22, 2026 1-3PM"})
+
+    assert left == ["price"]
+
+
+def test_nothing_answered_leaves_every_question_standing() -> None:
+    from gable.listings.intake import Question
+    from gable.pipeline.needs import still_unanswered
+
+    asked = [Question("open house date and time", "When is it?", absent=True)]
+
+    assert still_unanswered(asked, {}) == ["open house date and time"]
+
+
+def test_the_words_a_question_uses_map_back_to_the_field_it_fills() -> None:
+    from gable.pipeline.needs import internal_name, readable
+
+    for field_name in ("open_house", "list_price", "square_feet", "new_price", "beds"):
+        assert internal_name(readable(field_name)) == field_name
