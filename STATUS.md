@@ -2,6 +2,46 @@
 
 Last updated 2026-08-14 by the building agent.
 
+## 2026-08-14 second pass: six new agents, six new photographs
+
+Every design run again with a different agent and a different photograph, after
+Chase's review of the first pass. The complaint that mattered was not a design
+one: "some threads had 4 replies, some had 19 ... If a user has to go back and
+forth 19 times they are just going to build it themselves."
+
+| Design | Row | Agent | Size |
+|---|---|---|---|
+| Under Contract | 25 | Donald Clark | 3.57 MB |
+| Open House | 16 | Sydney Kinney | 3.45 MB |
+| Sold | 10 | Kim Hixson | 1.21 MB |
+| New Listing with Open House | 78 | Tonette Campbell | 2.06 MB |
+| New Listing | 29 | Kelli Kulnich | 3.45 MB |
+| Client Review Post | 50 | Ian DePinto | 0.54 MB |
+
+`slides/layout.py` reports zero regressions across all six, measured against the
+design each was copied from.
+
+**Round trips.** An unreadable address and an address the design cannot print
+both now ride the one batched ask with the photograph instead of costing their
+own turn. Sydney Kinney's flyer is what that looks like when nothing else is
+wrong: an announcement, one ask, one reply carrying the photo and four values,
+and the link.
+
+**Two new instruments.** `slides/layout.py` measures a built flyer against its
+own design and reports only what moved — all three defects Chase found were
+rectangles the rendered vision pass had not mentioned. And `fitting` now counts
+the lines text really wraps into rather than dividing total width by line count,
+which is what put the ZIP of a long address on top of the panel below it.
+
+**Still Carmen's, not Gable's**: Piet de Dreu's headshot is the only one of 41
+that is not a cut-out, and every client review on the form is longer than the
+panel it has to fit.
+
+**Left in the playground**: an unsent draft sits in the channel composer reading
+"3 beds, 2 baths, 1,528 sq ft, $230,000.The price is $325,000." It is a stray
+from driving Slack through the browser, it was never sent, and clearing it is
+one keystroke.
+
 ## 2026-08-14 every design run once, and polling is on
 
 All six designs were run end to end against real `Form Responses 1` rows, each
