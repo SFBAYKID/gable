@@ -35,6 +35,15 @@ MAX_TOLERABLE_UPSCALE: Final[float] = 2.0
 #: when nothing was cut. See `_vertical_crop_offset`.
 TOP_CROP_SHARE: Final[float] = 0.2
 
+#: Ceiling on that headroom, as a share of the height the crop keeps. The share
+#: above is a share of what is DISCARDED, so a source far taller than the frame
+#: gives it far more to take: a 1080x1149 upload into a 2.14:1 hero discards 644
+#: rows and 20% of that is 129, enough to take a dormer with it. Headroom is a
+#: property of the finished picture, not of how much was thrown away, so it is
+#: capped against what survives. On the confirmed Dawn Rea flyer this changes
+#: the offset by two pixels, which is the point: it bites only in the extreme.
+MAX_TOP_CROP_OF_KEPT: Final[float] = 0.08
+
 #: Aspect ratios closer than this are treated as equal, so a 1079x1350 photo is
 #: not sent round a crop path for a rounding error.
 ASPECT_EPSILON: Final[float] = 0.01
@@ -304,18 +313,26 @@ def _vertical_crop_offset(source_height: int, kept_height: int) -> int:
     the loss from the top — enough to avoid pinning the roof against the frame
     edge — and the rest from the bottom.
 
+    That share alone was not enough. It is a share of what is DISCARDED, so the
+    taller the source is relative to the frame, the more it takes: two flyers on
+    2026-08-15 came back from the visual gate as cutting off a dormer and a roof
+    peak, from portrait uploads where 20% of the excess was over 120 rows.
+    Headroom belongs to the finished picture rather than to how much was thrown
+    away, so it is also capped against the height that survives.
+
     Args:
         source_height: Height of the oriented source in pixels.
         kept_height: Height the crop retains.
 
     Returns:
-        The top offset for the crop box, never negative.
+        The top offset for the crop box, never negative and never more than a
+        small band above the subject.
 
     Raises:
         Nothing.
     """
     excess = max(0, source_height - kept_height)
-    return int(excess * TOP_CROP_SHARE)
+    return int(min(excess * TOP_CROP_SHARE, kept_height * MAX_TOP_CROP_OF_KEPT))
 
 
 def _fit_locally_unlocked(

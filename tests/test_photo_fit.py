@@ -640,6 +640,24 @@ def test_a_wide_frame_crop_takes_its_loss_from_the_bottom_not_the_roof() -> None
     assert offset > 0, "pinning the roof to the frame edge still reads as cropped"
 
 
+def test_a_portrait_upload_into_a_letterbox_keeps_its_roof() -> None:
+    """Two flyers on 2026-08-15 were refused for cutting a dormer and a roof peak.
+
+    A 1080x1149 upload into the Sold hero keeps about 505 rows and discards 644.
+    Twenty percent of the discarded height is 129 rows of sky and roof; headroom
+    belongs to the finished picture, not to how much was thrown away.
+    """
+    offset = _vertical_crop_offset(1149, 505)
+
+    assert offset <= int(505 * 0.08) + 1
+    assert offset > 0, "pinning the roof to the frame edge still reads as cropped"
+
+
+def test_the_cap_barely_moves_the_confirmed_flyer() -> None:
+    """The Dawn Rea crop is the standard, so the cap must not redefine it."""
+    assert abs(_vertical_crop_offset(452, 317) - int((452 - 317) * 0.2)) <= 3
+
+
 def test_the_vertical_crop_never_starts_above_the_image() -> None:
     """A source shorter than the kept height must not produce a negative box."""
     assert _vertical_crop_offset(300, 400) == 0
