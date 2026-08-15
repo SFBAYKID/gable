@@ -237,3 +237,41 @@ def test_a_note_that_only_repeats_the_request_type_is_not_printed(tmp_path: Path
         values = for_intake(connection, _note_intake("Under Contract", written), {})
         assert values["listing_note"] == "", written
     connection.close()
+
+
+def test_an_open_house_answered_in_the_thread_is_the_one_that_is_printed(
+    tmp_path: Path,
+) -> None:
+    """Gable asked, was given the date and time, and asked again."""
+    connection = connect(tmp_path / "gable.db")
+    apply_migrations(connection)
+    intake = _note_intake("Open House", "")
+    store.remember_supplied_fact(
+        connection, intake.address, "open_house", "Saturday, Aug 22, 2026 1-3PM"
+    )
+
+    values = for_intake(connection, intake, {})
+
+    assert values["open_house"] == "Saturday, Aug 22, 2026 1-3PM"
+    connection.close()
+
+
+def test_the_forms_own_open_house_is_used_when_nobody_answered(tmp_path: Path) -> None:
+    connection = connect(tmp_path / "gable.db")
+    apply_migrations(connection)
+    intake = Intake(
+        agent_email="agent@example.com",
+        agent_name="Avery Agent",
+        request_type="Open House",
+        address="1 Main St, Baltimore, MD 21201",
+        post_details="",
+        open_house="08/01 12-2pm",
+        new_price="",
+        closing_price="",
+        extra_notes="",
+        side="",
+        notes="",
+    )
+
+    assert for_intake(connection, intake, {})["open_house"] == "08/01 12-2pm"
+    connection.close()

@@ -164,6 +164,14 @@ def for_intake(
     # somebody actually chose outranks the pasted one. Only the quote: the
     # reviewer's name is not theirs to change here.
     stated = store.recall_supplied_facts(connection, intake.address)
+    # An open house someone answered in the thread. Every other suppliable
+    # value reaches the flyer through `known`, which research fills; this one
+    # came straight off the form, so a stated date and time was recorded and
+    # then ignored — Gable asked Jay Hinish's listing for the open house, was
+    # given "Saturday, Aug 22, 2026 1-3PM", and asked again.
+    when = stated.get("open_house", "").strip()
+    if when:
+        values["open_house"] = when
     named = stated.get("client_name", "").strip()
     if named:
         values["client_name"] = named
