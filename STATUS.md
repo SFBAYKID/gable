@@ -2,6 +2,31 @@
 
 Last updated 2026-08-14 by the building agent.
 
+## 2026-08-15 confirmation pass, and Gable stops writing in blocks
+
+All six designs rebuilt once more from their own threads, one message each —
+"Rebuild this one." — and all six delivered. `slides/layout.py` reports zero
+regressions against the designs they were copied from.
+
+Chase on the writing: "She needs to say a message and have a \n so it's not
+just one run-on sentence. His writing needs to be not one big block." Every
+outcome and every refusal now separates its thoughts with a blank line. A
+delivered flyer reads as the link, then what was done to the photo, then what
+was fitted — three paragraphs rather than one paragraph of three sentences.
+
+One defect found by the pass: dropping a note that only repeated the request
+type left Under Contract's panel empty, and the missing-value check then stopped
+the rebuild to ask what the note should say. An empty note panel keeps the
+design's own "Ready to Buy? / DM me to find your next home."
+
+**File size is no longer a proxy for a complete flyer.** Under Contract came
+back at 0.31 MB against a 3.57 MB template, which looks alarming and is not: the
+copy has 18 elements to the design's 18, the only absent source objects are the
+photo well and the headshot frame Gable deletes and replaces, and the render is
+complete. The earlier 3.57 MB copies still carried the template's own unused
+sample photograph; these do not. Judge a flyer by its render and the layout
+audit, not by its byte count.
+
 ## 2026-08-14 second pass: six new agents, six new photographs
 
 Every design run again with a different agent and a different photograph, after
