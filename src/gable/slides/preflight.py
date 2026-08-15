@@ -68,6 +68,14 @@ TEMPLATE_CAPACITY_CHARS: Final[dict[str, int]] = {
     "open_house": 38,
 }
 
+#: Fields whose empty state is the design's own words rather than a gap. The
+#: note panel on Under Contract ships reading "Ready to Buy? / DM me to find
+#: your next home." — a perfectly good call to action — and a submission with
+#: nothing to add about the deal should keep it. Treating that as a missing
+#: value stopped Donald Clark's rebuild to ask what the note should say, on a
+#: listing whose details column said only "Under Contract".
+OPTIONAL_FIELDS: Final[frozenset[str]] = frozenset({"listing_note"})
+
 # These values become confusing or visually broken when they wrap. A tall box
 # is not permission to put half an email, phone number, price, or person's name
 # on a second line. Addresses, review copy, and open-house wording may be
@@ -666,7 +674,11 @@ def analyze(
     # check still runs so the reason is recorded either way.
     if values:
         missing = next(
-            (name for name in resolution.fields if not values.get(name, "").strip()),
+            (
+                name
+                for name in resolution.fields
+                if name not in OPTIONAL_FIELDS and not values.get(name, "").strip()
+            ),
             "",
         )
         if missing:
