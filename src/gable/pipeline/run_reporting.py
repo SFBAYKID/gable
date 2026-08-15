@@ -144,6 +144,7 @@ def verify_rendered(
     resolution: template_fields.Resolution,
     values: Mapping[str, str],
     text_fit: TextFitResult,
+    layout_verified: bool = False,
 ) -> Verified:
     """Read the rendered flyer back, look at it, and decide whether it passed.
 
@@ -159,6 +160,12 @@ def verify_rendered(
         resolution: What each of the design's literals means.
         values: The values the run filled in.
         text_fit: The result of fitting text to its boxes.
+        layout_verified: True when the deterministic geometric audit already
+            compared this flyer with its source design and found no
+            regression. Layout-kind visual opinions are then dropped: a
+            rectangle measured identical to the design cannot be a defect
+            Gable introduced, and second-guessing the designer parked a
+            correct flyer in review.
 
     Returns:
         A `Verified` carrying every problem found, what to say about it, and
@@ -193,6 +200,8 @@ def verify_rendered(
         # Filtered afterwards as well: naming them in the prompt is guidance,
         # and the kind the model returns is the check that it was followed.
         seen = seen.without_expected_placeholders()
+    if layout_verified:
+        seen = seen.without_measured_layout_kinds()
 
     non_visual = list(verdict.problems)
     if final_text is None:
@@ -262,7 +271,12 @@ def _every_problem(lead: str, problems: list[str]) -> str:
     spoken = said.lower()
     rest = [
         problem.strip()
-        for problem in problems[1:]
+        # Every problem, not problems[1:]. The lead is whichever judge spoke —
+        # usually the visual one — while the list puts text problems first, so
+        # skipping the first entry dropped a wrong price whenever the lead was
+        # about the picture. The substring check below is what keeps the lead's
+        # own problem from repeating; position never could.
+        for problem in problems
         # Substring rather than equality: the lead is a sentence built around
         # the problem text, not the problem text itself.
         if problem.strip() and problem.strip().lower().rstrip(".") not in spoken

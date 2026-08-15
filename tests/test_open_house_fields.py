@@ -240,3 +240,49 @@ def test_a_bare_range_in_the_middle_is_left_alone() -> None:
     pairs = fields.replacements(resolution, {"open_house": "11-1 on Saturday"})
 
     assert pairs["Sunday, Aug 2, 2026"] == "11-1 on Saturday"
+
+
+def test_two_days_at_the_same_bare_hours_write_that_time_once() -> None:
+    """The meridiem forms were cured of this; the bare forms re-manifested it.
+
+    "Aug 8, 11-1 and Aug 9, 11-1" measured its times with the meridiem pattern
+    alone, found none, and left the first "11-1" standing in the date box above
+    its own time box.
+    """
+    resolution = fields.resolve(["Sunday, Aug 2, 2026", "2-4PM"])
+
+    pairs = fields.replacements(resolution, {"open_house": "Aug 8, 11-1 and Aug 9, 11-1"})
+
+    assert pairs["2-4PM"] == "11-1"
+    assert "11-1" not in pairs["Sunday, Aug 2, 2026"]
+    assert "Aug 8" in pairs["Sunday, Aug 2, 2026"]
+    assert "Aug 9" in pairs["Sunday, Aug 2, 2026"]
+
+
+def test_two_days_at_different_bare_hours_do_not_split() -> None:
+    """A promoted bare "2-4" would hide Saturday's own hours in the date line."""
+    resolution = fields.resolve(["Sunday, Aug 2, 2026", "2-4PM"])
+
+    pairs = fields.replacements(resolution, {"open_house": "Aug 8, 11-1 and Aug 9, 2-4"})
+
+    assert pairs["Sunday, Aug 2, 2026"] == "Aug 8, 11-1 and Aug 9, 2-4"
+    assert pairs["2-4PM"] == ""
+
+
+def test_a_time_with_no_date_is_not_printed_twice() -> None:
+    """A time alone used to fall back into the date box beside its own time box."""
+    resolution = fields.resolve(["Sunday, Aug 2, 2026", "2-4PM"])
+
+    pairs = fields.replacements(resolution, {"open_house": "2-4PM"})
+
+    assert pairs["2-4PM"] == "2-4PM"
+    # Cleared, not repeated: an explicit empty replacement clears the sample.
+    assert pairs["Sunday, Aug 2, 2026"] == ""
+
+
+def test_a_time_with_no_date_fills_the_one_box_design_once() -> None:
+    resolution = fields.resolve(["SUNDAY, MAY 24TH\n1 PM - 3 PM"])
+
+    pairs = fields.replacements(resolution, {"open_house": "2-4PM"})
+
+    assert pairs["SUNDAY, MAY 24TH\n1 PM - 3 PM"] == "2-4PM"

@@ -226,8 +226,12 @@ def process_mention(
     Raises:
         Nothing. The delegated handlers own their plain-language failures.
     """
-    if has_shared_files(event):
-        process_file_share(event, say, client, file_share_handler)
+    # A declined upload leaves the mention's own words to be answered — the
+    # message-path fix taught `process_file_share` to say so, and this caller
+    # was still discarding that signal. A mention carrying the asked-for
+    # address plus a photo the run could not take was answered with nothing at
+    # all, which is worse than the pre-fix "not waiting for a photo".
+    if has_shared_files(event) and process_file_share(event, say, client, file_share_handler):
         return
     answer_mention(
         event,

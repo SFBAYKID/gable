@@ -284,6 +284,48 @@ class Inspection:
             remedy=self.remedy if problems else InspectionRemedy.NONE,
         )
 
+    def without_measured_layout_kinds(self) -> Inspection:
+        """Drop layout-kind opinions once geometry has been measured clean.
+
+        Called only after the deterministic audit (`slides.layout.regressions`)
+        has compared every rectangle on the built flyer with the design it was
+        copied from and found nothing moved, nothing newly bleeding, and
+        nothing newly overlapping. A layout-kind complaint that survives that
+        measurement is a complaint about the design itself — Tambria Eaton's
+        flyer was parked in review for "the footer slogan is clipped along the
+        bottom edge" when the slogan sat 2.5 points inside the page, exactly
+        where the designer drew it. Whether Carmen's own footer is too tight is
+        Carmen's call, not the model's.
+
+        Text, photo and placeholder kinds are untouched: geometry cannot see a
+        wrong digit, a stranger's face, or ink inside a box.
+
+        Returns:
+            The verdict with layout-kind problems removed, passing when
+            nothing else remained. Unchanged when kinds and problems do not
+            line up, because then nothing can be dropped safely.
+
+        Raises:
+            Nothing.
+        """
+        if len(self.problem_kinds) != len(self.problems) or not self.problems:
+            return self
+        kept = [
+            (problem, kind)
+            for problem, kind in zip(self.problems, self.problem_kinds, strict=True)
+            if kind is not InspectionProblemKind.LAYOUT
+        ]
+        if len(kept) == len(self.problems):
+            return self
+        problems = [problem for problem, _ in kept]
+        return replace(
+            self,
+            problems=problems,
+            problem_kinds=tuple(kind for _, kind in kept),
+            looks_right=self.looks_right or not problems,
+            remedy=self.remedy if problems else InspectionRemedy.NONE,
+        )
+
     @property
     def say(self) -> str:
         """What Gable tells Carmen, or an empty string when all is well."""

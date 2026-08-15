@@ -597,6 +597,42 @@ _BARE_HOUR_RANGE_AT_END: Final[re.Pattern[str]] = re.compile(
 #: What has to survive in the date half for a bare range to have been a time.
 _A_DAY_NUMBER: Final[re.Pattern[str]] = re.compile(r"\d")
 
+#: The same meridiem-less range, found anywhere. Only ever consulted with the
+#: day-number context check `_bare_hours` uses, because on its own this matches
+#: the "8-9" of "Aug 8-9" — a range of days, not of hours.
+_BARE_HOUR_RANGE_INSIDE: Final[re.Pattern[str]] = re.compile(
+    r"\d{1,2}(?::\d{2})?\s*(?:-|–|—|to)\s*\d{1,2}(?::\d{2})?",  # noqa: RUF001
+    re.IGNORECASE,
+)
+
+
+def _bare_times_before(value: str, end: int) -> list[re.Match[str]]:
+    """Every meridiem-less time before `end`, judged by `_bare_hours`' own rule.
+
+    A candidate counts as a time only when the text before it still carries a
+    day number once separators are stripped — the same context test that keeps
+    "Aug 8-9" a pair of days. In "Aug 8, 11-1 and Aug 9, 11-1" the inner "11-1"
+    qualifies (before it stands "Aug 8,"), while in "Aug 8-9, 11-1" the "8-9"
+    does not (before it stands only "Aug").
+
+    Args:
+        value: The open-house details exactly as supplied.
+        end: Look only before this index — the trailing match's start.
+
+    Returns:
+        The qualifying matches, in order, spans intact so the caller can cut
+        exactly these and nothing else.
+
+    Raises:
+        Nothing.
+    """
+    head = value[:end]
+    return [
+        match
+        for match in _BARE_HOUR_RANGE_INSIDE.finditer(head)
+        if _A_DAY_NUMBER.search(head[: match.start()].strip(" ,-–—\t"))  # noqa: RUF001
+    ]
+
 
 def _bare_hours(value: str) -> re.Match[str] | None:
     """Find a trailing hour range written without am or pm.
@@ -641,13 +677,15 @@ def _open_house_part(literal: str, value: str) -> str:
 
     Returns:
         The matching half, or the whole value when it cannot be split
-        confidently. Never an empty string: a blank here would leave the
-        design's sample showing.
+        confidently. The date half may come back empty when only a time was
+        supplied — an explicit empty replacement clears the box, and
+        clearing the sample date beats printing the time twice.
 
     Raises:
         Nothing.
     """
-    found = _TIME_RANGE_INSIDE.search(value) or _bare_hours(value)
+    with_meridiem = _TIME_RANGE_INSIDE.search(value)
+    found = with_meridiem or _bare_hours(value)
     if not found:
         # No time was supplied at all. The date box takes the whole value; the
         # time box is emptied rather than repeating it. Sydney Kinney's open
@@ -656,28 +694,58 @@ def _open_house_part(literal: str, value: str) -> str:
         # would be worse still — that is a previous listing's real time.
         return "" if _wants_time(literal) else value
     time_part = found.group(0).strip()
-    times = [match.group(0) for match in _TIME_RANGE_INSIDE.finditer(value)]
+    earlier: list[re.Match[str]] = []
+    if with_meridiem is not None:
+        times = [match.group(0) for match in _TIME_RANGE_INSIDE.finditer(value)]
+    else:
+        # A bare range counts as a time only with a day number before it, and
+        # the same rule finds the earlier copies. Without this, "Aug 8, 11-1
+        # and Aug 9, 11-1" measured its times with the meridiem pattern alone,
+        # found none, and left the first "11-1" standing in the date box above
+        # its own time box — the exact failure the meridiem forms had
+        # already been cured of.
+        earlier = _bare_times_before(value, found.start())
+        times = [*(match.group(0) for match in earlier), time_part]
     # Two days at the same hours \u2014 "08/08/2026 11am-1pm , 08/09/2026 11am-1pm" \u2014
     # is one time written twice. Taking out only the first left the second in
     # the date box, so the flyer read "08/08/2026 , 08/09/2026 11am-1pm" above
     # its own "11am-1pm". Two DIFFERENT times are two facts: dropping one would
     # be a lie about when the house is open, so that case is left as it was.
     same_time = len({"".join(item.split()).casefold() for item in times}) == 1
-    remainder = (
-        _TIME_RANGE_INSIDE.sub(" ", value)
-        if same_time
-        else value[: found.start()] + " " + value[found.end() :]
-    ).strip(" ,-\u2013\u2014\t")
+    # A bare "2-4" promoted to the time box would assert itself as THE
+    # open-house time while Saturday's own hours hid in the date line, so
+    # bare forms carrying two different times do not split at all.
+    if with_meridiem is None and not same_time:
+        return "" if _wants_time(literal) else value
+    if with_meridiem is not None and same_time:
+        remainder = _TIME_RANGE_INSIDE.sub(" ", value)
+    else:
+        # Cut exactly the spans judged to be times, newest last. A blanket
+        # sub of the bare pattern would also take the "8-9" out of
+        # "August 8-9, 11-1", which is a pair of days.
+        spans = [(found.start(), found.end())]
+        if with_meridiem is None and same_time:
+            spans = [*((m.start(), m.end()) for m in earlier), *spans]
+        pieces, last = [], 0
+        for start, stop in spans:
+            pieces.append(value[last:start])
+            last = stop
+        pieces.append(value[last:])
+        remainder = " ".join(pieces)
+    remainder = remainder.strip(" ,-\u2013\u2014\t")
     remainder = _STRANDED_SEPARATOR.sub(", ", remainder)
     # The word that joined the date to the time it no longer sits beside.
     # "08/01 and 08/02 from 12-2pm" left "08/01 and 08/02 from" in the date box,
     # with the "from" dangling at the end of the line.
     remainder = _TRAILING_JOINER.sub("", remainder).strip(" ,-\u2013\u2014\t")
-    date_part = " ".join(remainder.split()) or value
+    # No `or value` fallback: a value that was nothing but a time — "2-4PM"
+    # — used to fall back to itself here and printed the time in both
+    # boxes, the Sydney Kinney duplicate mirrored. Empty clears the sample.
+    date_part = " ".join(remainder.split())
     # One box holding both, on two lines. Filling it with the whole string on a
     # single line overflowed the tag it sits in, so the shape is preserved.
     if _SAMPLE_OPEN_HOUSE_DATE_AND_TIME.match(literal.strip()):
-        return f"{date_part}\n{time_part}"
+        return f"{date_part}\n{time_part}" if date_part else time_part
     return time_part if _wants_time(literal) else date_part
 
 

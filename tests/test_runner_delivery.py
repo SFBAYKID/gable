@@ -451,6 +451,42 @@ def test_mixed_visual_problems_stay_review_even_with_a_replace_remedy(
     runner.look_at = lambda _run_id, _image, _expected: Inspection(
         looks_right=False,
         confident=True,
+        problems=["The source number says 721.", "The price digits look wrong."],
+        remedy=InspectionRemedy.REPLACE_PHOTO,
+        problem_kinds=(
+            InspectionProblemKind.SOURCE_PHOTO_CONFLICT,
+            InspectionProblemKind.TEXT,
+        ),
+        source_conflict_visible=True,
+    )
+
+    result = runner.run(submission)
+
+    current = store.run_by_id(db, result.run_id)
+    assert current is not None
+    assert result.status == current.status == "needs_review"
+    assert result.questions == []
+    assert "correct property image" not in rec.said[0]
+    assert current.failure_reason == ("The source number says 721.; The price digits look wrong.")
+
+
+def test_a_layout_opinion_disproven_by_geometry_leaves_a_pure_photo_conflict(
+    db: sqlite3.Connection,
+) -> None:
+    """The geometric audit outranks a layout opinion it has measured false.
+
+    When the only companion to a visible source-photo conflict is a layout
+    claim about rectangles the audit found identical to the design, the honest
+    remedy is the photo question — parking it in review made Carmen diagnose a
+    complaint about the designer's own footer.
+    """
+    submission = _submission(rid="rid-layout-disproven")
+    _record(db, submission)
+    rec = Recorder()
+    runner = _runner(db, rec)
+    runner.look_at = lambda _run_id, _image, _expected: Inspection(
+        looks_right=False,
+        confident=True,
         problems=["The source number says 721.", "The address overlaps the divider."],
         remedy=InspectionRemedy.REPLACE_PHOTO,
         problem_kinds=(
@@ -464,12 +500,8 @@ def test_mixed_visual_problems_stay_review_even_with_a_replace_remedy(
 
     current = store.run_by_id(db, result.run_id)
     assert current is not None
-    assert result.status == current.status == "needs_review"
-    assert result.questions == []
-    assert "correct property image" not in rec.said[0]
-    assert current.failure_reason == (
-        "The source number says 721.; The address overlaps the divider."
-    )
+    assert result.status == current.status == "needs_photo"
+    assert any("correct property image" in text for text in rec.said)
 
 
 def test_replacement_question_survives_an_overlong_visual_finding(

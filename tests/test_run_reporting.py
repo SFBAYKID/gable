@@ -46,3 +46,66 @@ def test_a_judge_with_nothing_to_say_still_names_the_problem() -> None:
 
 def test_no_problems_and_no_lead_says_nothing() -> None:
     assert run_reporting._every_problem("", []) == ""
+
+
+def test_a_visual_lead_does_not_swallow_the_text_problem_listed_first() -> None:
+    """The list puts text problems first; the lead is usually the visual judge.
+
+    Iterating from problems[1:] assumed the lead covered problems[0], so a
+    wrong price vanished whenever the picture also had a complaint.
+    """
+    price = "the price reads $32,500 rather than the supplied $325,000"
+    crop = "the top of the house is cropped off"
+
+    said = run_reporting._every_problem(f"I rendered it, but {crop}.", [price, crop])
+
+    assert "$32,500" in said
+    assert "cropped" in said
+    assert said.count("cropped") == 1
+
+
+def test_a_layout_opinion_is_dropped_once_geometry_measured_clean() -> None:
+    """Tambria Eaton's flyer was parked for a footer the designer drew.
+
+    The vision gate said "the footer slogan is clipped along the bottom edge";
+    the geometric audit had measured the slogan at the identical spot in the
+    design and the built flyer, 2.5 points inside the page. A rectangle that
+    matches the design cannot be a defect Gable introduced.
+    """
+    from gable.pipeline.vision import Inspection, InspectionProblemKind, InspectionRemedy
+
+    seen = Inspection(
+        checked=True,
+        confident=True,
+        looks_right=False,
+        problems=["The footer slogan is clipped along the bottom edge."],
+        problem_kinds=(InspectionProblemKind.LAYOUT,),
+        remedy=InspectionRemedy.REVIEW,
+    )
+
+    cleared = seen.without_measured_layout_kinds()
+
+    assert cleared.looks_right
+    assert not cleared.problems
+
+
+def test_a_text_opinion_survives_a_clean_geometric_audit() -> None:
+    """Geometry cannot see a wrong digit; the text kinds must stay."""
+    from gable.pipeline.vision import Inspection, InspectionProblemKind, InspectionRemedy
+
+    seen = Inspection(
+        checked=True,
+        confident=True,
+        looks_right=False,
+        problems=[
+            "The price reads $32,500.",
+            "The footer slogan is clipped along the bottom edge.",
+        ],
+        problem_kinds=(InspectionProblemKind.TEXT, InspectionProblemKind.LAYOUT),
+        remedy=InspectionRemedy.REVIEW,
+    )
+
+    cleared = seen.without_measured_layout_kinds()
+
+    assert not cleared.looks_right
+    assert list(cleared.problems) == ["The price reads $32,500."]

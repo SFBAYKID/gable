@@ -57,6 +57,17 @@ def resume_with_current_sources(
     Raises:
         Nothing. The runner records its own failures.
     """
+    # An upload for this run that has been accepted but not finished is between
+    # download and its own resume. Claiming the run here inside that window
+    # wins — the photo question is already satisfied — so the rebuild ran
+    # without the photograph and the upload's later claim lost, completing its
+    # ingress with the photo dropped. Whoever sent both the photo and "run it
+    # again" wants the run WITH the photo, so the photo goes first.
+    if store.has_open_slack_event(connection, "file_share", run.run_id):
+        return (
+            "I am still fitting the photo that just arrived on this listing, "
+            "so I did not start a second rebuild. It will finish on its own."
+        )
     captured: list[str] = []
 
     def capture(text: str, _requested_thread: str | None) -> str:

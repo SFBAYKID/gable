@@ -353,6 +353,14 @@ class PhotoHandoff:
             )
         files = event.get("files") or []
         if len(files) != 1:
+            # A message can carry several images AND the value Gable asked for —
+            # "1011 Winged Foot Dr..." with a front and a back photo attached.
+            # This early return used to discard those words with the images, the
+            # same swallowing the sentinel fix cured one guard lower. When the
+            # words carry an answer, the answer is the response; the run will
+            # ask for its photo again if it still needs one.
+            if carries_a_value(str(event.get("text") or "")):
+                return DECLINED_ANSWER_THE_WORDS
             return (
                 "Please upload exactly one image in the listing thread so I do not "
                 "guess which is the hero."
@@ -395,14 +403,23 @@ class PhotoHandoff:
                             safe(message),
                             thread_ts,
                         )
-                        if self.deliver_notification is not None:
-                            self.deliver_notification(connection, pending)
-                            # Production has either confirmed the exact message
-                            # or retained it for the process-lifetime worker.
-                            # The Bolt wrapper must never post it a second way.
-                            spoken = ""
                     except Exception:
                         logger.exception("could not persist the Slack photo outcome")
+                    else:
+                        if self.deliver_notification is not None:
+                            # Once the outbox row exists, the outbox owns the
+                            # message — cleared BEFORE delivery is attempted,
+                            # not after it succeeds. Delivery raising after the
+                            # row was persisted used to leave `spoken` intact,
+                            # so the Bolt wrapper said the sentence and the
+                            # retry worker said it again within the minute.
+                            spoken = ""
+                            try:
+                                self.deliver_notification(connection, pending)
+                            except Exception:
+                                # The persisted row is the guarantee; the
+                                # process-lifetime worker delivers it.
+                                logger.exception("photo outcome delivery deferred to the outbox")
                 # Release the durable ingress only once its outcome is stored. A
                 # crash before this line still reads as unfinished, so startup
                 # recovery asks again instead of leaving the listing waiting on

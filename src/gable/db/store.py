@@ -20,6 +20,7 @@ from gable.db.event_store import (
     abandoned_slack_events,
     claim_slack_event,
     complete_slack_event,
+    has_open_slack_event,
     slack_event_claimed,
 )
 from gable.db.photo_store import (
@@ -119,6 +120,7 @@ __all__ = [
     "complete_slack_event",
     "confirm_run_question",
     "confirm_template_notification",
+    "has_open_slack_event",
     "has_pending_photo_question",
     "has_pending_run_notification",
     "has_run_action_notification",

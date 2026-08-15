@@ -63,6 +63,40 @@ def abandoned_slack_events(
     )
 
 
+def has_open_slack_event(
+    connection: sqlite3.Connection,
+    route: str,
+    subject_id: str,
+) -> bool:
+    """Whether one subject has an accepted-but-unfinished claim in a route.
+
+    An open ``file_share`` claim means an upload for this run has been accepted
+    and its outcome is not yet durable — the handler is between download and
+    resume. A text-triggered rebuild that claims the run inside that window
+    wins the paused-run claim (the photo question is already satisfied), builds
+    without the new photograph, and the upload's own resume then loses and
+    marks its ingress complete — dropping the photo that was just sent. The
+    rebuild path consults this before claiming, and waits its turn instead.
+
+    Args:
+        connection: An open connection.
+        route: The handler family, for example ``file_share``.
+        subject_id: The run the work belongs to.
+
+    Returns:
+        True while such a claim is open.
+
+    Raises:
+        sqlite3.Error: on a query failure.
+    """
+    row = connection.execute(
+        "SELECT 1 FROM slack_event_claims "
+        "WHERE route = ? AND subject_id = ? AND completed_at = '' LIMIT 1",
+        (route.strip(), subject_id.strip()),
+    ).fetchone()
+    return row is not None
+
+
 def claim_slack_event(
     connection: sqlite3.Connection,
     route: str,
