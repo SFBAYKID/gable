@@ -2,6 +2,31 @@
 
 Last updated 2026-08-16 by the building agent.
 
+## 2026-08-16 — Gable is live in #calvo with Carmen
+
+`GABLE_SLACK_CHANNEL_ID` now points at **`C0BP597644B` (#calvo)**, the production
+channel, at Chase's instruction. The previous value is preserved in a timestamped
+`.env.bak-*` on the droplet. Testing that is not meant for Carmen must move back
+to `C0B02721MNK` (monarch-bot-playground) first — CLAUDE.md §11 still governs.
+
+Gable posted its own introduction there, and the service is watching the sheet on
+the two-minute business-hours interval. The next real form submission is the first
+live listing.
+
+One defect was found and fixed on the way: `voice.shorten` flattened every message
+over 600 characters into a single block and dropped its tail, because the sentence
+split ran across the whole message on a whitespace run. It was caught by running
+the introduction through Gable's own style gate before posting it. `mypy --strict`
+was also failing on three implicit re-exports left by the `preflight` split; both
+are fixed, and all 45 previously unpushed commits are now on `origin/main`.
+
+### Still waiting on Chase
+
+- Kelsey Mahon and Lina Mariner have no headshot in the roster.
+- Piet de Dreu's headshot is not a cut-out, so it renders as a rectangle.
+- Around six agents fail the official-profile identity check.
+- A stray test photo and a stray text message sit in #monarch-bot-playground.
+
 ## 2026-08-16 rounds 8 and 9 — round 9 is the clean one
 
 Round 8 found one defect: row 16's open house reads "7/11/2026", a date with no
