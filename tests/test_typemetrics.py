@@ -6,7 +6,7 @@ from typing import Any
 
 import pytest
 
-from gable.slides import fitting, preflight, typemetrics
+from gable.slides import fitting, measure, typemetrics
 from gable.slides.elements import font_family, font_weight
 
 #: The Open House design's agent-name box, measured from the live template.
@@ -189,7 +189,7 @@ def test_measured_boxes_reach_the_fitter_through_preflight() -> None:
         ]
     }
 
-    boxes = preflight.text_boxes(presentation)
+    boxes = measure.text_boxes(presentation)
 
     assert [box.family for box in boxes] == ["Open Sans"]
     assert boxes[0].weight == 700

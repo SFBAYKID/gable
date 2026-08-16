@@ -308,19 +308,34 @@ def shorten(text: str, limit: int = MAX_REPLY_CHARS) -> str:
     Note:
         This is a backstop, not the mechanism. The reply should be short because
         it was written short; arriving here means the wording needs fixing.
+
+        Paragraph breaks survive it. The sentence split used to run over the
+        whole message on a whitespace run, which consumes a blank line, and
+        rejoined with a single space — so every message past the limit came out as one
+        block, undoing the house rule that Gable writes in paragraphs. A four
+        paragraph introduction written for Carmen was flattened and lost its
+        last sentence, which is how this was found.
     """
     if len(text) <= limit:
         return text
-    kept: list[str] = []
+    blocks: list[str] = []
     total = 0
-    for sentence in re.split(r"(?<=[.!?])\s+", text):
-        if total + len(sentence) > limit:
+    stopped = False
+    for block in text.split("\n\n"):
+        kept: list[str] = []
+        for sentence in re.split(r"(?<=[.!?])\s+", block):
+            if total + len(sentence) > limit:
+                stopped = True
+                break
+            kept.append(sentence)
+            total += len(sentence) + 1
+        if kept:
+            blocks.append(" ".join(kept))
+        if stopped:
             break
-        kept.append(sentence)
-        total += len(sentence) + 1
-    if not kept:
+    if not blocks:
         return text[:limit].rsplit(" ", 1)[0]
-    return " ".join(kept)
+    return "\n\n".join(blocks)
 
 
 def paragraphs(*parts: str) -> str:

@@ -28,10 +28,7 @@ from gable.slides.elements import (
     text_content,
 )
 from gable.slides.hero import find_hero_frame, headshot_frames
-from gable.slides.measure import (
-    _axis_aligned_positive,
-    text_boxes,
-)
+from gable.slides.measure import _axis_aligned_positive, text_boxes
 
 PHOTO_CROP_WARNING: Final[float] = 0.30
 _TOKEN_MARKS: Final[re.Pattern[str]] = re.compile(r"[\[\]{}<>]")

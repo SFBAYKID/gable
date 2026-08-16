@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from gable.slackapp.style import violations
-from gable.slides import fields, fitting, preflight
+from gable.slides import fields, fitting, measure, preflight
 
 
 def _text(object_id: str, value: str, width_pt: float, font_pt: float = 20) -> dict[str, Any]:
@@ -390,7 +390,7 @@ def test_a_grouped_fillable_field_is_measured_at_its_rendered_width() -> None:
     )
 
     report = preflight.certify(presentation, "New Listing", "Just Listed")
-    boxes = {box.object_id: box for box in preflight.text_boxes(presentation)}
+    boxes = {box.object_id: box for box in measure.text_boxes(presentation)}
 
     assert not any(item.code.startswith("grouped_") for item in report.blockers)
     own_width = child["size"]["width"]["magnitude"] * child["transform"]["scaleX"]
@@ -587,7 +587,7 @@ def test_a_group_scales_the_type_but_a_box_transform_only_shapes_the_box() -> No
         ]
     }
 
-    box = next(item for item in preflight.text_boxes(presentation) if item.object_id == "p1_i103")
+    box = next(item for item in measure.text_boxes(presentation) if item.object_id == "p1_i103")
 
     assert round(box.font_size_pt, 2) == 14.09
     assert box.font_size_pt > fitting.MIN_READABLE_PT
