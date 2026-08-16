@@ -94,7 +94,12 @@ For each problem, provide one matching kind in the same order:
   the first human-supplied image.
 - "photo_output" for crop, placement, stretching, softness, or a change visible
   only in the rendered flyer.
-- "text", "layout", "placeholder", or "other" for every non-photo problem.
+- "text" for what words SAY: a wrong or missing value, an unreadable size, or
+  wording left as a label.
+- "layout" for where anything SITS: clipped at an edge, running off the slide,
+  overlapping another element, or misaligned - even when the thing sitting
+  wrong is text.
+- "placeholder" or "other" for the rest.
 
 Reply as JSON only:
 {"looks_right": true|false, "confident": true|false, "problems": ["..."],
