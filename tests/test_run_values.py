@@ -132,6 +132,36 @@ def test_a_dismissed_details_column_is_not_printed_as_a_note(tmp_path: Path) -> 
     connection.close()
 
 
+def test_a_note_of_pure_punctuation_keeps_the_designs_own_call_to_action(
+    tmp_path: Path,
+) -> None:
+    """Row 110's details column holds a single "?".
+
+    The strip list removed " .!" and not "?", so the flyer printed a callout
+    panel containing nothing but a question mark where the design says
+    "Ready to Buy? / DM me to find your next home." The visual gate caught it,
+    which is the only reason it did not ship.
+    """
+    connection = connect(tmp_path / "gable.db")
+    apply_migrations(connection)
+
+    for written in ("?", "??", "...", ".", "!!", " ? "):
+        values = for_intake(connection, _note_intake("Under Contract", written), {})
+        assert values["listing_note"] == "", written
+    connection.close()
+
+
+def test_a_note_that_carries_one_real_word_still_prints(tmp_path: Path) -> None:
+    """The rule is "says nothing", not "is short"."""
+    connection = connect(tmp_path / "gable.db")
+    apply_migrations(connection)
+
+    values = for_intake(connection, _note_intake("Under Contract", "Sold in 3 days!"), {})
+
+    assert values["listing_note"] == "Sold in 3 days!"
+    connection.close()
+
+
 def test_marketing_prose_is_not_squeezed_into_a_note_panel(tmp_path: Path) -> None:
     connection = connect(tmp_path / "gable.db")
     apply_migrations(connection)

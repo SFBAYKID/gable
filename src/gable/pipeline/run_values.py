@@ -7,6 +7,7 @@ and agent data comes only from the local roster mirror.
 
 from __future__ import annotations
 
+import re
 from collections.abc import Callable
 from sqlite3 import Connection
 from typing import Final
@@ -68,6 +69,15 @@ _MAX_NOTE_CHARS: Final[int] = 120
 #: What agents type into the details column when they have nothing to say.
 _EMPTY_NOTES: Final[frozenset[str]] = frozenset({"na", "n/a", "none", "no", "nothing", "-"})
 
+#: A note has to contain a letter or a digit to be saying anything. Row 110's
+#: details column holds a single "?", which the strip list did not cover — it
+#: removed " .!" and not "?" — so the flyer printed a callout panel containing
+#: nothing but a question mark, in place of the design's own "Ready to Buy? /
+#: DM me to find your next home." Enumerating punctuation is a losing game;
+#: requiring one alphanumeric character covers "?", "??", "...", ".", "!!" and
+#: whatever the next agent types when they mean nothing.
+_SAYS_SOMETHING: Final[re.Pattern[str]] = re.compile(r"[0-9A-Za-z]")
+
 
 def _listing_note(intake: Intake) -> str:
     """The submission's own short note about the deal, or nothing.
@@ -90,8 +100,8 @@ def _listing_note(intake: Intake) -> str:
     if "review" in intake.request_type.lower():
         return ""
     note = " ".join(intake.post_details.split())
-    plain = note.strip(" .!").casefold()
-    if not note or plain in _EMPTY_NOTES:
+    plain = note.strip(" .!?").casefold()
+    if not note or plain in _EMPTY_NOTES or not _SAYS_SOMETHING.search(note):
         return ""
     # A note that only restates the request type says nothing the headline above
     # it does not. Row 25's details column reads "Under Contract", and printing

@@ -478,97 +478,12 @@ refuses `needs_photo`; that state clears only when Carmen or Chase uploads the
 replacement in the owned Slack thread. The poller only ever starts rows it has
 never seen, so a row already on the sheet cannot be run by waiting.
 
-## Where this actually stands, 2026-08-11 evening
+## Superseded: the 2026-08-11 progress snapshot
 
-**Photos: proven.** A person can drop in a photo of any reasonable size or shape
-and it lands correctly. Nine source shapes from 275x183 to 6000x4000 — landscape
-through panorama, PNG included — plus a multi-megabyte EXIF-rotated portrait
-carried through the real Slack upload, download, publish and fit path. All land
-at exactly 1080x1350.
-
-**Flyers: not proven, and not provable without Carmen.** Of the 45 templates,
-**2 produce a flyer verified clean** — correct address, no stray content, no
-surviving placeholders. Two more reached "delivered" and were then refused once
-the checks caught what they carried. The rest stop for review.
-
-The remaining gate is a judgement — "a flyer Carmen would post without touching
-it" — and no measurement substitutes for it. **Nothing here has been certified,
-because certification means she looked.**
-
-### What to trust when reading progress numbers
-
-The deterministic checks are stable and moved cleanly across the session:
-
-| | Start | Now |
-|---|---|---|
-| templates that can place a hero photo | 3 | 39 |
-| templates with headshot detection | 0 | 32 |
-| blocked by the substring guard | 13 | 2 |
-| flyers verified clean | 0 | 2 |
-
-The vision-pass categories — overlap, placeholder, clipped — are **not** stable.
-Four walks of identical code against identical templates produced overlap counts
-of 6, 11, 8 and 13. Use the vision pass to find a defect worth looking at on a
-specific flyer; do not use it to measure whether a change helped.
-
-### Three guards now stop things that previously shipped
-
-Each exists because it reached a delivered flyer: a value that does not read back
-as supplied, a phone number or email belonging to somebody not on the listing,
-and sample content or a malformed price from the design itself. All three are
-deterministic and live in `pipeline/audit.py`.
-
-At that checkpoint, the automatic runtime was wired, deployed, active, and
-watching the Sheet. `slackapp.runtime` constructs the real Google clients,
-database, `Poller`, and `Runner`; Socket Mode connects in the background while
-the poller runs on the main thread. Polling is disabled in the audited live
-service described above. `cli.py` also runs one guarded pass locally without Slack.
-
-The Slack photo handoff is built and unit-tested. A
-`file_share` reply is matched to its thread's paused run, downloaded, fitted,
-hosted, verified, and used to resume that same run. **The receive and download
-portion is verified live:** at 10:24 on 2026-08-11 Gable fetched a real Slack
-upload, read its dimensions, and reached the former undersized-photo refusal.
-That proves `files:read` is installed. Commit `e09bb27` replaces that refusal
-with the guarded automatic upscale and is deployed. A second watched upload
-reached the image model successfully; the seam gate rejected the derivative and
-the local fallback exposed a root-owned photo directory. The directory is now
-owned by `gable:gable`, verified writable as the service user, and repaired on
-every future deploy. The exact production database at `/opt/gable/var/gable.db`
-has the historical backfill marker.
-
-At 11:00 Pacific, the same Slack file was replayed without another image-model
-call. It was resized, published, and attached to the original run. That replay
-exposed and fixed two more live defects: an address missing only its city comma
-was rejected, and a follow-up reply replaced the stored root thread timestamp.
-The run now correctly remains in its original thread at `needs_info`, waiting
-for Chase's agent phone number rather than guessing one.
-
-Proven live on two real submissions, invoked manually:
-
-- **Row 100** (Lolo Simmons, Under Contract, no closing price) stopped and asked
-  *"This one is marked under contract but there is no closing price on it. Do
-  you have that?"* — and built nothing. That is the rule working.
-- **Row 11** (Kelsey Mahon, Sold, $510,000) was **delivered**: template chosen
-  from the request type, address and price from the form, and **4 beds, 2.5
-  baths and 2,282 square feet researched from the web** — the fields nobody
-  typed.
-
-Gable also answers in Slack from the droplet under systemd, and the backfill is
-adopted: 96 historical rows recorded as history, none built.
-
-## The customer-facing gaps that remain
-
-The vision pass, automatic text fitting, field manifest, and image URL verifier
-are built. They are not yet enough to certify all 45 templates visually. Three
-templates have explicit measured hero-layer ids; the other 42 refuse placement
-instead of guessing. Headshot replacement is missing. Conversational font,
-colour, correction, resize, move, and status tools now execute against the
-thread's Slides file and report completion only after Google confirms the
-batch. No flyer should be called demo-ready until a real uploaded-photo render
-has been inspected. The certification ledger remains 0 of 45 approved.
-
----
+Removed 2026-08-16. It described a build with two verified flyers and no
+headshot replacement, which every entry above contradicts. The findings it
+carried that still matter — Spike A, the photo-shape proof, the certification
+ledger — are in the sections below and in `DECISIONS.md`.
 
 ## 1. The two findings that reshaped the build
 
