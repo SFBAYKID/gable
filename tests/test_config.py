@@ -164,14 +164,30 @@ def test_service_account_path_accepted_when_it_exists(tmp_path: Path) -> None:
     assert settings.google_service_account_file == key
 
 
-def test_only_two_stable_slack_user_ids_are_accepted() -> None:
+def test_only_stable_slack_user_ids_are_accepted() -> None:
     settings = _load(GABLE_SLACK_ALLOWED_USER_IDS=" U12345678, U87654321 ")
     assert settings.slack_allowed_user_ids == frozenset({"U12345678", "U87654321"})
 
-    with pytest.raises(ConfigError, match="exactly two"):
+    with pytest.raises(ConfigError, match="at least two"):
         _load(GABLE_SLACK_ALLOWED_USER_IDS="U12345678")
     with pytest.raises(ConfigError, match="beginning with U or W"):
         _load(GABLE_SLACK_ALLOWED_USER_IDS="C12345678,U87654321")
+
+
+def test_a_person_may_hold_more_than_one_slack_account() -> None:
+    """Carmen posts from a guest account, not the one she was configured with.
+
+    The rule read "exactly two", which took the service down in a restart loop
+    the moment her real ID was added beside it.
+    """
+    settings = _load(GABLE_SLACK_ALLOWED_USER_IDS="U12345678,U87654321,U11223344")
+    assert len(settings.slack_allowed_user_ids) == 3
+
+
+def test_an_allowlist_that_has_become_the_channel_is_rejected() -> None:
+    """Past a handful it no longer names the people who run Gable."""
+    with pytest.raises(ConfigError, match="more than 6"):
+        _load(GABLE_SLACK_ALLOWED_USER_IDS=",".join(f"U1234567{n}" for n in range(7)))
 
 
 def test_stale_oauth_settings_are_rejected_before_bolt_can_ignore_the_bot_token() -> None:

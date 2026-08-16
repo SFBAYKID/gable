@@ -93,6 +93,14 @@ MIN_POLL_INTERVAL_SECONDS: Final[int] = 30
 #: a mistyped variable cannot authorise unbounded spend.
 MAX_SPEND_CEILING_USD: Final[int] = 1000
 
+#: Who may drive Gable. The floor catches a list that would lock Carmen or Chase
+#: out; the ceiling catches one that has quietly become the whole channel. It is
+#: not two, because a person can hold more than one Slack identity — Carmen posts
+#: from a Calvo Consulting guest account, not the workspace account she was first
+#: configured with.
+_MIN_ALLOWED_SPEAKERS: Final[int] = 2
+_MAX_ALLOWED_SPEAKERS: Final[int] = 6
+
 
 @dataclass(frozen=True, slots=True)
 class Settings:
@@ -397,7 +405,18 @@ class _Reader:
             self._problems.append(f"{name} is no longer supported. {reason}")
 
     def slack_user_ids(self, name: str, *, required: bool) -> frozenset[str]:
-        """Read exactly Carmen and Chase's stable comma-separated Slack IDs."""
+        """Read the stable comma-separated Slack IDs Gable may answer.
+
+        Args:
+            name: The variable to read.
+            required: Whether an unset or blank value is a configuration problem.
+
+        Returns:
+            The distinct IDs, empty when unset and not required.
+
+        Raises:
+            Nothing. Problems are collected for the startup report.
+        """
         raw = self._raw(name)
         if not raw:
             if required:
@@ -407,8 +426,23 @@ class _Reader:
         invalid = sorted(value for value in values if not re.fullmatch(r"[UW][A-Z0-9]{8,}", value))
         if invalid:
             self._problems.append(f"{name} must contain Slack user IDs beginning with U or W")
-        if len(values) != 2:
-            self._problems.append(f"{name} must contain exactly two user IDs, for Carmen and Chase")
+        # Two people, not two accounts. This read "exactly two" until Carmen
+        # turned out to hold a second Slack identity — a Calvo Consulting guest
+        # in the shared channel — and it is the guest account she actually posts
+        # from. Adding it crash-looped the service on a Sunday evening, which is
+        # a worse failure than the broad allowlist the rule was guarding against.
+        # The floor stays: one ID means somebody is locked out. The ceiling stays
+        # low, because past a handful the list has stopped naming the people who
+        # run Gable and has started naming the channel.
+        if len(values) < _MIN_ALLOWED_SPEAKERS:
+            self._problems.append(
+                f"{name} must contain at least two user IDs, for Carmen and Chase"
+            )
+        if len(values) > _MAX_ALLOWED_SPEAKERS:
+            self._problems.append(
+                f"{name} lists more than {_MAX_ALLOWED_SPEAKERS} user IDs; "
+                f"it names the people who run Gable, not everyone in the channel"
+            )
         return values
 
     def path(self, name: str, must_exist: bool) -> Path:

@@ -75,8 +75,11 @@ template rather than inferring placement from page order.
 
 ## Slack operations
 
-Only the two stable user IDs in `GABLE_SLACK_ALLOWED_USER_IDS` can mention,
-reply to, upload to, or operate Gable. There are no slash commands and no
+Only the stable user IDs in `GABLE_SLACK_ALLOWED_USER_IDS` can mention, reply
+to, upload to, or operate Gable. It names people rather than accounts, and a
+person may hold more than one: Carmen posts from a Calvo Consulting guest
+account, so both of hers are listed. Anyone absent is dropped in silence at the
+first check in each handler, which looks exactly like Gable ignoring them. There are no slash commands and no
 operator console in Slack. Mention `@Gable` to start a conversation, then reply
 normally inside the Gable-owned thread. Natural requests such as “can you rerun
 this project?” reload the current source and continue the same paused listing;
