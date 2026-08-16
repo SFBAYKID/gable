@@ -565,66 +565,16 @@ ledger — are in the sections below and in `DECISIONS.md`.
 
 ## 1. The two findings that reshaped the build
 
-### Spike A FAILED — the photo cannot travel in the file
+Removed 2026-08-16, because both are recorded where they are actually read.
 
-Run live in Chase's Canva account. Full writeup: `spikes/SPIKE_A_RESULT.md`.
+**Spike A** — an uploaded Canva file types every column as text, so the photo
+could never travel in it — is in `CLAUDE.md` §4.1, `DECISIONS.md`, and in full in
+`spikes/SPIKE_A_RESULT.md`.
 
-An uploaded xlsx/CSV has **every column typed as text**. Only the *manual* data
-table can carry an image-typed column. Proven by running both paths against the
-same design in the same session: manual gives an image-glyph column, upload gives
-`T` on all four fields including `photo_url`.
-
-ARCHITECTURE.md §2.4 and §4.7 assumed `bulk_export.py` emits a file whose
-`photo_url` column becomes the flyer's photo. **That is not possible.** The file
-can carry every text field. It cannot carry the photo.
-
-Per CLAUDE.md §2.6 this was reported, not worked around. `bulk_export.py` is
-deliberately unwritten.
-
-### The live form is not the form the spec describes
-
-The sheet is **"Social Media and Marketing Request Form (Responses)"**
-(`1HxgGAo…`). Its real columns:
-
-| Col | Header |
-|---|---|
-| A | Timestamp |
-| B | Email Address |
-| C | Name of Agent |
-| D | Service Guidelines Acknowledgment |
-| E | Select your request type |
-| F | Please provide the property address for the p… |
-| G | Select postcard category |
-| H | Upload photos |
-| I | Upload your video assets (For Video Editing R… |
-
-**Absent:** Price, Description, Beds/Baths/Sq ft, agent phone, first/last name
-split. The flyer template displays a price; nothing in the form supplies one.
-
-**Unplanned:** request *type* (Sold, New Listing, Open House, Price Reduction,
-Under Contract, Client Review Post, New Listing with Open House), postcard
-category, video assets.
-
-**Corrected 2026-08-10, read through the service account.** The earlier note
-here said the workbook held only `Form Responses 1` and `Sheet1`, and listed 9
-columns. Both were wrong — that reading came from the browser, before API access
-existed.
-
-The form has **20 columns**, not 9. The full list is in `ARCHITECTURE.md` §3.1.
-Three things in it change the design:
-
-- **Photos are collected.** `Upload photos` and `Upload high-resolution property
-  photos (up to 5 images)`. The hero image may often already be attached, which
-  moves the photo cascade's common case from "hunt for it" to "read it".
-- **Two address columns.** One for postcards, one for social. The form branches
-  on `Select your request type`, serving postcards, video *and* social in a
-  single submission.
-- **Two price columns**, neither of them a list price: `New price (if price
-  improvement)` and `Closing price (for sold posts only)`.
-
-The second tab is **`Sales_People`**, not `Sheet1`, and it is not empty — header
-on row 2, one row: `lolo@cornerhouserealty.com | Lolo  | Simmons | 1`. `Runs`
-and `Templates` still do not exist.
+**The live form is not the form the spec described.** The column list kept here
+had already been corrected twice and was stale a third time; the current reading
+is `ARCHITECTURE.md` §3.1, and the code reads every tab by header text rather
+than by position, so that section is the one that matters.
 
 ---
 
