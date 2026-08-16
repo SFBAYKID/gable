@@ -1,6 +1,55 @@
 # Gable — status, and what's needed from Chase
 
-Last updated 2026-08-14 by the building agent.
+Last updated 2026-08-16 by the building agent.
+
+## 2026-08-16 two clean start-to-finish rounds, and the bugs they flushed out
+
+Rounds 5 and 6: every design run end to end in Slack — announcement, one
+batched ask, the human's reply with a fresh internet photograph, delivered
+link. Round 5 surfaced one real defect (below), which was fixed and verified
+live in the same thread; **round 6 then delivered all six designs with zero
+new defects and zero layout regressions.** The rebuilt Open House also proved
+the post-delivery value path: values sent after delivery reopen the run and
+the rebuilt flyer carries them.
+
+Fixed since the last entry, each with a decision-log row:
+
+- A Slack message whose line break came back as a space could never be
+  confirmed, so its outbox row logged an error a minute for a day.
+- A run outcome persisted without a thread tried to become a new channel
+  root and wedged; it now posts under its run's own announcement.
+- Gable named only the first problem a checked flyer had; it now says all of
+  them in one message.
+- A flyer parked in review refused the replacement photo that was its only
+  remedy.
+- "11-1" with no am/pm never reached the time box; a footer complaint about
+  the designer's own artwork parked a correct flyer (the deterministic
+  geometric audit now outranks disproven layout opinions).
+- The delivery message's offer — "send them here and I will run it again" —
+  was refused by the post-delivery edit pause when taken; listing values now
+  route to the rebuild path whatever the flyer shows.
+- Roof-lines were cut on tall photos; words sent beside an unusable photo were
+  discarded; a rebuild could race an in-flight upload and drop it. All three
+  closed, with tests.
+
+### Roster and form data gaps — Chase's calls, not code
+
+These stopped runs correctly and cannot be fixed from the repo:
+
+- **Kelsey Mahon and Lina Mariner have no headshot** in Head Shots; every
+  design with a face slot refuses their rows.
+- **Piet de Dreu's headshot is the only one of 41 that is not a cut-out**; it
+  will render as a white box.
+- Identity guards refuse: "Bobby Carr The Dog Walking Realtor" (row 42 and
+  friends), "Kim Hixson® Infinity Home Team" (row 39), Tracy Edwards (workbook
+  phone disagrees with the official site), Erica Pfeiffer (row 57 submitted
+  email not on the official profile), Herb Bryant's row 104 (submitted email
+  unknown), Lolo Simmons (no official profile page).
+- Rows 5 and 50 (Client Review) are at the three-attempt ceiling from
+  repeated test runs and need `tools/adopt_rows.py`-style clearance if they
+  should run again.
+- Row 85 (Jason Vetter) requests two agent placements — the dual-agent
+  designs are Phase 2 by decision.
 
 ## 2026-08-15 confirmation pass, and Gable stops writing in blocks
 
