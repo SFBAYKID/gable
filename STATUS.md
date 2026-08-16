@@ -2,6 +2,34 @@
 
 Last updated 2026-08-16 by the building agent.
 
+## 2026-08-16 round 7: two more real defects, both caught by the visual gate
+
+Every design run again with new agents and new photographs. Two defects, both
+found by the rendered inspection and neither reachable by the deterministic
+checks — which is the argument for keeping that gate:
+
+- **A note of pure punctuation was printed.** Row 110's details column holds a
+  single "?". The dismissal list stripped " .!" and not "?", so Douglas White's
+  Under Contract flyer showed a callout panel containing nothing but a question
+  mark where the design says "Ready to Buy? / DM me to find your next home." A
+  note now needs one letter or digit to be printed at all.
+- **A value was shrunk to a caption between two headlines.** Louis Smith's Open
+  House fitted "2:00 to 4:00 p.m." to 9.0pt in a row whose date and price
+  stayed at 24.2pt. It cleared the 8-point absolute floor, so it was applied.
+  The floor is now also relative to the siblings the designer sized with it,
+  and only to those — a box sized for the word "Email" has no peers left
+  standing and is still allowed to shrink hard.
+
+All six then delivered with zero layout regressions.
+
+**Testing note for whoever drives Slack next.** Every stray message in
+#monarch-bot-playground this session came from one mistake: targeting the
+composer by screen position instead of by containment. The rule that works is
+to resolve the file input, the editor and the send button from inside
+`[data-qa="threads_flexpane"]`, and to screenshot before sending. Clicks and
+keystrokes both stop being delivered after a while; synthetic pointer events on
+the pane's own send button keep working.
+
 ## 2026-08-16 two clean start-to-finish rounds, and the bugs they flushed out
 
 Rounds 5 and 6: every design run end to end in Slack — announcement, one
