@@ -28,7 +28,7 @@ from __future__ import annotations
 
 import math
 from collections.abc import Collection
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Final
 
 from gable.slides import typemetrics
@@ -53,6 +53,20 @@ WIDTH_FACTORS: Final[dict[str, float]] = {
 #: Never shrink past this. Below it the text is unreadable on a printed flyer,
 #: and the honest answer becomes "this does not fit" rather than a smaller lie.
 MIN_READABLE_PT: Final[float] = 8.0
+
+#: Nor shrink this far below the SIBLINGS the designer set at the same size.
+#: An absolute floor is not enough on its own: Louis Smith's Open House put
+#: "2:00 to 4:00 p.m." at 9.0pt between a date and a price still at 24.2pt on
+#: the same rule, cleared the 8-point floor, and rendered as a caption between
+#: two headlines. The visual gate caught it.
+#:
+#: Only against siblings, never against the box's own designed size. A design
+#: sizes some boxes for the WORD "Email" or "Phone", where any real value is
+#: several times longer and a large shrink is the correct answer — that is a
+#: box with no same-sized peers left standing. When peers ARE left standing,
+#: type this much smaller than them reads as broken whatever its absolute size,
+#: so the answer is again "this does not fit", which asks a person.
+MIN_PEER_SHARE: Final[float] = 0.65
 
 #: Leave real room, not a rounding allowance. These factors are a five-bucket
 #: approximation of proportional type, and a rendered flyer proved the error is
@@ -175,6 +189,10 @@ class Fit:
     #: Keeping it separate prevents an impossible 7-point fit from looking
     #: successful merely because the applied size is clamped to 8 points.
     required_pt: float | None = None
+    #: The designed size of same-sized sibling boxes this run left untouched,
+    #: or 0 when this box has no such peers. Set by `plan_fits`, which is the
+    #: only caller that can see the other boxes.
+    peers_kept_pt: float = 0.0
 
     @property
     def too_small_to_read(self) -> bool:
@@ -185,7 +203,11 @@ class Fit:
         question for Carmen.
         """
         required = self.fitted_pt if self.required_pt is None else self.required_pt
-        return required <= MIN_READABLE_PT or self.fitted_pt <= MIN_READABLE_PT
+        if required <= MIN_READABLE_PT or self.fitted_pt <= MIN_READABLE_PT:
+            return True
+        # And relative to the siblings the designer set at this same size, when
+        # this run left any of them standing.
+        return self.peers_kept_pt > 0 and required < self.peers_kept_pt * MIN_PEER_SHARE
 
 
 def wrapped_line_count(
@@ -410,4 +432,36 @@ def plan_fits(
                 box.family,
             )
         )
-    return fits
+    return _with_peer_sizes(fits)
+
+
+def _with_peer_sizes(fits: list[Fit]) -> list[Fit]:
+    """Tell each shrunk box the designed size its untouched siblings kept.
+
+    The designer sets a row of boxes at one size — Open House's date, time and
+    price all sit at 24.2pt — and a value that shrinks alone in that row reads
+    as a caption between two headlines however legible it is on its own. A box
+    whose same-sized siblings ALSO had to shrink is a different case: nothing
+    is left to look wrong against, and a design that sized a box for the word
+    "Email" is meant to be shrunk.
+
+    Args:
+        fits: Every fit this run planned, in element order.
+
+    Returns:
+        The same fits, with `peers_kept_pt` set on those that shrink while a
+        same-sized sibling did not. Grouped on the designed size rounded to a
+        tenth of a point, because Slides stores it as a float.
+
+    Raises:
+        Nothing.
+    """
+    kept_sizes = {round(fit.current_pt, 1) for fit in fits if not fit.overflows}
+    if not kept_sizes:
+        return fits
+    return [
+        replace(fit, peers_kept_pt=fit.current_pt)
+        if fit.overflows and round(fit.current_pt, 1) in kept_sizes
+        else fit
+        for fit in fits
+    ]

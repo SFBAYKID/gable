@@ -226,3 +226,70 @@ def test_rounding_at_the_eight_point_boundary_remains_blocked() -> None:
     assert fit.fitted_pt == fitting.MIN_READABLE_PT
     assert fit.too_small_to_read
     assert fitting.requests_for([fit]) == []
+
+
+#: Open House sets its date, time and price on one rule at the same size,
+#: measured from the live design 2026-08-16.
+_ROW_PT: float = 24.2
+_EMU_PER_PT: float = 12700.0
+
+
+def _row_box(object_id: str, text: str, width_pt: float) -> fitting.TextBox:
+    return fitting.TextBox(
+        object_id=object_id,
+        text=text,
+        font_size_pt=_ROW_PT,
+        width_emu=width_pt * _EMU_PER_PT,
+        lines=1,
+    )
+
+
+def test_a_value_shrunk_far_below_its_untouched_row_is_refused() -> None:
+    """Louis Smith's Open House rendered the time as a caption between headlines.
+
+    "2:00 to 4:00 p.m." fitted to 9.0pt in a row whose date and price stayed at
+    24.2pt. That cleared the 8-point absolute floor, so it was applied, and only
+    the visual gate noticed. Beside untouched siblings it reads as broken.
+    """
+    boxes = [
+        _row_box("date", "Sunday 08/02/2026", 200.0),
+        _row_box("time", "2:00 to 4:00 p.m.", 34.0),
+        _row_box("price", "$1,199,000", 200.0),
+    ]
+
+    fits = fitting.plan_fits(boxes, dynamic=[b.text for b in boxes])
+    time_fit = next(f for f in fits if f.object_id == "time")
+
+    assert time_fit.overflows
+    assert time_fit.too_small_to_read
+    # The untouched siblings are what it is judged against.
+    assert time_fit.peers_kept_pt == _ROW_PT
+
+
+def test_a_row_that_shrinks_together_is_still_an_acceptable_fit() -> None:
+    """Nothing is left standing to look wrong against."""
+    boxes = [
+        _row_box("date", "Sunday 08/02/2026", 40.0),
+        _row_box("time", "2:00 to 4:00 p.m.", 40.0),
+    ]
+
+    fits = fitting.plan_fits(boxes, dynamic=[b.text for b in boxes])
+
+    assert all(f.overflows for f in fits)
+    assert all(f.peers_kept_pt == 0.0 for f in fits)
+
+
+def test_a_box_sized_for_a_label_may_still_shrink_hard() -> None:
+    """A design that sizes a box for the word "Email" means it to be shrunk."""
+    boxes = [
+        fitting.TextBox("headline", "Just Listed", 60.0, 400.0 * _EMU_PER_PT, 1),
+        fitting.TextBox(
+            "email", "a.very.long.agent.address@cornerhouserealty.com", 20.0, 60.0 * _EMU_PER_PT, 1
+        ),
+    ]
+
+    fits = fitting.plan_fits(boxes, dynamic=[b.text for b in boxes])
+    email_fit = next(f for f in fits if f.object_id == "email")
+
+    assert email_fit.overflows
+    assert email_fit.peers_kept_pt == 0.0, "no same-sized sibling, so nothing to look wrong against"
