@@ -680,3 +680,40 @@ def test_a_name_is_still_refused_the_second_line_it_would_wrap_onto() -> None:
     )
 
     assert [issue.code for issue in report.blockers] == ["unreadable_agent_name"]
+
+
+def test_a_design_box_that_would_be_blanked_is_asked_about_first() -> None:
+    """Row 16's open house reads "7/11/2026" — a date with no time.
+
+    Open House sets the date and the time in separate boxes, so the date box
+    filled and the time box was blanked, and the flyer showed the design's own
+    two separators with a gap between them. The visual gate refused it, which
+    cost a round trip for something knowable before the copy was ever made.
+    """
+    presentation = _presentation(
+        _text("date", "Sunday, Aug 2, 2026", 300),
+        _text("time", "2-4PM", 120),
+        _text("price", "$1,199,000", 200),
+    )
+
+    report = _analyze(presentation, {"open_house": "7/11/2026", "price": "$500,000"})
+
+    asked = [issue for issue in report.issues if issue.code == "missing_part_open_house"]
+    assert asked, [issue.code for issue in report.issues]
+    assert asked[0].status == "needs_info"
+    assert "open house" in asked[0].say
+
+
+def test_an_open_house_carrying_its_time_is_not_asked_again() -> None:
+    presentation = _presentation(
+        _text("date", "Sunday, Aug 2, 2026", 300),
+        _text("time", "2-4PM", 120),
+        _text("price", "$1,199,000", 200),
+    )
+
+    report = _analyze(
+        presentation,
+        {"open_house": "Sunday, Sep 6, 2026 1-3PM", "price": "$500,000"},
+    )
+
+    assert not [issue for issue in report.issues if issue.code.startswith("missing_part_")]

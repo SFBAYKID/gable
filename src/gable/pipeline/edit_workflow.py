@@ -20,7 +20,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from gable.pipeline.vision import Inspection
-from gable.slides import fitting, preflight
+from gable.slides import fitting, measure
 from gable.slides.edit_plan import (
     EditPlanError,
     PlannedEdit,
@@ -135,7 +135,7 @@ class EditWorkflow:
                 if fit_problem:
                     return _stopped(fit_problem, draft_id, plan)
 
-            text = "\n".join(item.text for item in preflight.text_boxes(after) if item.text.strip())
+            text = "\n".join(item.text for item in measure.text_boxes(after) if item.text.strip())
             expected_values = [
                 plan.new_literal
                 if plan.old_literal and value.strip() == plan.old_literal
@@ -203,7 +203,7 @@ class EditWorkflow:
         """Fit only changed text, then prove the fit batch and readback."""
         boxes = [
             box
-            for box in preflight.text_boxes(presentation)
+            for box in measure.text_boxes(presentation)
             if box.object_id == plan.target_object_id and box.text == plan.dynamic_text
         ]
         if len(boxes) != 1:
@@ -243,7 +243,7 @@ class EditWorkflow:
         refitted = self.read_presentation(draft_id)
         refit_boxes = [
             box
-            for box in preflight.text_boxes(refitted)
+            for box in measure.text_boxes(refitted)
             if box.object_id == plan.target_object_id and box.text == plan.dynamic_text
         ]
         if len(refit_boxes) != 1 or abs(refit_boxes[0].font_size_pt - fit.fitted_pt) > 0.011:

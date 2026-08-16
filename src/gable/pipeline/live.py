@@ -37,7 +37,7 @@ from gable.pipeline.runner import Runner
 from gable.pipeline.vision import Inspection
 from gable.pipeline.vision import inspect as inspect_flyer
 from gable.slides import fields as template_fields
-from gable.slides import preflight
+from gable.slides import measure, preflight
 from gable.slides.elements import descendants, text_content
 from gable.slides.library import list_files as list_template_files
 from gable.slides.replacement import confirmed_replacement_count, safe_replacement_requests
@@ -155,7 +155,7 @@ def build_runner(
 
     def read_text_boxes(file_id: str) -> list[Any]:
         presentation = slides.presentations().get(presentationId=file_id).execute()
-        return preflight.text_boxes(presentation)
+        return measure.text_boxes(presentation)
 
     def apply(file_id: str, requests: list[dict[str, Any]]) -> None:
         if not requests:

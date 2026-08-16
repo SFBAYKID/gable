@@ -25,12 +25,13 @@ from gable.photos.fit import assess
 from gable.slides import fields, fitting
 from gable.slides.elements import (
     descendants,
-    font_family,
-    font_size_pt,
-    font_weight,
     text_content,
 )
 from gable.slides.hero import find_hero_frame, headshot_frames
+from gable.slides.measure import (
+    _axis_aligned_positive,
+    text_boxes,
+)
 
 PHOTO_CROP_WARNING: Final[float] = 0.30
 _TOKEN_MARKS: Final[re.Pattern[str]] = re.compile(r"[\[\]{}<>]")
@@ -129,113 +130,6 @@ class Report:
     def warnings(self) -> tuple[Issue, ...]:
         """Correctable measured tradeoffs to report with the finished build."""
         return tuple(issue for issue in self.issues if not issue.blocking)
-
-
-def _implied_font_size_pt(height_emu: float) -> float:
-    """Estimate inherited type size from a one-line box's height."""
-    if height_emu <= 0:
-        return 0.0
-    return max(1.0, (height_emu / fitting.EMU_PER_POINT) / 1.2)
-
-
-def _axis_aligned_positive(element: dict[str, Any]) -> bool:
-    """Whether exact one-dimensional text-capacity measurement is valid."""
-    transform = element.get("transform", {})
-    try:
-        return (
-            float(transform.get("scaleX", 1.0)) > 0
-            and float(transform.get("scaleY", 1.0)) > 0
-            and abs(float(transform.get("shearX", 0.0))) < 1e-9
-            and abs(float(transform.get("shearY", 0.0))) < 1e-9
-        )
-    except (TypeError, ValueError):
-        return False
-
-
-def _leaves_with_group_scale(
-    elements: list[dict[str, Any]],
-    group_x: float = 1.0,
-    group_y: float = 1.0,
-) -> list[tuple[dict[str, Any], float, float, float]]:
-    """Every leaf element with the scale its enclosing groups apply.
-
-    The two scales are kept apart deliberately. An element's own transform
-    shapes its box — New Listing with Open House stores its title as a 3,000,000
-    EMU square scaled to 1.11 x 0.13 — and does not change the size of the type
-    inside it. A GROUP's scale does change the rendered type, because the whole
-    group is drawn smaller. Multiplying the two together read that title as
-    1.79pt and refused the design as unreadable.
-
-    Args:
-        elements: A `pageElements` list, or a group's children.
-        group_x: Accumulated horizontal scale from enclosing groups.
-        group_y: Accumulated vertical scale from enclosing groups.
-
-    Returns:
-        `(element, group_scale_y, width, height)` per leaf, with width and
-        height already in absolute EMU and the group scale kept separate so the
-        caller can apply it to the type size alone.
-
-    Raises:
-        Nothing.
-    """
-    out: list[tuple[dict[str, Any], float, float, float]] = []
-    for element in elements:
-        transform = element.get("transform", {})
-        own_x = float(transform.get("scaleX", 1.0) or 1.0)
-        own_y = float(transform.get("scaleY", 1.0) or 1.0)
-        group = element.get("elementGroup")
-        if group:
-            out.extend(
-                _leaves_with_group_scale(
-                    group.get("children", []), group_x * own_x, group_y * own_y
-                )
-            )
-            continue
-        size = element.get("size", {})
-        width = float(size.get("width", {}).get("magnitude", 0)) * own_x * group_x
-        height = float(size.get("height", {}).get("magnitude", 0)) * own_y * group_y
-        out.append((element, group_y, width, height))
-    return out
-
-
-def text_boxes(presentation: dict[str, Any]) -> list[fitting.TextBox]:
-    """Measure every text box in a Slides presentation.
-
-    Imported PowerPoint files often inherit their font size from the theme.
-    Slides omits that value, so the box height supplies a conservative estimate
-    instead of silently skipping the field most likely to overflow.
-    """
-    boxes: list[fitting.TextBox] = []
-    for page in presentation.get("slides", []):
-        # Absolute bounds, so a field inside grouped artwork is measured as it
-        # actually renders. A child's own transform is relative to its group:
-        # New Listing with Open House scales its REALTOR box to 0.75, so its
-        # own numbers overstated the usable width by a third and the design was
-        # refused outright rather than measured.
-        for element, group_scale_y, width, height in _leaves_with_group_scale(
-            page.get("pageElements", [])
-        ):
-            text = text_content(element)
-            if not text:
-                continue
-            declared = font_size_pt(element)
-            size_pt = declared * group_scale_y if declared else _implied_font_size_pt(height)
-            lines = 1
-            if size_pt > 0 and height > 0:
-                lines = max(1, int((height / fitting.EMU_PER_POINT) // (size_pt * 1.2)))
-            boxes.append(
-                fitting.TextBox(
-                    object_id=str(element.get("objectId") or ""),
-                    text=text,
-                    font_size_pt=size_pt,
-                    width_emu=width,
-                    lines=lines,
-                    weight=font_weight(element),
-                    family=font_family(element),
-                )
-            )
-    return boxes
 
 
 def _readable(text: str) -> str:
@@ -349,6 +243,45 @@ def _fits_every_box(
     """Whether one replacement is readable in every box that carries it."""
     return all(
         _replacement_issue(template_label, "agent_title", box, replacement) is None for box in boxes
+    )
+
+
+def _box_left_blank(resolution: fields.Resolution, values: dict[str, str]) -> str:
+    """The field whose design box this run would empty rather than fill.
+
+    Open House sets the date and the time in separate boxes. Row 16's form
+    carries "7/11/2026" — a date with no time — so the date box filled and the
+    time box was blanked, and the flyer showed the design's own two separators
+    with a gap between them. The visual gate refused it, which cost a second
+    round trip for something knowable before the copy was ever made.
+
+    Blanking is still the right fallback: the alternative is leaving a previous
+    listing's real time on somebody else's flyer. But it is a fallback, and a
+    value Gable knows it cannot supply belongs in the one batched ask.
+
+    Args:
+        resolution: What each of the design's literals means.
+        values: The values this run intends to fill.
+
+    Returns:
+        The field name whose box would be emptied, or "" when every box a value
+        touches will actually carry something. A field with no value at all is
+        not this — that is the ordinary missing-value check above.
+
+    Raises:
+        Nothing.
+    """
+    pairs = fields.replacements(resolution, values)
+    blanked = {literal for literal, written in pairs.items() if not written.strip()}
+    if not blanked:
+        return ""
+    return next(
+        (
+            name
+            for name, primary in resolution.fields.items()
+            if values.get(name, "").strip() and blanked & {primary, *resolution.also.get(name, ())}
+        ),
+        "",
     )
 
 
@@ -690,6 +623,20 @@ def analyze(
                     f"{readable} section, but I do not have a value for it. What should "
                     "it say? You can also remove that section from the template and tell "
                     "me to check it again.",
+                    blocking=True,
+                    status="needs_info",
+                )
+            )
+
+        blanked = _box_left_blank(resolution, values)
+        if blanked and not missing:
+            issues.append(
+                Issue(
+                    f"missing_part_{blanked}",
+                    f"I checked the {template_label} design before building. It sets the "
+                    f"{blanked.replace('_', ' ')} in its own box, and what I have for this "
+                    "listing does not include that part. What should it say? Leave it and "
+                    "I will build without it.",
                     blocking=True,
                     status="needs_info",
                 )
