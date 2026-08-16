@@ -44,6 +44,7 @@ from gable.slackapp.routing import (
     MessageRoute,
     ThreadOwnership,
     has_shared_files,
+    speaks_to_gable_at_top_level,
 )
 from gable.slackapp.status import Working
 from gable.slackapp.style import is_clean, strip_to_plain
@@ -492,6 +493,37 @@ def build_app(
             if allowed_channel and event.get("channel") != allowed_channel:
                 return
             if not speaker_allowed(str(event.get("user") or ""), allowed_user_ids):
+                return
+            # Being named in the channel is being spoken to. Carmen wrote
+            # "Thanks Gable!" at top level and got nothing, because an ordinary
+            # message outside a Gable thread was ignored by design — which reads
+            # as being snubbed rather than as a routing rule. A top-level message
+            # that names Gable takes the same path as a mention, and becomes an
+            # owned thread so the follow-ups work too. Messages that do not name
+            # Gable are still ignored: this channel carries Carmen and Chase
+            # talking to each other, and Gable does not interrupt that.
+            if speaks_to_gable_at_top_level(event, str(context.get("bot_user_id") or "")):
+                if not replay_guard.first_delivery(event, route="human_message"):
+                    return
+                thread_ownership.remember_owned(
+                    str(event.get("channel") or ""),
+                    str(event.get("ts") or ""),
+                )
+                process_mention(
+                    event,
+                    say,
+                    client,
+                    thinker,
+                    file_share_handler,
+                    action_handler,
+                    _scoped_history_provider(
+                        history_provider,
+                        allowed_user_ids,
+                        str(context.get("bot_user_id") or ""),
+                        str(context.get("bot_id") or ""),
+                    ),
+                    context_provider,
+                )
                 return
             route = thread_ownership.route(
                 event,

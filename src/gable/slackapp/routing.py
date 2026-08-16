@@ -47,6 +47,48 @@ def has_shared_files(event: dict[str, Any]) -> bool:
     return isinstance(files, list) and bool(files)
 
 
+#: "Gable" is also a roof. In a real-estate channel "gable roof", "gable end"
+#: and "gable vent" are ordinary description, not somebody addressing Gable, so
+#: the name followed by one of these is not treated as being spoken to.
+_ROOF_WORDS: Final[frozenset[str]] = frozenset(
+    ("roof", "roofs", "roofline", "end", "ends", "vent", "vents", "window", "windows", "wall")
+)
+_NAMED: Final[re.Pattern[str]] = re.compile(r"\bgable\b[\s,.!?:;'-]*(\w+)?", re.IGNORECASE)
+
+
+def speaks_to_gable_at_top_level(event: dict[str, Any], bot_user_id: str) -> bool:
+    """Return whether a channel message outside any thread is addressing Gable.
+
+    Carmen wrote "Thanks Gable!" straight into the channel and got silence,
+    because an ordinary message outside a Gable thread was ignored by design.
+    Being named is being spoken to, so it is answered like a mention. A message
+    that does not name Gable is still ignored: the channel carries Carmen and
+    Chase talking to each other, and Gable does not interrupt that.
+
+    Args:
+        event: Slack's message event.
+        bot_user_id: Gable's Slack bot-user id, for a real `<@U…>` mention.
+
+    Returns:
+        True only for a human, top-level, routable message that names Gable.
+
+    Raises:
+        Nothing.
+    """
+    if event.get("thread_ts") or event.get("bot_id"):
+        return False
+    if str(event.get("subtype") or "") not in _ROUTABLE_SUBTYPES:
+        return False
+    text = str(event.get("text") or "")
+    if bot_user_id and f"<@{bot_user_id}>" in text:
+        return True
+    for match in _NAMED.finditer(text):
+        following = (match.group(1) or "").casefold()
+        if following not in _ROOF_WORDS:
+            return True
+    return False
+
+
 class EventReplayGuard:
     """Suppress repeated delivery of one already-accepted Slack event.
 

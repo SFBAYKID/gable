@@ -9,7 +9,12 @@ import pytest
 
 from gable.slackapp.app import answer_mention, build_app, process_mention
 from gable.slackapp.brain import Decision
-from gable.slackapp.routing import EventReplayGuard, MessageRoute, ThreadOwnership
+from gable.slackapp.routing import (
+    EventReplayGuard,
+    MessageRoute,
+    ThreadOwnership,
+    speaks_to_gable_at_top_level,
+)
 
 CHANNEL = "C0B02721MNK"
 GABLE_USER = "UGABLE"
@@ -494,3 +499,164 @@ def test_app_mention_and_message_delivery_of_one_photo_run_only_once(
     assert handled == ["F1"]
     assert thought == []
     assert len(said) == 1
+
+
+def _top_level(text: str, **overrides: object) -> dict[str, Any]:
+    """Build one human message posted straight into the channel."""
+    event: dict[str, Any] = {
+        "channel": CHANNEL,
+        "user": "UCARMEN",
+        "ts": "1786918349.613549",
+        "text": text,
+    }
+    event.update(overrides)
+    return event
+
+
+def test_being_named_in_the_channel_is_being_spoken_to() -> None:
+    """Carmen wrote "Thanks Gable!" at top level and got silence."""
+    assert speaks_to_gable_at_top_level(_top_level("Thanks Gable!"), GABLE_USER)
+    assert speaks_to_gable_at_top_level(_top_level("gable, can you redo that one?"), GABLE_USER)
+    assert speaks_to_gable_at_top_level(_top_level(f"<@{GABLE_USER}> please rerun"), GABLE_USER)
+
+
+def test_a_message_that_does_not_name_gable_is_left_alone() -> None:
+    """The channel carries Carmen and Chase talking to each other."""
+    assert not speaks_to_gable_at_top_level(_top_level("sounds good, thanks!"), GABLE_USER)
+    assert not speaks_to_gable_at_top_level(_top_level(""), GABLE_USER)
+
+
+def test_a_gable_roof_is_not_someone_speaking_to_gable() -> None:
+    """This is a real-estate channel; the word is also a part of a house."""
+    assert not speaks_to_gable_at_top_level(
+        _top_level("Love the gable roof on this one"), GABLE_USER
+    )
+    assert not speaks_to_gable_at_top_level(_top_level("shoot the gable end wide"), GABLE_USER)
+    # A roof mentioned alongside an actual request is still a request.
+    assert speaks_to_gable_at_top_level(
+        _top_level("nice gable roof - gable can you build it?"), GABLE_USER
+    )
+
+
+def test_a_thread_reply_or_a_bot_is_not_a_top_level_address() -> None:
+    """Threads have their own owned-root path, and Gable never answers itself."""
+    assert not speaks_to_gable_at_top_level(
+        _top_level("Thanks Gable!", thread_ts="1786918000.000000"), GABLE_USER
+    )
+    assert not speaks_to_gable_at_top_level(
+        _top_level("Thanks Gable!", bot_id=GABLE_BOT), GABLE_USER
+    )
+    assert not speaks_to_gable_at_top_level(
+        _top_level("Thanks Gable!", subtype="message_changed"), GABLE_USER
+    )
+
+
+def test_a_top_level_message_naming_gable_reaches_the_brain(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The wiring, not just the predicate: "Thanks Gable!" must be answered.
+
+    Carmen posted exactly this into the shared channel and got nothing back,
+    because an ordinary message outside a Gable thread was dropped by design.
+    """
+    import slack_bolt
+
+    class FakeBoltApp:
+        """Capture event decorators without constructing a real Slack client."""
+
+        def __init__(self, **_kwargs: Any) -> None:  # noqa: ANN401
+            self.handlers: dict[str, Any] = {}
+
+        def event(self, name: str) -> Any:  # noqa: ANN401
+            def register(handler: Any) -> Any:  # noqa: ANN401
+                self.handlers[name] = handler
+                return handler
+
+            return register
+
+    class EventClient:
+        """Support the native waiting status only."""
+
+        def assistant_threads_setStatus(self, **_kwargs: Any) -> None:  # noqa: ANN401, N802
+            """Stand in for native status."""
+
+    monkeypatch.setattr(slack_bolt, "App", FakeBoltApp)
+    thought: list[str] = []
+
+    def thinker(message: str, speaker: str = "") -> Decision:
+        del speaker
+        thought.append(message)
+        return Decision(reply="You are welcome.")
+
+    said: list[dict[str, Any]] = []
+
+    def say(**kwargs: Any) -> dict[str, str]:  # noqa: ANN401
+        said.append(kwargs)
+        return {"ts": "said"}
+
+    app = build_app(
+        "xoxb-test-token",
+        allowed_channel=CHANNEL,
+        allowed_user_ids=frozenset(("UCARMEN",)),
+        thinker=thinker,
+        history_provider=None,
+    )
+    app.handlers["message"](
+        _top_level("Thanks Gable!", type="message", event_ts="1786918349.613549"),
+        say,
+        EventClient(),
+        {"bot_user_id": GABLE_USER, "bot_id": GABLE_BOT},
+    )
+
+    assert thought == ["Thanks Gable!"], "the message never reached the brain"
+    assert said and said[0]["text"] == "You are welcome."
+
+
+def test_a_top_level_message_not_naming_gable_stays_silent(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Gable does not interrupt Carmen and Chase talking to each other."""
+    import slack_bolt
+
+    class FakeBoltApp:
+        """Capture event decorators without constructing a real Slack client."""
+
+        def __init__(self, **_kwargs: Any) -> None:  # noqa: ANN401
+            self.handlers: dict[str, Any] = {}
+
+        def event(self, name: str) -> Any:  # noqa: ANN401
+            def register(handler: Any) -> Any:  # noqa: ANN401
+                self.handlers[name] = handler
+                return handler
+
+            return register
+
+    monkeypatch.setattr(slack_bolt, "App", FakeBoltApp)
+    thought: list[str] = []
+
+    def thinker(message: str, speaker: str = "") -> Decision:
+        del speaker
+        thought.append(message)
+        return Decision(reply="should not be reached")
+
+    said: list[dict[str, Any]] = []
+
+    def say(**kwargs: Any) -> dict[str, str]:  # noqa: ANN401
+        said.append(kwargs)
+        return {"ts": "said"}
+
+    app = build_app(
+        "xoxb-test-token",
+        allowed_channel=CHANNEL,
+        allowed_user_ids=frozenset(("UCARMEN",)),
+        thinker=thinker,
+    )
+    app.handlers["message"](
+        _top_level("sounds good, thanks!", type="message", event_ts="1786918349.7"),
+        say,
+        object(),
+        {"bot_user_id": GABLE_USER, "bot_id": GABLE_BOT},
+    )
+
+    assert thought == []
+    assert said == []
