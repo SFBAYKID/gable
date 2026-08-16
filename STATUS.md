@@ -2,6 +2,31 @@
 
 Last updated 2026-08-16 by the building agent.
 
+## 2026-08-16 rounds 8 and 9 — round 9 is the clean one
+
+Round 8 found one defect: row 16's open house reads "7/11/2026", a date with no
+time, and Open House sets the two in separate boxes. The date filled, the time
+box was blanked, and the flyer showed the design's own two separators with a gap
+between them. Fixed at the root — preflight now reports any box this run would
+BLANK so the missing part joins the one batched ask, before the copy is made.
+
+**Round 9 then ran all six designs and found zero code defects.** Sold, Under
+Contract, Open House, New Listing, New Listing with Open House and Client Review
+all delivered, all with zero layout regressions against their source designs,
+with no pending notifications, no open photo ingress claims, and no errors in
+the log.
+
+Everything the visual gate stopped in round 9 was a photograph I had cropped
+badly — a low-angle shot that was mostly sky, a cabin cropped so the house was
+gone. Each was a correct refusal of a genuinely bad hero image, and each was
+resolved by supplying a photograph matched to the frame's measured aspect. That
+is the gate doing its job, not a defect.
+
+Two designs had no unused form row left (New Listing with Open House, and every
+Client Review row is at the three-attempt ceiling), so those ran through the
+post-delivery replacement path instead: "replace the property photo with this
+one and run it again", then the photo. Same pipeline, same checks.
+
 ## 2026-08-16 round 7: two more real defects, both caught by the visual gate
 
 Every design run again with new agents and new photographs. Two defects, both
