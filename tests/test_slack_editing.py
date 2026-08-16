@@ -136,8 +136,7 @@ def test_font_size_edit_is_refused_before_google_mutation(tmp_path: Path) -> Non
 
     said = SlideEditor(connection, slides).execute(decision, THREAD)
 
-    assert "Post-delivery flyer edits are paused" in said
-    assert "left the flyer unchanged" in said
+    assert "I do not edit a delivered flyer in place" in said
     assert slides.operation == ""
     assert slides.requests == []
     connection.close()
@@ -252,7 +251,7 @@ def test_an_ambiguous_target_is_not_ranked_or_changed(tmp_path: Path) -> None:
 
     said = SlideEditor(connection, slides).execute(decision, THREAD)
 
-    assert "Post-delivery flyer edits are paused" in said
+    assert "I do not edit a delivered flyer in place" in said
     assert slides.requests == []
     connection.close()
 
@@ -275,7 +274,7 @@ def test_a_legacy_cached_public_fact_cannot_select_an_edit_target(tmp_path: Path
 
     said = SlideEditor(connection, slides).execute(decision, THREAD)
 
-    assert "Post-delivery flyer edits are paused" in said
+    assert "I do not edit a delivered flyer in place" in said
     assert slides.requests == []
     connection.close()
 
@@ -291,7 +290,7 @@ def test_hero_resize_targets_the_inserted_hero_object(tmp_path: Path) -> None:
 
     said = SlideEditor(connection, slides).execute(decision, THREAD)
 
-    assert "Post-delivery flyer edits are paused" in said
+    assert "I do not edit a delivered flyer in place" in said
     assert slides.operation == ""
     assert slides.requests == []
     connection.close()
@@ -308,7 +307,7 @@ def test_a_single_literal_field_correction_checks_occurrence_count(tmp_path: Pat
 
     said = SlideEditor(connection, slides).execute(decision, THREAD)
 
-    assert "Post-delivery flyer edits are paused" in said
+    assert "I do not edit a delivered flyer in place" in said
     assert slides.operation == ""
     assert slides.requests == []
     connection.close()
@@ -325,7 +324,7 @@ def test_move_hero_photo_executes_the_nudge_chase_asked_for(tmp_path: Path) -> N
 
     said = SlideEditor(connection, slides).execute(decision, THREAD)
 
-    assert "Post-delivery flyer edits are paused" in said
+    assert "I do not edit a delivered flyer in place" in said
     assert slides.operation == ""
     assert slides.requests == []
     connection.close()
@@ -343,7 +342,7 @@ def test_incomplete_google_reply_is_never_reported_as_success(tmp_path: Path) ->
     said = SlideEditor(connection, slides).execute(decision, THREAD)
 
     assert not said.startswith("Done")
-    assert "Post-delivery flyer edits are paused" in said
+    assert "I do not edit a delivered flyer in place" in said
     assert slides.operation == ""
     assert slides.requests == []
     connection.close()
@@ -364,8 +363,7 @@ def test_mutation_is_refused_when_post_edit_verification_is_not_connected(
         THREAD,
     )
 
-    assert "verify a separate draft" in said
-    assert "left the flyer unchanged" in said
+    assert "I do not edit a delivered flyer in place" in said
     assert slides.requests == []
     connection.close()
 

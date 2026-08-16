@@ -258,7 +258,12 @@ TOOLS: Final[list[dict[str, Any]]] = [
         "type": "function",
         "function": {
             "name": "correct_field",
-            "description": "Replace a wrong value on the flyer, such as a phone number.",
+            "description": (
+                "Replace one wrong contact detail on the flyer, such as a phone number "
+                "or an email. For listing facts — beds, baths, square footage, price, "
+                "address, open house, client name — use supply_listing_value instead, "
+                "whatever the flyer currently shows."
+            ),
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -308,8 +313,10 @@ TOOLS: Final[list[dict[str, Any]]] = [
         "function": {
             "name": "supply_listing_value",
             "description": (
-                "Record the listing details the person states in answer to Gable's one "
-                "question, then continue the paused run. Use this whenever they give a "
+                "Record the listing details the person states, then continue the run — "
+                "paused or already delivered; stating values reopens a delivered flyer "
+                "and rebuilds it with them, which is exactly what the delivery message "
+                "offers when a value was missing. Use this whenever they give a "
                 "property address, price, square footage, bed or bath count, "
                 "open-house date and time, a client's name, or a shorter version of "
                 "their review "

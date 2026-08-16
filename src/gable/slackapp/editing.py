@@ -147,9 +147,16 @@ class SlideEditor:
         if not run.output_file_id:
             return "This listing does not have a built flyer yet, so there is nothing to edit."
         if decision.tool != "replace_photo":
+            # The delivery message offers "send them here and I will run it
+            # again" for missing values, and a reply that took that offer was
+            # answered with this refusal — the promise and the guard
+            # contradicted each other. Listing values route to the rebuild
+            # path at the brain now; this branch remains for true in-place
+            # edits, and its words must not contradict that offer.
             return (
-                "Post-delivery flyer edits are paused until I can verify a separate draft, so I "
-                "left the flyer unchanged."
+                "I do not edit a delivered flyer in place. Say the values that "
+                "should change — like 4 beds, 2 baths, $500,000 — and I will "
+                "rebuild it with them."
             )
         if decision.tool == "replace_photo":
             return self._begin_photo_replacement(run, decision.arguments)
