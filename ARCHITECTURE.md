@@ -474,9 +474,21 @@ Postcard Order.
 Before a listing copy is created, `slides/preflight.py` reads the current source
 object graph. It requires one slide, resolves fillable text, refuses unsafe
 substring replacements, identifies one hero frame, converts its geometry to
-pixels, and measures the listing's actual values against the source boxes. A
-result at or below 8 points stops as unreadable; every larger fitted size is
-applied automatically and described only with the finished result.
+pixels, and measures the listing's actual values against the source boxes.
+`slides/measure.py` supplies those measurements — text-box geometry as Slides
+renders it, including the scale an enclosing group applies — so preflight holds
+only the verdicts about them.
+
+A result at or below 8 points stops as unreadable, and so does one that falls
+below 65% of the size the same-sized siblings in its row kept: a value shrunk
+alone in a row reads as a caption between headlines whatever its absolute size.
+Every larger fitted size is applied automatically and described only with the
+finished result.
+
+Preflight also reports a box this run would BLANK — a design that sets the open
+house date and time separately, given a date with no time — so the missing part
+joins the one batched ask instead of surfacing as a gap the visual gate refuses
+after the copy exists.
 
 `pipeline/template_triage.py` applies the same structural checks plus standard
 capacity targets when a new file appears. The initial folder is adopted
