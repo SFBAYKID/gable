@@ -247,17 +247,22 @@ def test_a_sample_headshot_can_never_survive_for_an_agent_without_a_file() -> No
     assert not violations(issue.say)
 
 
-def test_a_material_photo_crop_is_a_postbuild_advisory_not_a_question() -> None:
-    presentation = _presentation(_text("address", "[PROPERTY ADDRESS]", 500))
-    text = ["[PROPERTY ADDRESS]"]
-    report = preflight.analyze(
-        presentation,
+def _photo_report(photo_size: tuple[int, int]) -> preflight.Report:
+    """Analyze one listing against the 4:3 test hero at a given source size."""
+    return preflight.analyze(
+        _presentation(_text("address", "[PROPERTY ADDRESS]", 500)),
         "New Listing",
         "New Listing",
-        fields.resolve(text),
+        fields.resolve(["[PROPERTY ADDRESS]"]),
         {"address": "123 Main St, Baltimore, MD 21201"},
-        photo_size=(800, 1200),
+        photo_size=photo_size,
     )
+
+
+def test_a_material_photo_crop_is_a_postbuild_advisory_not_a_question() -> None:
+    # 900x1000 against the 4:3 hero loses about a third, which is inside the
+    # ordinary band that still fills the frame by cropping.
+    report = _photo_report((900, 1000))
 
     issue = next(item for item in report.warnings if item.code == "large_photo_crop")
     assert not issue.blocking
@@ -265,6 +270,24 @@ def test_a_material_photo_crop_is_a_postbuild_advisory_not_a_question() -> None:
     assert "outside that frame" in issue.say
     assert "?" not in issue.say
     assert "run anyway" not in issue.say.casefold()
+
+
+def test_a_contained_photo_is_never_described_as_cropped() -> None:
+    """A rebuilt flyer kept the whole photograph and still claimed a 57% crop.
+
+    The advisory keyed off `needs_small_source_fit`, which stopped being the
+    whole of the contained set once a badly-shaped source was contained too.
+    Saying it cropped what it did not crop is a false claim about its own work.
+    """
+    report = _photo_report((800, 1200))
+
+    codes = {item.code for item in report.warnings}
+    assert "photo_contained_whole" in codes
+    assert "large_photo_crop" not in codes
+    note = next(item for item in report.warnings if item.code == "photo_contained_whole")
+    assert "kept all of it" in note.advisory
+    assert "blurred copy" in note.advisory
+    assert not note.blocking
 
 
 def test_small_source_containment_does_not_claim_a_crop() -> None:

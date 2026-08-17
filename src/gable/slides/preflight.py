@@ -688,11 +688,21 @@ def analyze(
     if photo_size is not None:
         photo_width, photo_height = photo_size
         photo = assess(photo_width, photo_height, hero_width_px, hero_height_px)
-        # The small-source path contains the complete foreground over a
-        # same-photo backdrop. Its hypothetical cover crop can be large, but no
-        # source edge is actually discarded, so reporting crop loss would be a
-        # false claim about what Gable did.
-        if not photo.needs_small_source_fit and photo.crop_loss > PHOTO_CROP_WARNING:
+        # Either contained path keeps the complete photograph over a same-photo
+        # backdrop. Its hypothetical cover crop can be large, but no source edge
+        # is actually discarded, so reporting crop loss would be a false claim
+        # about what Gable did. This read `needs_small_source_fit`, which stopped
+        # being the whole of that set the moment a badly-shaped source was
+        # contained too: a rebuilt flyer kept the entire photograph and still
+        # said it had center-cropped 57 percent of it away.
+        if photo.needs_contained_fit:
+            note = (
+                "The photo is a different shape from the frame, so I kept all of it "
+                "and filled the space around it with a blurred copy of the same "
+                "photo rather than cropping the property."
+            )
+            issues.append(Issue("photo_contained_whole", note, advisory=note))
+        elif photo.crop_loss > PHOTO_CROP_WARNING:
             percent = round(photo.crop_loss * 100)
             note = (
                 f"I center-cropped and fitted the photo to the current frame; about "
