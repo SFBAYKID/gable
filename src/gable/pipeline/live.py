@@ -339,10 +339,19 @@ def build_runner(
             vision_reference = original
             source_width, source_height = image_dimensions(original)
             decision = assess(source_width, source_height, width_px, height_px)
-            if decision.needs_small_source_fit:
-                progress("is fitting the small photo without changing the property...")
+            if decision.needs_contained_fit:
+                # The same source-only fit serves both reasons to avoid a crop:
+                # too few pixels, or a shape so far from the frame that filling
+                # it would discard most of the photograph. Only the first is
+                # worth telling Carmen about, because only the first is fixed by
+                # sending a better original.
+                progress(
+                    "is fitting the small photo without changing the property..."
+                    if decision.needs_small_source_fit
+                    else "is fitting the whole photo without cropping the property..."
+                )
                 recropped = fit_small_source(original, width_px, height_px)
-                used_small_source_fit = True
+                used_small_source_fit = decision.needs_small_source_fit
             else:
                 recropped = fit_locally(original, width_px, height_px)
             url = publish_local(settings.photo_public_root, settings.photo_public_base, recropped)

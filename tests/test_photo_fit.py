@@ -94,8 +94,10 @@ def test_upscale_is_driven_by_the_binding_axis() -> None:
 
 def test_a_wide_photo_loses_its_sides() -> None:
     a = assess(2000, 1000, FRAME_W, FRAME_H)  # 2.0 vs 0.8
-    assert a.action is FitAction.CROP
     assert a.crop_loss == pytest.approx(1 - (0.8 / 2.0))
+    # 60% is past MAX_TOLERABLE_CROP_LOSS, so the whole photograph is kept over
+    # its own blurred copy rather than having well over half its width cut off.
+    assert a.action is FitAction.CONTAIN_WHOLE
 
 
 def test_a_tall_photo_loses_top_and_bottom() -> None:

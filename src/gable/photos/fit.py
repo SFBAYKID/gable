@@ -48,6 +48,24 @@ MAX_TOP_CROP_OF_KEPT: Final[float] = 0.08
 #: not sent round a crop path for a rounding error.
 ASPECT_EPSILON: Final[float] = 0.01
 
+#: How much of a photo may be thrown away to fill the frame before containing it
+#: over its own blurred backdrop instead.
+#:
+#: `crop_loss` was measured here from the start and never used to choose
+#: anything, so a portrait upload was cropped as hard as the frame demanded. Two
+#: real flyers on 2026-08-17: a 1320x1918 photograph into the Under Contract
+#: frame, measured 809x420pt at 1.924:1, discarded 64% of it, and a 1000x1080
+#: into the Sold frame at 1.923:1 discarded 52%. Both kept the house and lost
+#: the whole front garden and the bottom of the porch. Chase's words: "the image
+#: is so cropped in the flyer".
+#:
+#: The ordinary case is untouched and must stay that way. A 3:2 photograph into
+#: those frames loses 22%, a 4:3 loses 31%, and into the widest 2.14:1 hero they
+#: lose 30% and 38%. So the line sits above 38% with room to spare: a landscape
+#: photograph still fills the frame exactly as it always has, and only a source
+#: whose shape genuinely fights the frame is contained instead.
+MAX_TOLERABLE_CROP_LOSS: Final[float] = 0.45
+
 #: JPEG quality for the fitted output. 88 is visually lossless at flyer sizes
 #: and roughly half the bytes of 95.
 OUTPUT_QUALITY: Final[int] = 88
@@ -142,6 +160,10 @@ class FitAction(StrEnum):
     CROP = "crop"
     #: Too few pixels for a full-frame cover. Use the source-only backdrop fit.
     SMALL_SOURCE = "small_source"
+    #: Enough pixels, but so far off the frame's shape that filling it would
+    #: throw most of the photograph away. Keep all of it over its own blurred
+    #: copy instead of cutting the property in half.
+    CONTAIN_WHOLE = "contain_whole"
 
 
 @dataclass(frozen=True, slots=True)
@@ -163,8 +185,22 @@ class FitAssessment:
 
     @property
     def needs_small_source_fit(self) -> bool:
-        """True when the source-only contained-over-backdrop fit is required."""
+        """True only when the source is too small to fill the frame sharply.
+
+        Kept narrow on purpose: this is what tells Carmen a bigger original
+        would help. A photograph the wrong SHAPE for the frame is not a
+        low-quality photograph, and saying so would be wrong.
+        """
         return self.action is FitAction.SMALL_SOURCE
+
+    @property
+    def needs_contained_fit(self) -> bool:
+        """True when the whole photo is kept over its own blurred backdrop.
+
+        Either it is too small to enlarge safely, or filling the frame would
+        discard more of it than `MAX_TOLERABLE_CROP_LOSS` allows.
+        """
+        return self.action in {FitAction.SMALL_SOURCE, FitAction.CONTAIN_WHOLE}
 
     @property
     def is_free(self) -> bool:
@@ -242,6 +278,14 @@ def assess(
                 f"right shape, and larger than needed — downscaling "
                 f"{1 / upscale:.1f}x, which is free and lossless to the eye."
             )
+    elif crop_loss > MAX_TOLERABLE_CROP_LOSS:
+        action = FitAction.CONTAIN_WHOLE
+        orientation = "wider" if source_aspect > target_aspect else "taller"
+        reason = (
+            f"the photo is much {orientation} than the frame, so filling it would "
+            f"cut {crop_loss:.0%} of the photograph away. The whole picture is kept "
+            "instead, over a blurred copy of itself."
+        )
     else:
         action = FitAction.CROP
         orientation = "wider" if source_aspect > target_aspect else "taller"
