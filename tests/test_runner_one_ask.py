@@ -349,3 +349,35 @@ def test_an_incomplete_address_is_asked_for_once_and_then_printed(
     assert result.status == "delivered", "a partial address must not hold the flyer"
     assert "still need the address" not in spoken.lower(), "asked twice for one value"
     assert "Open the flyer" in spoken
+
+
+def test_two_properties_in_one_address_field_are_never_printed() -> None:
+    """A real submission held two listings separated by a line break.
+
+    Collapsing the break produced one string naming neither house. It fails the
+    whole-address shape, so the incomplete-but-true rule would have printed it —
+    and it is not incomplete, it is false about both properties. A wrong address
+    on a real flyer is the worst thing this system can produce, so it asks.
+    """
+    from gable.slides import manifest as template_manifest
+
+    both = "5111 Hanover Pike Manchester, MD 21102 75 S Ralph Street Westminstermd, 21157"
+
+    assert not template_manifest.names_one_property(both)
+    problems = template_manifest.validate(template_manifest.manifest_for("Sold"), {"address": both})
+    address_problem = next(p for p in problems if p.field_name == "address")
+    assert address_problem.blocking
+    assert not address_problem.releasable, "this must never ride the released blanks"
+    assert "more than one property" in address_problem.say
+
+
+def test_one_property_with_a_zip_is_unaffected() -> None:
+    """The ordinary case must not be caught by the two-property rule."""
+    from gable.slides import manifest as template_manifest
+
+    for good in (
+        "210 S Monastery Ave, Baltimore, MD 21229",
+        "5556 Dolores Ave, 21227",
+        "8517 Oglethorpe Street, New Carrollton 20784",
+    ):
+        assert template_manifest.names_one_property(good), good

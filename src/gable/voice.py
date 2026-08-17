@@ -258,6 +258,13 @@ def strip_to_plain(text: str) -> str:
 #: number is a ceiling, not a target — most replies should be far shorter.
 MAX_REPLY_CHARS: Final[int] = 600
 
+#: Ceiling for the one message that delivers a finished flyer. It is a report,
+#: not a reply: the link, anything a check noticed, the fields nobody supplied,
+#: and the text Gable resized to make things fit. Every one of those is a fact
+#: Carmen acts on, and at 600 the last two were being dropped without a trace.
+#: Still bounded, because an unbounded message is its own kind of unreadable.
+MAX_DELIVERY_CHARS: Final[int] = 1400
+
 #: Markdown that Slack does not render. `**bold**` shows the asterisks, and a
 #: `#` heading shows the hash, so both look like a mistake rather than emphasis.
 _MD_BOLD: Final[re.Pattern[str]] = re.compile(r"\*\*(.+?)\*\*", re.DOTALL)
@@ -359,13 +366,21 @@ def paragraphs(*parts: str) -> str:
     return "\n\n".join(part.strip() for part in parts if part and part.strip())
 
 
-def safe(text: str) -> str:
+def safe(text: str, limit: int = MAX_REPLY_CHARS) -> str:
     """Return `text` if it obeys the house style, or the closest thing that does.
 
     The one call any module can make before speaking.
 
     Args:
         text: A candidate message.
+        limit: Character ceiling. The default suits a conversational reply, which
+            should be short because it was written short. A finished flyer's
+            delivery message is a report rather than a reply — link, findings,
+            what was left blank, what was resized — and silently trimming it
+            loses facts Carmen needs to act on, so `MAX_DELIVERY_CHARS` raises
+            the ceiling for that one message. Found when a 535-character
+            delivery dropped two whole paragraphs, including the one naming the
+            fields nobody had supplied.
 
     Returns:
         The text unchanged when clean, a scrubbed version when scrubbing is
@@ -374,7 +389,7 @@ def safe(text: str) -> str:
     Raises:
         Nothing.
     """
-    formatted = shorten(for_slack(text))
+    formatted = shorten(for_slack(text), limit)
     if is_clean(formatted):
         return formatted
     scrubbed = strip_to_plain(formatted)

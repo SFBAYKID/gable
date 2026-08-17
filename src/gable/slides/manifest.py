@@ -242,6 +242,16 @@ def validate(manifest: Manifest, values: dict[str, str]) -> list[Problem]:
         if not value:
             continue
 
+        if slot.kind == ADDRESS and not names_one_property(value):
+            problems.append(
+                Problem(
+                    slot.name,
+                    f"The address reads {value!r}, which looks like more than one "
+                    "property. Which one is this post for?",
+                )
+            )
+            continue
+
         if slot.kind == ADDRESS and not ADDRESS_SHAPE.match(value):
             problems.append(
                 Problem(
@@ -253,6 +263,33 @@ def validate(manifest: Manifest, values: dict[str, str]) -> list[Problem]:
             )
 
     return sorted(problems, key=lambda p: not p.blocking)
+
+
+#: More than one ZIP in a single address field means the field holds more than
+#: one property. A real submission put two listings in it, separated by a line
+#: break, and collapsing the break produced "5111 Hanover Pike Manchester, MD
+#: 21102 75 S Ralph Street Westminstermd, 21157" — a single string naming
+#: neither house. It fails the whole-address shape, so before this it would have
+#: been printed as an incomplete-but-true address, which it is not: it is false
+#: about both properties. A flyer carrying it would be wrong in the one way that
+#: matters most, so it asks instead.
+_ZIP_ANYWHERE: Final[re.Pattern[str]] = re.compile(r"\b\d{5}(?:-\d{4})?\b")
+
+
+def names_one_property(value: str) -> bool:
+    """Whether an address field describes a single property.
+
+    Args:
+        value: The supplied address.
+
+    Returns:
+        False when it carries two or more ZIP codes, which is how a field
+        holding two listings presents once its line breaks are collapsed.
+
+    Raises:
+        Nothing.
+    """
+    return len(_ZIP_ANYWHERE.findall(value)) <= 1
 
 
 #: A street line and a ZIP, with no confident city and state between them. This
@@ -275,6 +312,8 @@ def _is_printable_partial_address(value: str) -> bool:
     Raises:
         Nothing.
     """
+    if not names_one_property(value):
+        return False
     return bool(_STREET_AND_ZIP.match(" ".join(value.split()).replace(",", " ")))
 
 

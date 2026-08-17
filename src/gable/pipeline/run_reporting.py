@@ -14,7 +14,7 @@ from gable.pipeline.orchestrator import QualityVerdict
 from gable.pipeline.vision import Inspection
 from gable.slides import fields as template_fields
 from gable.slides import fitting, layout, preflight
-from gable.voice import paragraphs, safe
+from gable.voice import MAX_DELIVERY_CHARS, paragraphs, safe
 
 logger = logging.getLogger("gable.runner")
 
@@ -380,22 +380,36 @@ def delivery_message(
     # A flyer that a check disliked is still delivered, so the opening line must
     # not call it finished when it is not. Carmen sees every post before a client
     # does, and she can only judge a flyer she is able to open.
-    opening = (
-        f"Here it is. <{output_url}|Open the flyer>"
-        if noticed
-        else f"Your flyer is ready. <{output_url}|Open the flyer>"
-    )
+    if not output_url.strip():
+        # A built flyer whose link could not be read is still a built flyer. The
+        # link markup raises on an empty URL, and raising here would record a
+        # failed run for a file that exists in the Gable drive — the worst of
+        # both, because nobody would go looking for it.
+        opening = (
+            "I built the flyer, but I could not read back its link. "
+            "It is in the Gable drive under this listing's name."
+        )
+    elif noticed:
+        opening = f"Here it is. <{output_url}|Open the flyer>"
+    else:
+        opening = f"Your flyer is ready. <{output_url}|Open the flyer>"
+    # Ordered by what Carmen can act on. The link first, then anything a check
+    # noticed, then what is MISSING from the flyer — those change what she does
+    # next. What Gable already handled for her comes last: useful to know, not
+    # urgent. The order used to be the reverse of this, so when the message ran
+    # long the trim took the missing-fields note and kept the resize note.
     return safe(
         paragraphs(
             opening,
             noticed,
+            blank_note(left_blank) if left_blank else "",
+            price_missing_note,
             *run_notes,
             photo,
             fit,
             *advisories,
-            blank_note(left_blank) if left_blank else "",
-            price_missing_note,
-        )
+        ),
+        MAX_DELIVERY_CHARS,
     )
 
 

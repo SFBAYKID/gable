@@ -8,7 +8,13 @@ and bulleted lists, hundreds of words long — which is what these guard.
 
 from __future__ import annotations
 
-from gable.voice import MAX_REPLY_CHARS, for_slack, safe, shorten
+from gable.voice import (
+    MAX_DELIVERY_CHARS,
+    MAX_REPLY_CHARS,
+    for_slack,
+    safe,
+    shorten,
+)
 
 
 def test_markdown_bold_becomes_slack_bold() -> None:
@@ -100,3 +106,49 @@ def test_the_wall_of_text_from_the_live_test_is_contained() -> None:
     assert "**" not in out, "Slack shows raw asterisks"
     assert "- " not in out, "hyphens are not list markers in Slack"
     assert len(out) <= MAX_REPLY_CHARS
+
+
+def test_a_delivery_report_is_not_trimmed_like_a_chat_reply() -> None:
+    """A 535-character delivery lost two paragraphs at the 600-char ceiling.
+
+    The dropped one named the fields nobody had supplied, which is exactly what
+    Carmen needs in order to fill them in. A delivery message is a report — the
+    link, what a check noticed, what is missing, what was resized — not a
+    conversational reply, so it gets its own ceiling.
+    """
+    parts = [
+        "Your flyer is ready. <https://docs.google.com/presentation/d/abc123/edit|Open the flyer>",
+        "I rendered it, but the main property photo is cropped through the roofline.",
+        "Price, beds and baths aren't on your request form yet, so I left them off.",
+        "I kept the whole photo and filled the space beside it with a blurred copy.",
+        "I reduced the agent title, phone and email text sizes to fit the boxes.",
+    ]
+    report = safe("\n\n".join(parts), MAX_DELIVERY_CHARS)
+
+    assert len(report) <= MAX_DELIVERY_CHARS
+    for part in parts:
+        head = part.split(".")[0]
+        assert head in report, f"the delivery lost: {head}"
+
+
+def test_a_conversational_reply_keeps_the_shorter_ceiling() -> None:
+    """Raising the delivery ceiling must not let ordinary replies run long."""
+    rambling = ("I need the address. " * 80).strip()
+
+    assert len(safe(rambling)) <= MAX_REPLY_CHARS
+    assert MAX_DELIVERY_CHARS > MAX_REPLY_CHARS
+
+
+def test_a_flyer_with_no_readable_link_is_still_reported_as_built() -> None:
+    """The link markup raises on an empty URL.
+
+    Raising inside the delivery message would record a failed run for a file
+    that exists in the Gable drive, which is the worst outcome available: the
+    flyer is built and nobody knows to look for it.
+    """
+    import pytest as _pytest
+
+    from gable.voice import link
+
+    with _pytest.raises(ValueError, match="needs both"):
+        link("", "Open the flyer")

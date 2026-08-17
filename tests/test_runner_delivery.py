@@ -11,7 +11,7 @@ from gable.agents.website import OfficialProfile, ProfileLookup
 from gable.db import store
 from gable.db.schema import apply_migrations, connect
 from gable.pipeline.vision import Inspection, InspectionProblemKind, InspectionRemedy
-from gable.voice import is_clean
+from gable.voice import MAX_DELIVERY_CHARS, is_clean
 from tests.runner_support import Recorder
 from tests.runner_support import record as _record
 from tests.runner_support import runner as _runner
@@ -510,7 +510,10 @@ def test_replacement_question_survives_an_overlong_visual_finding(
     assert result.status == "delivered"
     assert len(rec.said) == 2  # the announcement, then the outcome
     assert "Open the flyer" in rec.said[-1], "the link survives a runaway finding"
-    assert len(rec.said[-1]) <= 600
+    # Bounded, at the delivery ceiling rather than the conversational one: this
+    # message is a report, and trimming it to 600 silently dropped the note
+    # naming the fields nobody supplied.
+    assert len(rec.said[-1]) <= MAX_DELIVERY_CHARS
     assert is_clean(rec.said[-1])
 
 
