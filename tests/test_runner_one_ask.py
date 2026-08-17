@@ -315,3 +315,37 @@ def test_a_design_with_no_address_slot_is_never_asked_for_one() -> None:
     assert not template_manifest.needs_a_whole_address(
         review, {"address": "Google Review, SRES Listing 29 Maple"}
     )
+
+
+def test_an_incomplete_address_is_asked_for_once_and_then_printed(
+    db: sqlite3.Connection,
+) -> None:
+    """Lina Mariner's listing asked for four values and re-asked for one.
+
+    The form gave "5556 Dolores Ave 21227" — a street and a ZIP, no city or
+    state. That rode the first ask correctly, alongside the beds, baths, square
+    footage and price. She answered with the price, beds and square footage, and
+    Gable came straight back with "I still need the address": the exact second
+    round this whole file exists to prevent. The address check was the one value
+    check missing the released-blanks gate.
+    """
+    submission = _submission(rid="rid-partial-address", address="5556 Dolores Ave 21227")
+    _record(db, submission)
+
+    first = Recorder()
+    opening = _runner(db, first, facts=Facts())
+    opening.hero_photo_url = ""
+    paused = opening.run(submission)
+
+    assert paused.status == "needs_photo"
+    assert "address" in first.said[1].lower(), "the incomplete address must ride the first ask"
+
+    # The photo lands. Nobody ever answered the address.
+    second = Recorder()
+    resumed = _runner(db, second, facts=Facts())
+    result = resumed.resume(submission, paused.run_id)
+
+    spoken = "\n".join(second.said)
+    assert result.status == "delivered", "a partial address must not hold the flyer"
+    assert "still need the address" not in spoken.lower(), "asked twice for one value"
+    assert "Open the flyer" in spoken

@@ -198,6 +198,14 @@ class Problem:
     #: keep the design's own placeholder; a malformed one never is, because
     #: writing it onto a client-facing flyer states something untrue.
     absent: bool = False
+    #: True when the value is present, imperfect, and still TRUE — so once it has
+    #: been asked about it may be printed as supplied rather than asked about
+    #: again. An address of "5556 Dolores Ave 21227" has a street and a ZIP and
+    #: no city: incomplete, not false. Blocking a flyer on it asked Carmen for an
+    #: address a second time, which is the round trip the one batched ask exists
+    #: to remove. Distinct from `absent`, which keeps a placeholder; this prints
+    #: what the person actually typed.
+    releasable: bool = False
 
 
 def validate(manifest: Manifest, values: dict[str, str]) -> list[Problem]:
@@ -240,10 +248,34 @@ def validate(manifest: Manifest, values: dict[str, str]) -> list[Problem]:
                     slot.name,
                     f"The address reads {value!r}, and I could not separate the street, "
                     "city, state and ZIP confidently. What is the full address?",
+                    releasable=_is_printable_partial_address(value),
                 )
             )
 
     return sorted(problems, key=lambda p: not p.blocking)
+
+
+#: A street line and a ZIP, with no confident city and state between them. This
+#: is the shape a form submission arrives in when somebody typed the address
+#: quickly, and it is printable: incomplete is not the same as untrue.
+_STREET_AND_ZIP: Final[re.Pattern[str]] = re.compile(r"^\s*\d+\s+\S.*\b\d{5}(?:-\d{4})?\s*$")
+
+
+def _is_printable_partial_address(value: str) -> bool:
+    """Whether an address the shape check refused is still true enough to print.
+
+    Args:
+        value: The supplied address, already tidied.
+
+    Returns:
+        True when it opens with a street number and ends with a ZIP, which is a
+        real address missing only its city and state. False for anything that
+        does not identify a place at all, which must keep asking.
+
+    Raises:
+        Nothing.
+    """
+    return bool(_STREET_AND_ZIP.match(" ".join(value.split()).replace(",", " ")))
 
 
 def needs_a_whole_address(manifest: Manifest, values: dict[str, str]) -> bool:

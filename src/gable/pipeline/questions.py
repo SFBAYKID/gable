@@ -20,7 +20,6 @@ from typing import Final
 
 from gable.db import store
 from gable.db.schema import connect
-from gable.voice import quote_rail, safe, shorten
 
 logger = logging.getLogger("gable.questions")
 
@@ -31,7 +30,6 @@ DrainAdditional = Callable[[Connection], int]
 ClaimDelivery = Callable[[int, str], str]
 ReleaseDelivery = Callable[[str], None]
 
-PHOTO_REPLACEMENT_QUESTION: Final[str] = "Can you send the correct property image?"
 _PHOTO_REPLACEMENT_FACT_LIMIT: Final[int] = 480
 _DELIVERY_LOCK_STRIPES: Final[int] = 64
 _DELIVERY_LOCKS: Final[tuple[threading.RLock, ...]] = tuple(
@@ -96,67 +94,6 @@ def run_question_guard(run_id: str) -> Iterator[None]:
     """
     with notification_guard(f"run:{run_id}"):
         yield
-
-
-def replacement_message(finding: str) -> str:
-    """Keep a visual fact bounded while preserving the complete action below it."""
-    bounded_fact = shorten(finding, _PHOTO_REPLACEMENT_FACT_LIMIT)
-    return safe(f"{quote_rail([bounded_fact])}\n\n{PHOTO_REPLACEMENT_QUESTION}")
-
-
-def request_replacement_photo(
-    connection: Connection,
-    run_id: str,
-    finding: str,
-    detail: str,
-    say: Post,
-    *,
-    post_once: PostOnce | None = None,
-    reconcile: ReconcilePost | None = None,
-    thread_ts: str = "",
-    output_file_id: str = "",
-    output_url: str = "",
-) -> Delivery:
-    """Ask, once, for the one photograph a finished flyer contradicted.
-
-    Every label and reason this pause needs is fixed, so they live here rather
-    than being spelled out again at the call site. The rejected draft's file is
-    recorded for audit; its link stays out of Slack.
-
-    Args:
-        connection: An open database connection.
-        run_id: The run returning to `needs_photo`.
-        finding: What the rendered inspection proved, in Carmen's words.
-        detail: The same finding for the append-only transition record.
-        say: Posts a Slack message.
-        post_once: Durable outbox poster, when one is configured.
-        reconcile: Confirms a delivery whose acknowledgement was lost.
-        thread_ts: The run's own thread, so the ask lands where the answer can.
-        output_file_id: The rejected draft, kept as evidence.
-        output_url: The rejected draft's link, persisted but never posted.
-
-    Returns:
-        The `Delivery`, carrying the run's new status and what was said.
-
-    Raises:
-        sqlite3.Error: on a persistence failure.
-    """
-    return prepare_and_deliver(
-        connection,
-        run_id,
-        replacement_message(finding),
-        "needs_photo",
-        say,
-        post_once=post_once,
-        reconcile=reconcile,
-        question_label=PHOTO_REPLACEMENT_QUESTION,
-        thread_ts=thread_ts,
-        confirmed_reason=store.PHOTO_REPLACEMENT_WAITING,
-        confirmation_detail="replacement property photo request confirmed in Slack",
-        transition_detail=f"replacement supplied photo required: {detail}",
-        output_file_id=output_file_id,
-        output_url=output_url,
-    )
 
 
 def prepare_and_deliver(

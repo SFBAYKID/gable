@@ -399,7 +399,15 @@ class Runner:
 
         # Asked WITH the photograph rather than one step after it; see
         # `manifest.needs_a_whole_address` for the round trip that cost.
-        if template_manifest.needs_a_whole_address(
+        #
+        # Asked ONCE, like every other value: this was missing the `allow_blank`
+        # gate that guards the rest, so a listing answered with three of the four
+        # values it was asked for came straight back with "I still need the
+        # address". It only fires when an address IS supplied and is the wrong
+        # shape, so after the ask, printing what the agent typed is the honest
+        # move — "5556 Dolores Ave, 21227" is true and incomplete, a second
+        # question is neither.
+        if not allow_blank and template_manifest.needs_a_whole_address(
             template_manifest.manifest_for(template_label), values
         ):
             outstanding.add_value("address")
@@ -461,7 +469,9 @@ class Runner:
         # keeps the design's placeholder rather than stopping a finished flyer;
         # a value that is present and malformed still stops.
         blocking = [
-            item for item in field_problems if item.blocking and not (allow_blank and item.absent)
+            item
+            for item in field_problems
+            if item.blocking and not (allow_blank and (item.absent or item.releasable))
         ]
         if blocking:
             return self._ask(run_id, intake, blocking[0].say, [], result)

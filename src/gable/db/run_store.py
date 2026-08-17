@@ -47,12 +47,6 @@ INTERRUPTED_NOTIFICATION_PENDING: Final[str] = (
     "processing was interrupted before completion; Slack notification pending"
 )
 
-#: The corresponding human-owned wait after Slack returns the question's exact
-#: timestamp. This stable sentence is safe to expose in bounded thread context.
-PHOTO_REPLACEMENT_WAITING: Final[str] = (
-    "waiting for the correct property image because the supplied photo conflicts with the listing"
-)
-
 _RUN_UPDATE_FIELDS: Final[frozenset[str]] = frozenset(
     {
         "template_file_id",
