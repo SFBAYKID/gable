@@ -275,6 +275,78 @@ def test_a_skip_that_cannot_be_recorded_is_withheld_rather_than_built(
     assert db.execute("SELECT COUNT(*) AS n FROM runs").fetchone()["n"] == 0
 
 
+def test_a_half_written_skip_leaves_nothing_behind(
+    db: sqlite3.Connection,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The dangerous partial failure: the run opened, the status never landed.
+
+    An orphan `pending` row is the worst of every world. `has_been_handled`
+    already returns true for it, so the row is never reconsidered; `pending` is
+    an ACTIVE status, so `start_run` refuses to open another attempt; and the
+    next startup's `recover_interrupted_runs` fails it and owes Carmen a Slack
+    notice about a Reel Gable promised to say nothing about. The insert and the
+    terminal status therefore have to be one transaction.
+    """
+    sheet = FakeSheet(
+        [
+            LIVE_HEADER,
+            _live_row("8/1/2026 09:00:00", "1 A St, Baltimore, MD 21201", "Instagram Reel"),
+        ]
+    )
+    repo.adopt_backfill(db, [])
+
+    def refuse(
+        _connection: sqlite3.Connection,
+        _run_id: str,
+        _status: str,
+        _detail: str = "",
+        **_fields: str | int,
+    ) -> None:
+        raise sqlite3.OperationalError("database is locked")
+
+    monkeypatch.setattr(store, "set_status", refuse)
+    assert _poller(db, sheet, []).one_pass() == 0
+
+    assert db.execute("SELECT COUNT(*) AS n FROM runs").fetchone()["n"] == 0
+    assert store.recover_interrupted_runs(db) == ()
+
+
+def test_a_withheld_skip_is_retried_on_the_next_pass(
+    db: sqlite3.Connection,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The withholding is only honest if the row genuinely comes back."""
+    sheet = FakeSheet(
+        [
+            LIVE_HEADER,
+            _live_row("8/1/2026 09:00:00", "1 A St, Baltimore, MD 21201", "Instagram Reel"),
+        ]
+    )
+    repo.adopt_backfill(db, [])
+    poller = _poller(db, sheet, [])
+
+    original = store.start_run
+    calls = 0
+
+    def fail_once(connection: sqlite3.Connection, response_row_id: str) -> object:
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            raise sqlite3.OperationalError("database is locked")
+        return original(connection, response_row_id)
+
+    monkeypatch.setattr(store, "start_run", fail_once)
+    assert poller.one_pass() == 0
+    assert db.execute("SELECT COUNT(*) AS n FROM runs").fetchone()["n"] == 0
+
+    monkeypatch.undo()
+    assert poller.one_pass() == 0
+
+    row = db.execute("SELECT status FROM runs").fetchone()
+    assert row is not None and row["status"] == "skipped"
+
+
 def test_an_unknown_content_type_is_still_built(db: sqlite3.Connection) -> None:
     """The safe direction: Carmen sees a design she can ignore."""
     sheet = FakeSheet(

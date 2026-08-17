@@ -29,6 +29,28 @@ Two things were found on the way and are worth knowing:
   added it. A submission reloaded for a resumed thread would have read as
   "build" regardless of what the form said.
 
+### Known dead end — Chase's call, not mine
+
+**A Reel corrected in place to a static post is never built and never
+mentioned.** Verified by running it: the poller skips the Reel terminally, the
+agent edits that same form row to `Static Instagram/Facebook Post`,
+`record_submission` correctly stores the new value — and nothing happens.
+`response_row_id` is `source_identity(tab, sheet_row)`, which is stable across
+an in-place edit, so `has_been_handled` still sees the terminal `skipped` run
+and `new_submissions` filters the row out before the gate ever looks at it.
+
+The run's stated reason ("video or animation") is no longer true of the stored
+row, and unlike a delivered listing there is no Slack thread in which to ask for
+a rebuild. The workaround is to submit a new form response, which lands on a new
+sheet row, earns a new identity, and builds normally.
+
+I did not fix it. The fix means reopening a row `has_been_handled` has already
+retired, and that guard is the thing standing between Gable and 99 unwanted
+flyers — CLAUDE.md §2.6 puts a change like that with Chase. The narrow version
+would reconsider only a submission whose single run is a content-type skip and
+whose stored content type has since become a graphic. Worth doing if agents turn
+out to mis-select the content type; not worth touching the guard speculatively.
+
 ### Owed, not blocking
 
 `src/gable/listings/intake.py` is 750 lines. That is under the 800 hard ceiling
@@ -743,55 +765,14 @@ priority order is:
 
 ## 7. Overnight matrix test — 13–14 August 2026
 
-Every person on the roster against every design, driven from `Testing_1` into
+Trimmed 2026-08-17 to keep this file under the 800-line ceiling. The run itself:
+every person on the roster against every design, driven from `Testing_1` into
 `#monarch-bot-playground`. 263 runs opened, 68 flyers delivered, $17.32 spent
 against the $500 campaign ceiling. `#calvo` received nothing.
 
-### Fixed and deployed
-
-| What | Commit |
-|---|---|
-| Text width measured from the designs' own faces instead of a five-class estimate. A name wrapped onto the Realtor title beneath it because the estimate was 14 percent low. | `c1e29c3` |
-| Every field filled through a sentinel, so a value Gable writes cannot be caught by a later replacement. A brokerage name ending in "Realtor" had that word rewritten. | `8d4b4eb` |
-| The sentinel made plain ASCII, because Slides silently strips U+E000 and the second pass then matched nothing. | `c76c8b9` |
-| The visual gate told which sample text was deliberately left, so a correct flyer is not held for showing the design's own price. | `86551d6` |
-| A failed run records the kind of error, not just that one happened. | `7abfc8a` |
-| A filled measurement keeps the design's own unit and capitals. Found by re-testing the first four people after the other fixes. | `3919d0e` |
-| A value supplied after delivery reopens the finished flyer, so "run it again, the price should be $560,000" produces a new one instead of "already being rechecked". | `6dd70c4` |
-
-### Waiting on Chase
-
-- **Sold cannot deliver.** "Reach Out Today." overflows its own callout in the
-  source design and the second line prints onto the white band below. Every Sold
-  run stops for review and is right to. Open House loses the last line of its
-  footer the same way.
-- ~~**Two job titles fit no design.**~~ Closed 2026-08-14: a title that cannot
-  be set at a readable size now falls back to the credential inside the agent's
-  own proven title, and the closing message says the longer title was dropped.
-  See `DECISIONS.md`.
-
-### Re-tested depth-first afterwards
-
-Reps 1–4 were exercised before some of these fixes landed, so each was run again
-design by design on the current code. That second pass found the measurement
-defect above — answering with "4 beds, 3 baths, 2,450 square feet" wrote the
-person's words over the design's own "5 BEDS" and "6,348 SQFT", and no listing
-had ever had those filled correctly. It also surfaced one more for Chase: on
-New Listing with Open House the design's portrait is a cut-out, so a rectangular
-headshot fills the wider frame and covers the start of "REALTOR" beneath it.
-
-The whole flow was then proven end to end on the fixed code, in one thread on
-Deborah Manarin's New Listing with Open House: Gable posted the request, asked
-once for the only thing it lacked, took a one-line reply, delivered the flyer,
-and — after "Can you run this again? The price should be $560,000" — delivered a
-second one carrying the new price. Annie's Open House proved the same loop for a
-four-value answer.
-
-### Known limits of the test itself
-
-Three runs of about 210 failed transiently just after preflight and all three
-delivered on a rerun. Driving photo uploads through the Slack web client proved
-unreliable partway through the night, so the sweep used
-`run_row --hero-photo-url`; that flag carries a photo for one run only, which is
-why the three designs showing beds, baths and square footage stop at the ask
-rather than producing a flyer.
+Its seven fixes are in git with their commit hashes, and the two findings worth
+keeping are recorded where they are actually read: text width measured from the
+designs' own faces is `CLAUDE.md` §4.3 item 9, and Slides silently stripping
+U+E000 from replacement text is item 10. Its one open item — Sold overflowing
+its callout — was closed by the 2026-08-16 round 9 entry above, which ran all
+six designs with zero code defects.

@@ -220,23 +220,56 @@ class Poller:
                     )
                 wanted.append(submission)
                 continue
+            if self._record_skip(submission):
+                logger.info(
+                    "sheet row %d asks for %r, which needs no graphic; skipped",
+                    submission.sheet_row,
+                    intake.content_type,
+                )
+        return wanted
+
+    def _record_skip(self, submission: Submission) -> bool:
+        """Retire one submission terminally, in a single transaction.
+
+        The insert and the terminal status must land together or not at all. A
+        half-written skip leaves a `pending` run, and that is the worst
+        available outcome: `has_been_handled` already reports the row done so
+        nothing reconsiders it, `pending` is an ACTIVE status so `start_run`
+        refuses another attempt, and the next startup's
+        `recover_interrupted_runs` fails it and owes Carmen a Slack notice
+        about a Reel Gable promised to say nothing about. `adopt_backfill`
+        wraps the same pair for the same reason.
+
+        Args:
+            submission: The submission to retire.
+
+        Returns:
+            True when the skip is durably recorded. False leaves the row
+            untouched and pending, so the next pass tries again.
+
+        Raises:
+            Nothing. One unrecordable row must not stop the batch.
+        """
+        try:
+            # SAVEPOINT-based, so `start_run` and `set_status` nest inside this
+            # caller-owned transaction rather than committing independently.
+            self.connection.execute("BEGIN IMMEDIATE")
             try:
                 run = store.start_run(self.connection, submission.response_row_id)
                 store.set_status(
                     self.connection,
                     run.run_id,
                     "skipped",
-                    f"content type {intake.content_type!r} is video or animation",
+                    f"content type {submission.intake.content_type!r} is video or animation",
                 )
+                self.connection.execute("COMMIT")
             except Exception:
-                logger.exception("could not record the skip for sheet row %d", submission.sheet_row)
-                continue
-            logger.info(
-                "sheet row %d asks for %r, which needs no graphic; skipped",
-                submission.sheet_row,
-                intake.content_type,
-            )
-        return wanted
+                self.connection.execute("ROLLBACK")
+                raise
+        except Exception:
+            logger.exception("could not record the skip for sheet row %d", submission.sheet_row)
+            return False
+        return True
 
     def _wait(self, timeout: float | None) -> None:
         """Wait until the next scheduled pass or a shutdown request."""
