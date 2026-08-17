@@ -40,6 +40,14 @@ def summarize(outcomes: tuple[BatchOutcome, ...]) -> str:
         noun = "listing" if len(held) == 1 else "listings"
         facts.append(f"Held back  {len(held)} {noun} waiting for a person.")
     if skipped:
+        # NOT the Reel and Story path, despite how "non-flyer" reads. Those are
+        # retired in `poller._record_skip` before a run opens, so they never
+        # become a BatchOutcome and are never mentioned in Slack at all —
+        # Chase's instruction on 2026-08-17. This branch belongs to
+        # `Outcome.SKIP`, which as of 2026-08-17 nothing in the codebase
+        # produces; it is reachable only from a test. Kept rather than deleted
+        # because the state machine still declares the outcome, but do not read
+        # it as the content-type gate.
         noun = "request" if len(skipped) == 1 else "requests"
         facts.append(f"Skipped  {len(skipped)} non-flyer {noun}.")
     if failed:
