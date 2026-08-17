@@ -64,13 +64,20 @@ def _intake(**overrides: str) -> Intake:
 # --- the column map ---------------------------------------------------------
 
 
-def test_only_the_eleven_columns_chase_named_are_read() -> None:
-    assert set(COLUMNS) == {"B", "C", "E", "L", "N", "O", "P", "Q", "R", "S", "T"}
+def test_only_the_twelve_columns_that_matter_are_read() -> None:
+    assert set(COLUMNS) == {"B", "C", "E", "K", "L", "N", "O", "P", "Q", "R", "S", "T"}
 
 
-def test_column_k_is_deliberately_absent() -> None:
-    """Social media content type is out of scope; Gable makes flyers."""
-    assert "K" not in COLUMNS
+def test_column_k_is_read_because_it_decides_whether_to_build_at_all() -> None:
+    """Reversed on 2026-08-17.
+
+    This previously asserted the opposite — that the social-media content type
+    was out of scope because Gable makes flyers rather than reels. That was true
+    of what Gable *builds* and false about what it must *read*: 40 of the 112
+    live rows ask for a Reel or a Story, and without this column Gable would
+    have built a flyer for every one of them. Carmen confirmed the rule.
+    """
+    assert COLUMNS["K"] == 10
 
 
 def test_row_84_reads_correctly() -> None:

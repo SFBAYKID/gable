@@ -61,6 +61,11 @@ def _remove_v10_run_columns(connection: sqlite3.Connection) -> None:
     connection.execute("ALTER TABLE runs DROP COLUMN photo_event_id")
 
 
+def _remove_v13_submission_columns(connection: sqlite3.Connection) -> None:
+    """Restore submissions to its pre-v13 shape, without the content type."""
+    connection.execute("ALTER TABLE submissions DROP COLUMN content_type")
+
+
 def test_schema_six_migrates_through_current_durable_state(
     tmp_path: Path,
 ) -> None:
@@ -73,12 +78,13 @@ def test_schema_six_migrates_through_current_durable_state(
     connection.execute("DROP INDEX idx_spend_id_run")
     _remove_v10_template_columns(connection)
     _remove_v10_run_columns(connection)
+    _remove_v13_submission_columns(connection)
     connection.execute("DELETE FROM schema_version WHERE version >= 7")
     assert current_version(connection) == 6
 
-    assert apply_migrations(connection) == 6
+    assert apply_migrations(connection) == 7
 
-    assert current_version(connection) == SCHEMA_VERSION == 12
+    assert current_version(connection) == SCHEMA_VERSION == 13
     columns = connection.execute("PRAGMA table_info(operation_releases)").fetchall()
     assert [str(row["name"]) for row in columns] == [
         "id",
@@ -109,12 +115,13 @@ def test_deployed_schema_seven_gains_the_generalized_outbox(tmp_path: Path) -> N
     connection.execute("DROP TABLE slack_event_claims")
     _remove_v10_template_columns(connection)
     _remove_v10_run_columns(connection)
+    _remove_v13_submission_columns(connection)
     connection.execute("DELETE FROM schema_version WHERE version >= 8")
     assert current_version(connection) == 7
 
-    assert apply_migrations(connection) == 5
+    assert apply_migrations(connection) == 6
 
-    assert current_version(connection) == SCHEMA_VERSION == 12
+    assert current_version(connection) == SCHEMA_VERSION == 13
     columns = {
         str(row["name"])
         for row in connection.execute("PRAGMA table_info(run_questions)").fetchall()

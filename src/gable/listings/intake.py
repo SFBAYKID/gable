@@ -1,13 +1,20 @@
-"""The eleven columns that matter, and what each one means.
+"""The twelve columns that matter, and what each one means.
 
-Chase named them: **B, C, E, L, N, O, P, Q, R, S, T**. Everything else on the
-form is deliberately ignored — the postcard branch and the video branch are
-unused (0 of 99 rows), and column K, the social-media content type, is out of
-scope because Gable makes flyers rather than reels.
+Chase named eleven — **B, C, E, L, N, O, P, Q, R, S, T** — and the
+social-media content type joined them on 2026-08-17. Everything else on the
+form is deliberately ignored: the postcard branch and the video branch are
+unused (0 of 112 rows).
 
 Column E is the hinge. Its value is the request type, and the source template in
 Generic Templates must carry that exact human-visible name. That is the whole
 routing decision; no ranked catalogue or agent override participates.
+
+The content type is the **gate**, and it runs before the hinge. Carmen confirmed
+on 2026-08-17 that only the static posts are graphics — an Instagram Reel or an
+Instagram Story is video or animation, and nobody wants a flyer for one. That is
+not a rare branch: of the 112 rows on the live tab, 40 ask for a Reel or a
+Story. Gable builds nothing for them, says nothing about them, and records them
+terminally so they are never reopened. `wants_a_graphic` is that decision.
 
 The second idea here is **completeness**. A template must never ship with a
 publicly knowable fact it displays left blank. Square footage, beds and baths
@@ -33,20 +40,29 @@ from typing import Final
 
 from gable.listings.headers import fold_header
 
-#: Spreadsheet letters to zero-based indices on `Form Responses 1`, so this
-#: module can be read against that tab itself. Only the eleven Chase named.
+#: Spreadsheet letters to zero-based indices, in the shape `Form Responses 1`
+#: had on 2026-08-12, so this module can be read against a real tab.
 #:
-#: **These positions are a fallback, not the mechanism.** `columns_from_header`
-#: reads the tab's own header row, because a position is only true of one tab:
-#: `Testing_1` splits the agent's name into `First Name` and `Second Name`,
-#: which shifts every column from D rightward by one. Read positionally, that
-#: tab yields the acknowledgment blob as the request type and the words
-#: "Instagram Story" as the property address — confirmed against row 78 on
-#: 2026-08-12, and both are the kind of wrong that still looks like data.
+#: **These positions are a fallback, not the mechanism, and they no longer
+#: describe any live tab.** `columns_from_header` reads the tab's own header
+#: row, because a position is only true of one tab on one day. `Testing_1`
+#: splits the agent's name into `First Name` and `Second Name`, which shifts
+#: every column from D rightward by one; read positionally, that tab yields the
+#: acknowledgment blob as the request type and the words "Instagram Story" as
+#: the property address — confirmed against row 78 on 2026-08-12, and both are
+#: the kind of wrong that still looks like data.
+#:
+#: `Form Responses 1` has since made the same split — it now asks "First Name of
+#: Agent" and "Last Name of Agent" and has dropped its trailing `Notes` column,
+#: so it too sits one column right of the map below. Read positionally today it
+#: would return the content type as the property address. Confirmed live
+#: 2026-08-17. Nothing reads these positions in production; the map is kept
+#: because it documents the original shape the header rules were written from.
 COLUMNS: Final[dict[str, int]] = {
     "B": 1,  # Email Address — the join key to the mirrored contact roster
     "C": 2,  # Name of Agent
     "E": 4,  # Select your request type — picks the same-named source
+    "K": 10,  # Select social media content type — the build-or-skip gate
     "L": 11,  # Property Address
     "N": 13,  # Include details for post
     "O": 14,  # Open house date/time (if applicable)
@@ -62,6 +78,7 @@ DEFAULT_COLUMNS: Final[dict[str, int]] = {
     "agent_email": COLUMNS["B"],
     "agent_name": COLUMNS["C"],
     "request_type": COLUMNS["E"],
+    "content_type": COLUMNS["K"],
     "address": COLUMNS["L"],
     "post_details": COLUMNS["N"],
     "open_house": COLUMNS["O"],
@@ -95,6 +112,10 @@ HEADER_RULES: Final[tuple[tuple[str, str, str], ...]] = (
     ("agent_last_name", "prefix", "second name"),
     ("agent_last_name", "prefix", "last name"),
     ("request_type", "exact", "select your request type"),
+    # Prefix rather than exact only because the form has re-worded questions
+    # before. Both live tabs carry it verbatim as "Select social media content
+    # type" — confirmed on `Form Responses 1` and `Testing_1` on 2026-08-17.
+    ("content_type", "prefix", "select social media content type"),
     ("address", "exact", "property address"),
     ("post_details", "prefix", "include details for post"),
     ("open_house", "prefix", "open house date/time"),
@@ -180,6 +201,70 @@ REQUEST_TYPE_TO_CATEGORY: Final[dict[str, str]] = {
     "end of year brag post": "",  # no design exists for this yet
 }
 
+#: Content types that mean a still graphic, case-folded. Both wordings are live:
+#: 55 rows say "Static Instagram/Facebook Post" and 16 say "Static Instagram
+#: Post". They are the same job — one 4:5 design, which Facebook reuses — so
+#: neither changes template selection, only the decision to build at all.
+GRAPHIC_CONTENT_TYPES: Final[frozenset[str]] = frozenset(
+    {
+        "static instagram/facebook post",
+        "static instagram post",
+    }
+)
+
+#: Content types that are video or animation, which Carmen's team makes by hand.
+#: Carmen confirmed on 2026-08-17: "only the static posts are graphics. The rest
+#: are either videos or have animation." 40 of 112 live rows are one of these.
+ANIMATED_CONTENT_TYPES: Final[frozenset[str]] = frozenset(
+    {
+        "instagram reel",
+        "instagram story",
+    }
+)
+
+
+def wants_a_graphic(content_type: str) -> bool:
+    """Whether this submission asks for something Gable can build.
+
+    Case-folded because the form's own values are inconsistent — one live row
+    says "Instagram reel" in lower case, exactly as one says "just listed".
+
+    Args:
+        content_type: The social-media content type, as the sheet returns it.
+
+    Returns:
+        False for a Reel or a Story. True for everything else, **including an
+        empty or unrecognised value**. The asymmetry is deliberate: an extra
+        design Carmen ignores costs her a glance, while a silently skipped one
+        is a request that disappears without anybody being told. Only the two
+        types Carmen named are skipped, and a new form option therefore has to
+        be added here rather than being guessed at.
+
+    Raises:
+        Nothing.
+    """
+    return content_type.strip().casefold() not in ANIMATED_CONTENT_TYPES
+
+
+def is_known_content_type(content_type: str) -> bool:
+    """Whether the form's content type is one Gable has been taught.
+
+    Used only to log an unrecognised value, so a new form option surfaces as a
+    log line rather than as a design nobody expected.
+
+    Args:
+        content_type: The social-media content type, as the sheet returns it.
+
+    Returns:
+        True when the value is a known graphic or a known animated type.
+
+    Raises:
+        Nothing.
+    """
+    folded = content_type.strip().casefold()
+    return folded in GRAPHIC_CONTENT_TYPES or folded in ANIMATED_CONTENT_TYPES
+
+
 #: Categories whose designs legitimately carry no property address. A client
 #: review is a testimonial, a meet-the-agent is a profile and a neighborhood
 #: post is about an area — none of them is about one house.
@@ -210,6 +295,22 @@ class Intake:
     extra_notes: str
     side: str
     notes: str
+    #: The social-media content type. Defaults to empty so the many synthetic
+    #: `Intake`s in tests and tools need not carry one; empty means "build",
+    #: which is the safe direction. `from_row` always supplies the real value.
+    content_type: str = ""
+
+    @property
+    def wants_a_graphic(self) -> bool:
+        """Whether Gable should build anything at all for this submission.
+
+        Returns:
+            False for an Instagram Reel or Story, which are video or animation.
+
+        Raises:
+            Nothing.
+        """
+        return wants_a_graphic(self.content_type)
 
     @property
     def category(self) -> str:
@@ -313,6 +414,7 @@ def from_row(row: list[str], columns: Mapping[str, int] | None = None) -> Intake
         extra_notes=cell("extra_notes"),
         side=cell("side"),
         notes=cell("notes"),
+        content_type=cell("content_type"),
     )
 
 

@@ -280,6 +280,20 @@ call on 2026-08-12:
     `slides/replacement.py` uses plain ASCII. Observed on a real render
     2026-08-14, and caught by the occurrence check rather than delivered.
 
+11. **A third of submissions do not want a graphic, and the live tab has
+    shifted.** Read through the service account on 2026-08-17: of the 112 rows
+    on `Form Responses 1`, 55 ask for `Static Instagram/Facebook Post`, 31 for
+    `Instagram Reel`, 16 for `Static Instagram Post`, 8 for `Instagram Story`
+    and one for `Instagram reel` in lower case. Carmen confirmed only the static
+    posts are graphics. The same read showed the live tab now splits the agent's
+    name into `First Name of Agent` and `Last Name of Agent` and has dropped its
+    trailing `Notes` column, so every column from D rightward sits one further
+    right than the transcription the positional fallback was written from — read
+    positionally today it returns the content type as the property address. This
+    cost nothing because `columns_from_header` is the mechanism, which is the
+    point of item 4.3-style evidence: the fallback in `intake.COLUMNS` documents
+    a shape that no longer exists and must never become load-bearing.
+
 Each of these cost a real failure to learn. They are in the decision log with
 their evidence.
 

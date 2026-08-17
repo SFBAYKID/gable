@@ -27,7 +27,7 @@ from typing import Final
 
 #: Bumped whenever a migration is added. `apply_migrations` uses it to decide
 #: what still needs running.
-SCHEMA_VERSION: Final[int] = 12
+SCHEMA_VERSION: Final[int] = 13
 
 #: Each migration is (version, sql). They run in order and only once. Never edit
 #: one that has shipped — add another, the same rule as the decision log.
@@ -411,6 +411,20 @@ MIGRATIONS: Final[tuple[tuple[int, str], ...]] = (
             stated_by       TEXT NOT NULL DEFAULT '',
             stated_at       TEXT NOT NULL
         );
+        """,
+    ),
+    (
+        13,
+        """
+        -- The form's social-media content type, which decides whether a
+        -- graphic is wanted at all: a Reel or a Story is video or animation and
+        -- Gable builds nothing for it. Stored because a submission reloaded
+        -- from here must equal the one that was written — a resumed thread that
+        -- silently lost this field would read every stored row as "build".
+        --
+        -- Defaults to empty, which means "build". Rows recorded before this
+        -- migration therefore keep the behaviour they already had.
+        ALTER TABLE submissions ADD COLUMN content_type TEXT NOT NULL DEFAULT '';
         """,
     ),
 )

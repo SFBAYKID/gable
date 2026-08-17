@@ -183,12 +183,29 @@ nine listed here until 2026-08-12 came from a browser reading taken before API
 access existed.
 
 **Columns are found by header text, never by position** (`listings/intake.py`).
-The eleven Gable reads are `Email Address`, `Name of Agent` — or a `First Name`
-and `Second Name` pair — `Select your request type`, `Property Address`,
-`Include details for post`, `Open house date/time`, `New price`, `Closing
-price`, `Additional Notes for Social Media Team`, the buyer-or-seller side, and
-`Notes`. Column A is the timestamp and is reconciliation evidence, but the live
-workbook proves it is not unique: six pairs currently share timestamps.
+The twelve Gable reads are `Email Address`, `Name of Agent` — or a `First Name`
+and `Second Name` pair — `Select your request type`, `Select social media
+content type`, `Property Address`, `Include details for post`, `Open house
+date/time`, `New price`, `Closing price`, `Additional Notes for Social Media
+Team`, the buyer-or-seller side, and `Notes`. Column A is the timestamp and is
+reconciliation evidence, but the live workbook proves it is not unique: six
+pairs currently share timestamps.
+
+**The content type decides whether Gable builds at all**, and it is checked in
+the poller before any run opens. Carmen confirmed on 2026-08-17 that only the
+static posts are graphics: an `Instagram Reel` or an `Instagram Story` is video
+or animation her team makes by hand. Those rows are recorded `skipped` and
+nothing is posted about them — Chase's instruction, and at 40 of the 112 live
+rows a notice per row would be noise. `Static Instagram/Facebook Post` and
+`Static Instagram Post` are the same job and both build. Anything else,
+including a blank, builds: an extra design costs Carmen a glance, while a
+silent skip is a request that disappears with nobody told.
+
+The live tab has since made the same split `Testing_1` had — it asks `First Name
+of Agent` and `Last Name of Agent` and has dropped its trailing `Notes` column,
+so it too now sits one column right of the original transcription. Confirmed
+2026-08-17. Nothing reads positions in production, which is why this cost
+nothing; the fallback map in `intake.COLUMNS` documents the original shape only.
 
 Position was the original mechanism and it broke on the first tab shaped
 differently: `Testing_1` splits the agent's name across two columns, shifting

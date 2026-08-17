@@ -3,6 +3,14 @@
 The headers below are transcriptions of the live sheet, read through the service
 account on 2026-08-12. They are the point of these tests: a fixture that invents
 header text proves the matcher works on a tab nobody has.
+
+`LIVE_HEADER` is that 2026-08-12 shape and is **no longer what the live tab
+looks like**. Re-read on 2026-08-17, `Form Responses 1` splits the name into
+`First Name of Agent` / `Last Name of Agent` and has dropped its trailing
+`Notes`, so it now sits one column right of this — much closer to `Testing_1`.
+The current shape is exercised in `tests/test_content_type_gate.py`. This
+fixture is kept because it is the shape `DEFAULT_COLUMNS` was written from, and
+the pair proves the matcher survives the form being edited underneath it.
 """
 
 from __future__ import annotations

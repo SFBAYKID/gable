@@ -64,12 +64,24 @@ def main(argv: list[str] | None = None) -> int:
         client = SheetClient.build(settings.google_service_account_file, settings.sheet_id)
         submissions = repo.read_submissions(client, settings.tab_responses)
         pending = pending_submissions(connection, submissions)
+        would_build = [item for item in pending if item.intake.wants_a_graphic]
+        would_skip = [item for item in pending if not item.intake.wants_a_graphic]
         print(f"Rows read: {len(submissions)}")
-        print(f"Unhandled rows polling would start: {len(pending)}")
-        for item in pending:
+        print(f"Unhandled rows polling would start: {len(would_build)}")
+        for item in would_build:
             print(
                 f"row {item.sheet_row}: {item.submitted_at} | {item.content_hash} | "
                 f"{item.intake.request_type} | {item.intake.address}"
+            )
+        # Reported separately because these produce no design and no Slack
+        # message. They are not nothing: each still writes one terminal `runs`
+        # row, so `--expect-none` counts them and stays exactly as strict as it
+        # was. Splitting them only stops a Reel reading as pending flyer work.
+        print(f"Unhandled rows polling would skip as video or animation: {len(would_skip)}")
+        for item in would_skip:
+            print(
+                f"row {item.sheet_row}: {item.submitted_at} | "
+                f"{item.intake.content_type} | {item.intake.address}"
             )
         if args.expect_none and pending:
             return 1

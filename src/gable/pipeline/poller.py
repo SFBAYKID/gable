@@ -29,9 +29,12 @@ from sqlite3 import Connection
 from types import FrameType
 from typing import Final
 
+from gable.db import store
+from gable.listings.intake import is_known_content_type
 from gable.pipeline.schedule import PollSchedule
 from gable.sheets import repository as repo
 from gable.sheets.client import ReadsRanges, SheetError
+from gable.sheets.identity import Submission
 
 logger = logging.getLogger("gable.poller")
 
@@ -150,6 +153,8 @@ class Poller:
         except Exception:
             logger.exception("could not reconcile the current sheet rows this pass")
             return 0
+
+        pending = self._drop_animated(pending)
         if not pending:
             return 0
 
@@ -179,6 +184,59 @@ class Poller:
                 # failed cycle or cause it to be retried.
                 logger.exception("could not post the batch summary")
         return started
+
+    def _drop_animated(self, pending: list[Submission]) -> list[Submission]:
+        """Retire the submissions that never wanted a graphic.
+
+        A Reel or a Story is video or animation, which Carmen's team makes by
+        hand. Each is recorded terminally so polling never reopens it, and
+        nothing is posted: Chase's instruction on 2026-08-17 was to skip them
+        silently, and at 40 of 112 live rows a notice per row would be noise.
+
+        Args:
+            pending: Submissions this pass would otherwise start.
+
+        Returns:
+            Only the submissions that want a graphic, in the order given. One
+            whose skip could not be recorded is withheld too and retried next
+            pass — building it is the one wrong answer available here.
+
+        Raises:
+            Nothing. A skip that cannot be recorded is logged, not raised, so
+            one bad row cannot stop the batch (ARCHITECTURE 4.2).
+        """
+        wanted: list[Submission] = []
+        for submission in pending:
+            intake = submission.intake
+            if intake.wants_a_graphic:
+                if not is_known_content_type(intake.content_type):
+                    # Not an error — an unrecognised or empty value still
+                    # builds. Logged so a new form option surfaces here rather
+                    # than as a design nobody expected.
+                    logger.info(
+                        "sheet row %d has an unrecognised content type %r; building anyway",
+                        submission.sheet_row,
+                        intake.content_type,
+                    )
+                wanted.append(submission)
+                continue
+            try:
+                run = store.start_run(self.connection, submission.response_row_id)
+                store.set_status(
+                    self.connection,
+                    run.run_id,
+                    "skipped",
+                    f"content type {intake.content_type!r} is video or animation",
+                )
+            except Exception:
+                logger.exception("could not record the skip for sheet row %d", submission.sheet_row)
+                continue
+            logger.info(
+                "sheet row %d asks for %r, which needs no graphic; skipped",
+                submission.sheet_row,
+                intake.content_type,
+            )
+        return wanted
 
     def _wait(self, timeout: float | None) -> None:
         """Wait until the next scheduled pass or a shutdown request."""

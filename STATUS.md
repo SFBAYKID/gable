@@ -1,6 +1,41 @@
 # Gable — status, and what's needed from Chase
 
-Last updated 2026-08-16 by the building agent.
+Last updated 2026-08-17 by the building agent.
+
+## 2026-08-17 — Reels and Stories are skipped, silently
+
+Carmen confirmed to Chase that only the static posts are graphics; an Instagram
+Reel or Story is video or animation her team makes by hand. The form has always
+carried that answer in `Select social media content type`, and Gable has always
+ignored it, so every Reel would have become a flyer. **40 of the 112 live rows
+ask for a Reel or a Story** — better than a third of everything submitted.
+
+The poller now checks the content type before opening a run, records the skip
+terminally so it never reopens, and posts nothing about it. Silence is Chase's
+call. An unknown or blank value still builds, because an extra design costs
+Carmen a glance while a silent skip is a request that disappears with nobody
+told; unknown values are logged so a new form option surfaces there.
+
+Two things were found on the way and are worth knowing:
+
+- **The live `Form Responses 1` has changed shape.** It now splits the agent's
+  name into `First Name of Agent` / `Last Name of Agent` and has dropped its
+  trailing `Notes` column, so every column from D rightward moved one right.
+  Nothing broke, because columns are found by header text — but the positional
+  fallback in `intake.COLUMNS` now describes a tab that does not exist, and the
+  `LIVE_HEADER` fixture in `tests/test_intake_headers.py` is a transcription of
+  the older shape. Both are labelled as such rather than silently trusted.
+- **`content_type` did not survive a database round-trip** until schema v13
+  added it. A submission reloaded for a resumed thread would have read as
+  "build" regardless of what the form said.
+
+### Owed, not blocking
+
+`src/gable/listings/intake.py` is 750 lines. That is under the 800 hard ceiling
+and over the 300–500 target, and it was already over before this change. It
+wants a split — the column mapping, the content-type gate and the
+coherence/completeness rules are three separate concerns — but doing it inside a
+scope change would make this diff unreviewable.
 
 ## 2026-08-16 — Gable is live in #calvo with Carmen
 

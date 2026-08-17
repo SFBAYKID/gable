@@ -217,7 +217,7 @@ def record_submission(
                    SET sheet_row = ?, submitted_at = ?, agent_email = ?, agent_name = ?,
                        request_type = ?, address = ?, post_details = ?, open_house = ?,
                        new_price = ?, closing_price = ?, extra_notes = ?, side = ?,
-                       notes = ?, content_hash = ?, source_tab = ?
+                       notes = ?, content_type = ?, content_hash = ?, source_tab = ?
                  WHERE response_row_id = ?
                 """,
                 (
@@ -234,6 +234,7 @@ def record_submission(
                     intake.extra_notes,
                     intake.side,
                     intake.notes,
+                    intake.content_type,
                     content_hash or str(existing["content_hash"] or ""),
                     clean_tab or str(existing["source_tab"] or ""),
                     response_row_id,
@@ -245,9 +246,9 @@ def record_submission(
         INSERT INTO submissions (
             response_row_id, sheet_row, submitted_at, agent_email, agent_name,
             request_type, address, post_details, open_house, new_price,
-            closing_price, extra_notes, side, notes, first_seen_at, content_hash,
-            source_tab
-        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            closing_price, extra_notes, side, notes, content_type, first_seen_at,
+            content_hash, source_tab
+        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
         """,
         (
             response_row_id,
@@ -264,6 +265,7 @@ def record_submission(
             intake.extra_notes,
             intake.side,
             intake.notes,
+            intake.content_type,
             _now(),
             content_hash,
             source_tab.strip(),
@@ -291,7 +293,8 @@ def load_submission(
         """
         SELECT response_row_id, sheet_row, submitted_at, agent_email, agent_name,
                request_type, address, post_details, open_house, new_price,
-               closing_price, extra_notes, side, notes, content_hash, source_tab
+               closing_price, extra_notes, side, notes, content_type, content_hash,
+               source_tab
           FROM submissions
          WHERE response_row_id = ?
         """,
@@ -323,6 +326,7 @@ def load_submission(
             extra_notes=row["extra_notes"],
             side=row["side"],
             notes=row["notes"],
+            content_type=str(row["content_type"] or ""),
         ),
         content_hash=row["content_hash"],
         source_tab=str(row["source_tab"] or ""),

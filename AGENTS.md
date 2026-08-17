@@ -171,6 +171,14 @@ four are actually ready.
 There is no attachment and nothing to download. Each listing was already posted
 individually with a link to its own file; this message only summarises.
 
+A submission asking for an Instagram Reel or Story is **not** a held-back
+listing and never appears here or anywhere else in Slack. It asked for video or
+animation, which Carmen's team makes by hand, so there was never a post to hold
+back. Gable records it and says nothing — Chase's instruction on 2026-08-17,
+and at better than a third of submissions a line about each one is noise. A
+pass that finds only Reels and Stories posts no summary at all, because a
+summary is still a message.
+
 ### 2.6 Confirming an ambiguous request
 
 Gable restates what it understood and waits. It does not take the likely reading.
