@@ -102,3 +102,52 @@ def test_the_words_a_question_uses_map_back_to_the_field_it_fills() -> None:
 
     for field_name in ("open_house", "list_price", "square_feet", "new_price", "beds"):
         assert internal_name(readable(field_name)) == field_name
+
+
+def test_a_blocker_is_asked_with_the_photo_not_before_it() -> None:
+    """Lina Mariner's listing asked for a headshot and nothing else.
+
+    It was equally certain it would need the property photo, so Carmen would
+    have answered, been asked again, and answered again.
+    """
+    outstanding = needs.Needs()
+    outstanding.add_blocker("I could not find a headshot for Lina Mariner.", "needs_info")
+    outstanding.photo = True
+
+    message = outstanding.message()
+    assert "headshot" in message
+    assert "property photo" in message
+    assert "\n\n" in message, "a blocker and an ask are different things"
+    assert outstanding.status() == "needs_info"
+
+
+def test_every_blocker_is_reported_not_only_the_first() -> None:
+    """Reporting one hides the next until the first is fixed."""
+    outstanding = needs.Needs()
+    outstanding.add_blocker("First design problem.", "needs_info")
+    outstanding.add_blocker("Second design problem.", "needs_info")
+    outstanding.add_blocker("First design problem.")
+
+    assert outstanding.blockers == ["First design problem.", "Second design problem."]
+    assert "Second design problem." in outstanding.message()
+
+
+def test_the_photo_is_named_only_when_a_blocker_sits_above_it() -> None:
+    """ "Can you send me the image?" under a headshot sentence means two images."""
+    plain = needs.Needs()
+    plain.photo = True
+    assert plain.message() == needs.PHOTO_ONLY_ASK
+
+    blocked = needs.Needs()
+    blocked.photo = True
+    blocked.add_blocker("Add a headshot image to Head Shots.", "needs_info")
+    assert needs.PHOTO_ONLY_ASK not in blocked.message()
+    assert "property photo" in blocked.message()
+
+
+def test_a_blocker_alone_still_stops_the_build() -> None:
+    """Nothing outstanding but a blocker must not fall through to building."""
+    outstanding = needs.Needs()
+    outstanding.add_blocker("More than one agent-photo spot.", "needs_info")
+    assert outstanding.anything
+    assert outstanding.status() == "needs_info"

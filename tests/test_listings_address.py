@@ -120,3 +120,24 @@ def test_a_unit_stays_with_the_street_and_the_city_still_gets_its_comma() -> Non
 def test_a_unit_with_no_city_after_it_is_left_alone() -> None:
     """Nothing follows the unit, so there is no city to separate."""
     assert tidy("100 Main St Unit 5") == "100 Main St Unit 5"
+
+
+def test_a_trailing_country_does_not_cost_a_round_trip() -> None:
+    """Address autocomplete appends it; every shape check ends at the ZIP.
+
+    A real submission arrived as "225 N Wycombe Ave Upper Darby, PA 19082
+    United States". The country left the text ending past the ZIP, the shape
+    check failed, and Gable asked Carmen for an address the form already held.
+    """
+    for written in (
+        "225 N Wycombe Ave Upper Darby, PA  19082 United States",
+        "225 N Wycombe Ave Upper Darby, PA 19082 USA",
+        "225 N Wycombe Ave Upper Darby, PA 19082, United States of America",
+    ):
+        assert tidy(written) == "225 N Wycombe Ave Upper Darby, PA 19082"
+
+
+def test_a_street_is_not_mistaken_for_a_country() -> None:
+    """The pattern is anchored at the end, so these are untouched."""
+    assert tidy("100 US Highway 1, Trenton, NJ 08608").endswith("NJ 08608")
+    assert tidy("12 Usaquen Way, Baltimore, MD 21201") == "12 Usaquen Way, Baltimore, MD 21201"

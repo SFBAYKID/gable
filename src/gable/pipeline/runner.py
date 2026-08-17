@@ -383,10 +383,14 @@ class Runner:
         # what gets filled. Measuring one string and writing another would put
         # the overflow back on the flyer.
         values.update(measured.adjusted)
-        blockers = preflight.blocking_after_release(measured, gathering)
-        if blockers:
-            issue = blockers[0]
-            return self._ask(run_id, intake, issue.say, [], result, status=issue.status)
+        # A blocker used to return here with its own sentence and nothing else,
+        # so Lina Mariner's New Listing asked for a headshot and never mentioned
+        # the property photo it was equally certain to need. Carmen would have
+        # answered, been asked again, and answered again. Blockers now join the
+        # one batched ask below — every one of them, because reporting only the
+        # first hides the second until the first is fixed.
+        for issue in preflight.blocking_after_release(measured, gathering):
+            outstanding.add_blocker(issue.say, issue.status)
         # Correctable layout work is Gable's job. Text is fitted to the largest
         # readable size and a supplied photo is center-cropped to the measured
         # frame; neither becomes another Slack question. The notes are folded

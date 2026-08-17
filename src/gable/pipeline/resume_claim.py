@@ -24,11 +24,15 @@ logger = logging.getLogger("gable.resume")
 
 #: The paused states a Slack photo upload may resume. `needs_photo` is a run
 #: that asked for a photograph; `needs_review` is one whose flyer was built and
-#: withheld, which is where the visual gate parks a photo it will not accept.
-#: Both hold an unsent draft, so a replacement image is welcome in either, and
-#: a run in review that refused one was a dead end — the only thing that fixes
-#: it was the only thing it would not take.
-PHOTO_RESUME_STATES: Final[frozenset[str]] = frozenset({"needs_photo", "needs_review"})
+#: withheld, which is where the visual gate parks a photo it will not accept;
+#: `needs_info` is one stopped on a preflight blocker, which now asks for the
+#: photograph in the same breath and so must be able to take it. All three hold
+#: an unsent draft, so a replacement image is welcome in any of them, and a run
+#: that refused one was a dead end — the only thing that fixes it was the only
+#: thing it would not take.
+PHOTO_RESUME_STATES: Final[frozenset[str]] = frozenset(
+    {"needs_photo", "needs_review", "needs_info"}
+)
 
 #: Said when another worker owns the run. Deliberately not said when the loser
 #: is a duplicate delivery of the same upload; see `Claim.duplicate`.

@@ -7,7 +7,9 @@ Spring, MD, 20902`. Each is understandable and none is presentable: this text
 is set at 44pt across the middle of a flyer that goes to a client.
 
 So the rules here are deliberately conservative. Capitalisation, punctuation and
-spacing are fixed; **nothing is added, removed, corrected or reordered**. A
+spacing are fixed; **nothing is added, corrected or reordered**, and the only
+thing removed is a trailing country, which no design prints and which fails
+every shape check downstream. A
 misspelled street stays misspelled and a missing state stays missing, because
 inventing either would put a different address on a flyer for a real property —
 which is worse than an untidy one, and invisible to anyone checking.
@@ -143,6 +145,18 @@ _ORDINAL: Final[re.Pattern[str]] = re.compile(r"^\d+(st|nd|rd|th)$", re.IGNORECA
 _ZIP: Final[re.Pattern[str]] = re.compile(r"^\d{5}(-\d{4})?$")
 _MC: Final[re.Pattern[str]] = re.compile(r"^(mc|mac)([a-z]{2,})$", re.IGNORECASE)
 
+#: A country appended to an otherwise complete address. Address autocomplete
+#: adds it, so a real submission arrived as "225 N Wycombe Ave Upper Darby, PA
+#: 19082 United States". Every downstream check requires the text to end at the
+#: ZIP, so the address failed validation and Gable asked Carmen to retype one
+#: the form already held, correctly — the same failure the lower-case-state bug
+#: caused, one regex away. Anchored at the end, so a street carrying these
+#: letters mid-address is untouched.
+_TRAILING_COUNTRY: Final[re.Pattern[str]] = re.compile(
+    r"[,\s]+(?:united\s+states(?:\s+of\s+america)?|u\.?\s*s\.?\s*a\.?)\s*$",
+    re.IGNORECASE,
+)
+
 
 def _word(token: str) -> str:
     """Capitalise one token according to what it is.
@@ -198,9 +212,11 @@ def tidy(address: str) -> str:
         caller should treat as a missing address rather than an error here.
 
     Note:
-        Nothing is added, removed or reordered. A street name spelled wrong on
-        the form stays wrong on the flyer, because the alternative is guessing
-        at a real property's address and being confidently mistaken.
+        Nothing is added or reordered, and the only thing removed is a trailing
+        country, which no design prints and which otherwise fails every shape
+        check downstream. A street name spelled wrong on the form stays wrong on
+        the flyer, because the alternative is guessing at a real property's
+        address and being confidently mistaken.
     """
     if not address or not address.strip():
         return ""
@@ -210,6 +226,11 @@ def tidy(address: str) -> str:
     # commas floating between spaces.
     collapsed = re.sub(r"\s*,\s*", ", ", " ".join(address.split()))
     collapsed = re.sub(r"(,\s*)+", ", ", collapsed).strip().strip(",").strip()
+    # The one thing this function removes, and it is removed because it is not
+    # part of the address any design prints: every template writes a US street,
+    # city, state and ZIP. Left in place it ends the string after the ZIP, which
+    # fails the shape check and turns a complete address into a question.
+    collapsed = _TRAILING_COUNTRY.sub("", collapsed).strip().strip(",").strip()
 
     tokens = collapsed.split(" ")
     out: list[str] = []

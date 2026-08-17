@@ -112,6 +112,11 @@ _LEAVE_OUT: Final[str] = (
 #: case and this wording is what the thread has always opened with.
 PHOTO_ONLY_ASK: Final[str] = "Can you send me the image?"
 
+#: The same ask when a blocker sits above it. "Can you send me the image?" under
+#: a sentence about a missing headshot names two different images and reads as
+#: one, so the photograph is named explicitly wherever both appear together.
+PHOTO_ASK_BESIDE_A_BLOCKER: Final[str] = "Separately, can you send me the property photo?"
+
 
 def readable(name: str) -> str:
     """Turn an internal field name into the words a person would use.
@@ -151,6 +156,14 @@ class Needs:
     values: list[str] = field(default_factory=list)
     #: Whether the property photograph is still missing.
     photo: bool = False
+    #: Whole sentences from a preflight check that stops the build — a design
+    #: with no headshot on file for its agent, say. These used to return on the
+    #: spot, so Lina Mariner's listing asked for a headshot and said nothing
+    #: about the property photo it was equally certain to need, turning one
+    #: round trip into two.
+    blockers: list[str] = field(default_factory=list)
+    #: The paused state a blocker asks for, when one did.
+    blocked_status: str = ""
 
     def add_value(self, name: str) -> None:
         """Record one missing value, ignoring blanks and repeats.
@@ -177,10 +190,26 @@ class Needs:
         for name in names:
             self.add_value(name)
 
+    def add_blocker(self, say: str, status: str = "") -> None:
+        """Record one preflight sentence that stops the build.
+
+        Args:
+            say: The whole sentence, already in Carmen's words.
+            status: The paused state it asks for, if it names one.
+
+        Raises:
+            Nothing.
+        """
+        sentence = " ".join(say.split())
+        if sentence and sentence not in self.blockers:
+            self.blockers.append(sentence)
+        if status and not self.blocked_status:
+            self.blocked_status = status
+
     @property
     def anything(self) -> bool:
         """Whether there is anything at all to ask for."""
-        return self.photo or bool(self.values)
+        return self.photo or bool(self.values) or bool(self.blockers)
 
     def message(self) -> str:
         """The single ask covering every outstanding need.
@@ -196,12 +225,23 @@ class Needs:
         """
         if not self.anything:
             return ""
+        lead = " ".join(self.blockers)
+        photo_ask = PHOTO_ASK_BESIDE_A_BLOCKER if lead else PHOTO_ONLY_ASK
         if self.photo and not self.values:
-            return PHOTO_ONLY_ASK
-        listed = _listed(self.values)
-        if self.photo:
-            return f"{PHOTO_ONLY_ASK} I also need the {listed}. {_LEAVE_OUT}"
-        return f"I still need the {listed}. {_LEAVE_OUT}"
+            rest = photo_ask
+        elif self.values:
+            listed = _listed(self.values)
+            rest = (
+                f"{photo_ask} I also need the {listed}. {_LEAVE_OUT}"
+                if self.photo
+                else f"I still need the {listed}. {_LEAVE_OUT}"
+            )
+        else:
+            rest = ""
+        # A blocker and an ask are two different things — one is work only a
+        # person can do outside Slack, the other is something to send back — so
+        # they are separate paragraphs rather than one run-on sentence.
+        return "\n\n".join(part for part in (lead, rest) if part)
 
     def status(self) -> str:
         """The paused state this ask leaves the run in.
@@ -213,6 +253,8 @@ class Needs:
         Raises:
             Nothing.
         """
+        if self.blocked_status:
+            return self.blocked_status
         return "needs_photo" if self.photo else "needs_info"
 
 
