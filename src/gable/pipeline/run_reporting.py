@@ -345,6 +345,7 @@ def delivery_message(
     advisories: list[str],
     left_blank: list[str],
     price_missing_note: str = "",
+    noticed: str = "",
 ) -> str:
     """Assemble the one message that delivers a finished flyer.
 
@@ -356,6 +357,9 @@ def delivery_message(
         advisories: Correctable layout work Gable already did.
         left_blank: Plain-words names of fields nobody supplied.
         price_missing_note: The existing missing-price sentence, if any.
+        noticed: What a check found wrong with the flyer being sent. Placed
+            directly under the link, before every other note, so the trim in
+            `voice.shorten` can never be what removes it.
 
     Returns:
         One house-style message carrying the link and every useful detail, so
@@ -373,9 +377,18 @@ def delivery_message(
             "I did my best to fit this image to the frame. If you have a "
             "higher-quality version, send it here and I will run it again."
         )
+    # A flyer that a check disliked is still delivered, so the opening line must
+    # not call it finished when it is not. Carmen sees every post before a client
+    # does, and she can only judge a flyer she is able to open.
+    opening = (
+        f"Here it is. <{output_url}|Open the flyer>"
+        if noticed
+        else f"Your flyer is ready. <{output_url}|Open the flyer>"
+    )
     return safe(
         paragraphs(
-            f"Your flyer is ready. <{output_url}|Open the flyer>",
+            opening,
+            noticed,
             *run_notes,
             photo,
             fit,

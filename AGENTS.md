@@ -501,12 +501,24 @@ indefinitely and are re-checked from their owned Slack thread:
 | `needs_photo` | No supplied hero image, the upload could not be used, or inspection proved it contradicts the listing | Carmen or Chase uploads one in the owned thread |
 | `needs_template` | No exact request-type design, unsafe structure, unresolved new-template audit, or text that cannot fit legibly | The source is fixed or added, then Carmen or Chase asks in its thread to check again |
 | `needs_info` | The one batched ask (§2.7) is outstanding, a value present in the row contradicts itself, a headshot is missing, or official contact fallback was unavailable, ambiguous, or conflicting | The reply answers what it can, or the source record or Head Shots folder is fixed and the run is rechecked. A value left unanswered does **not** hold this state — the flyer builds with that placeholder showing |
-| `needs_review` | A non-source-photo build, readback, placement, or inspection problem could not prove the output is right | Carmen or Chase resolves the named problem and requests a recheck or retry |
+| `needs_review` | A build, readback, or placement problem meant no usable flyer exists to send | Carmen or Chase resolves the named problem and requests a recheck or retry. A flyer that DOES exist is never held here over what the vision pass thinks of it — see below |
 
-`rendered → checked` is the vision pass of ARCHITECTURE.md §4.7b. A post that
-fails it goes back to Carmen (§2.9) rather than forward to `delivered`. Gable
-delivering something it doubts is the failure this whole state machine exists to
-prevent.
+`rendered → checked` is the vision pass of ARCHITECTURE.md §4.7b. A flyer that
+fails it is still **delivered**, with every finding stated above the link and an
+offer to redo it from another photograph. Chase's call, 2026-08-17, after two
+real listings were built and withheld over how Carmen's own photograph had been
+cropped: she had supplied every value and the image, and received a description
+of a flyer she could not open. Withholding assumes Gable's judgement of her
+photograph beats hers, and it leaves her with nothing to act on — the reason to
+build it by hand instead. She reviews every post before a client sees it, so the
+honest move is to send the flyer and say plainly what was noticed. What still
+holds a run is a flyer that does not exist or could not be read back at all.
+
+The older rule sent a failed post back to Carmen rather than forward to
+`delivered`, on the reasoning that Gable delivering something it doubts is the
+failure the state machine exists to prevent. That reasoning held for a wrong
+value it invented; it did not hold for an opinion about a photograph she chose
+herself, which is what it kept being used for.
 
 Every transition updates the current SQLite run and appends to `run_events` with
 a timestamp. A listing whose state cannot be explained from that log is a bug.

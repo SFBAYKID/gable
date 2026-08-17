@@ -133,7 +133,7 @@ def test_every_blocker_is_reported_not_only_the_first() -> None:
 
 
 def test_the_photo_is_named_only_when_a_blocker_sits_above_it() -> None:
-    """ "Can you send me the image?" under a headshot sentence means two images."""
+    """The generic image ask under a headshot sentence names two images."""
     plain = needs.Needs()
     plain.photo = True
     assert plain.message() == needs.PHOTO_ONLY_ASK

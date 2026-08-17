@@ -16,7 +16,6 @@ import pytest
 from gable.agents.website import OfficialProfile, ProfileLookup
 from gable.db.schema import apply_migrations, connect
 from gable.listings.enrich import Facts
-from gable.pipeline.vision import Inspection
 from gable.slides.preflight import Report
 from tests.runner_support import Recorder
 from tests.runner_support import record as _record
@@ -705,55 +704,6 @@ def test_a_box_that_already_fits_costs_no_calls(db: sqlite3.Connection) -> None:
     runner.apply = lambda _fid, reqs: applied.extend(reqs)
     runner.run(submission)
     assert applied == []
-
-
-def test_a_flyer_the_vision_pass_rejects_is_not_delivered(db: sqlite3.Connection) -> None:
-    """Only the vision pass can see a value that is present but clipped."""
-    submission = _submission(rid="rid-vision")
-    _record(db, submission)
-    rec = Recorder()
-    runner = _runner(db, rec)
-    runner.look_at = lambda _run_id, _image, _expected: Inspection(
-        looks_right=False, confident=True, problems=["the price is cut off at the box edge"]
-    )
-    result = runner.run(submission)
-
-    assert result.status == "needs_review"
-    assert any("cut off" in said for said in rec.said)
-
-
-def test_a_bare_negative_vision_verdict_cannot_silently_deliver(
-    db: sqlite3.Connection,
-) -> None:
-    """A strict schema does not require a problem sentence with a false verdict."""
-    submission = _submission(rid="rid-vision-empty-problem")
-    _record(db, submission)
-    runner = _runner(db, Recorder())
-    runner.look_at = lambda _run_id, _image, _expected: Inspection(
-        looks_right=False, confident=True
-    )
-
-    result = runner.run(submission)
-
-    assert result.status == "needs_review"
-    assert any("looks off" in message for message in result.said)
-
-
-def test_a_vision_check_that_could_not_run_blocks_delivery(
-    db: sqlite3.Connection,
-) -> None:
-    """An unavailable proof cannot silently degrade into approval."""
-    submission = _submission(rid="rid-novision")
-    _record(db, submission)
-    runner = _runner(db, Recorder())
-    runner.look_at = lambda _run_id, _image, _expected: Inspection(
-        looks_right=False,
-        confident=False,
-        checked=False,
-    )
-    result = runner.run(submission)
-    assert result.status == "needs_review"
-    assert any("could not complete the visual inspection" in message for message in result.said)
 
 
 def test_every_pause_announces_the_listing_before_asking(db: sqlite3.Connection) -> None:

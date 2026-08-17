@@ -286,18 +286,16 @@ def test_pixelated_mike_render_is_held_without_exposing_the_bad_flyer(
     current = db.execute(
         "SELECT status, output_url FROM runs WHERE run_id = ?", (result.run_id,)
     ).fetchone()
-    assert result.status == "needs_review"
-    assert current["status"] == "needs_review"
-    assert current["output_url"].endswith("/edit"), "retain the rejected copy for audit"
+    assert result.status == "delivered"
+    assert current["status"] == "delivered"
+    assert current["output_url"].endswith("/edit")
     assert result.output_url == current["output_url"]
     assert len(rec.said) == 2  # the announcement, then the outcome
-    assert "badly pixelated and blurry" in rec.said[-1]
-    assert "kept the supplied image and draft" in rec.said[-1]
-    assert "without starting over" in rec.said[-1]
-    assert "send" not in rec.said[-1].lower()
-    assert "larger" not in rec.said[-1].lower()
-    assert "Open it" not in rec.said[-1]
-    assert current["output_url"] not in rec.said[-1]
+    assert "badly pixelated and blurry" in rec.said[-1], "she must be told what was seen"
+    assert current["output_url"] in rec.said[-1], "she cannot judge a flyer she cannot open"
+    assert "Send another photo here" in rec.said[-1]
+    assert "ready" not in rec.said[-1], "built, not finished"
+    assert is_clean(rec.said[-1])
 
 
 def test_mike_wrong_property_photo_requests_one_replacement_on_the_same_run(
@@ -345,28 +343,16 @@ def test_mike_wrong_property_photo_requests_one_replacement_on_the_same_run(
 
     current = store.run_by_id(db, result.run_id)
     assert current is not None
-    assert result.status == "needs_photo"
-    assert current.status == "needs_photo"
-    assert current.output_file_id == "out-1", "retain the rejected copy for audit"
+    assert result.status == "delivered"
+    assert current.status == "delivered"
+    assert current.output_file_id == "out-1"
     assert current.output_url.endswith("/edit")
-    assert current.failure_reason == store.PHOTO_REPLACEMENT_WAITING
     assert store.run_attempt_count(db, submission.response_row_id) == 1
-    assert len(result.said) == 1
     assert len(rec.said) == 2  # announcement, then outcome
-    assert result.questions == ["Can you send the correct property image?"]
-    assert "house number in the photo says 721" in rec.said[-1]
-    assert "Can you send the correct property image?" in rec.said[-1]
-    assert rec.said[-1].startswith("&gt;I rendered it")
+    assert "house number in the photo says 721" in rec.said[-1], "the contradiction is named"
+    assert "Send another photo here" in rec.said[-1], "and the fix is offered"
+    assert "Open the flyer" in rec.said[-1]
     assert is_clean(rec.said[-1])
-    assert "Open the flyer" not in rec.said[-1]
-    assert current.output_url not in rec.said[-1]
-    confirmation_events = db.execute(
-        "SELECT detail FROM run_events WHERE run_id = ? AND status = 'needs_photo' ORDER BY id",
-        (result.run_id,),
-    ).fetchall()
-    assert [str(event["detail"]) for event in confirmation_events] == [
-        "replacement property photo request confirmed in Slack at 1786.0"
-    ]
 
 
 def test_a_conflict_visible_only_in_the_render_stays_needs_review(
@@ -390,12 +376,9 @@ def test_a_conflict_visible_only_in_the_render_stays_needs_review(
 
     current = store.run_by_id(db, result.run_id)
     assert current is not None
-    assert result.status == current.status == "needs_review"
-    assert result.questions == []
-    assert "correct property image" not in rec.said[0]
-    assert current.failure_reason == (
-        "The render shows 721, but the number is unreadable in the source image."
-    )
+    assert result.status == current.status == "delivered"
+    assert "unreadable in the source image" in rec.said[-1]
+    assert "Open the flyer" in rec.said[-1]
 
 
 def test_an_unconfirmed_replacement_request_remains_durable_review(
@@ -426,16 +409,16 @@ def test_an_unconfirmed_replacement_request_remains_durable_review(
 
     current = store.run_by_id(db, result.run_id)
     assert current is not None
-    assert result.status == current.status == "needs_review"
-    assert current.failure_reason == store.QUESTION_NOTIFICATION_PENDING
+    # Slack never confirmed, so the run stays pending and the durable outbox
+    # owns the retry. It must not claim delivery it cannot prove.
+    assert result.status == current.status == "building"
     assert current.output_file_id == "out-1"
     assert current.output_url.endswith("/edit")
     assert result.said == []
-    assert result.questions == []
-    assert len(attempted) == 2  # the announcement, then the question
-    assert "correct property image" in attempted[-1]
+    assert len(attempted) == 2  # the announcement, then the outcome
+    assert "house number says 721" in attempted[-1]
     assert not db.execute(
-        "SELECT 1 FROM run_events WHERE run_id = ? AND status = 'needs_photo'",
+        "SELECT 1 FROM run_events WHERE run_id = ? AND status = 'delivered'",
         (result.run_id,),
     ).fetchone()
 
@@ -464,10 +447,10 @@ def test_mixed_visual_problems_stay_review_even_with_a_replace_remedy(
 
     current = store.run_by_id(db, result.run_id)
     assert current is not None
-    assert result.status == current.status == "needs_review"
-    assert result.questions == []
-    assert "correct property image" not in rec.said[0]
-    assert current.failure_reason == ("The source number says 721.; The price digits look wrong.")
+    assert result.status == current.status == "delivered"
+    assert "source number says 721" in rec.said[-1]
+    assert "price digits look wrong" in rec.said[-1], "every finding, not only the first"
+    assert "Open the flyer" in rec.said[-1]
 
 
 def test_a_layout_opinion_disproven_by_geometry_leaves_a_pure_photo_conflict(
@@ -500,8 +483,9 @@ def test_a_layout_opinion_disproven_by_geometry_leaves_a_pure_photo_conflict(
 
     current = store.run_by_id(db, result.run_id)
     assert current is not None
-    assert result.status == current.status == "needs_photo"
-    assert any("correct property image" in text for text in rec.said)
+    assert result.status == current.status == "delivered"
+    assert "source number says 721" in rec.said[-1]
+    assert "Open the flyer" in rec.said[-1]
 
 
 def test_replacement_question_survives_an_overlong_visual_finding(
@@ -523,9 +507,9 @@ def test_replacement_question_survives_an_overlong_visual_finding(
 
     result = runner.run(submission)
 
-    assert result.status == "needs_photo"
+    assert result.status == "delivered"
     assert len(rec.said) == 2  # the announcement, then the outcome
-    assert "Can you send the correct property image?" in rec.said[-1]
+    assert "Open the flyer" in rec.said[-1], "the link survives a runaway finding"
     assert len(rec.said[-1]) <= 600
     assert is_clean(rec.said[-1])
 
@@ -583,3 +567,71 @@ def test_nothing_extra_leaves_a_blank_line_behind(tmp_path: Path) -> None:
     )
 
     assert "\n" not in message
+
+
+# --- A built flyer is delivered, and the finding travels with it ------------
+
+
+def test_a_flyer_the_vision_pass_rejects_is_still_delivered(db: sqlite3.Connection) -> None:
+    """The problem is said, and the flyer goes with it.
+
+    Two real listings were built and withheld over how Carmen's own photograph
+    was cropped, after she had supplied every value. She got a description of a
+    flyer she could not open. She reviews every post before a client sees it, so
+    the flyer is delivered and the finding travels with it.
+    """
+    submission = _submission(rid="rid-vision")
+    _record(db, submission)
+    rec = Recorder()
+    runner = _runner(db, rec)
+    runner.look_at = lambda _run_id, _image, _expected: Inspection(
+        looks_right=False, confident=True, problems=["the price is cut off at the box edge"]
+    )
+    result = runner.run(submission)
+
+    assert result.status == "delivered"
+    assert result.output_url
+    spoken = " ".join(rec.said)
+    assert "cut off" in spoken, "she cannot judge a finding she was never told"
+    assert "Open the flyer" in spoken, "the link is the whole point"
+    assert "ready" not in spoken, "it is built, not finished"
+
+
+def test_a_bare_negative_vision_verdict_cannot_silently_deliver(
+    db: sqlite3.Connection,
+) -> None:
+    """A strict schema does not require a problem sentence with a false verdict."""
+    submission = _submission(rid="rid-vision-empty-problem")
+    _record(db, submission)
+    runner = _runner(db, Recorder())
+    runner.look_at = lambda _run_id, _image, _expected: Inspection(
+        looks_right=False, confident=True
+    )
+
+    result = runner.run(submission)
+
+    assert result.status == "delivered"
+    assert any("looks off" in message for message in result.said)
+
+
+def test_a_vision_check_that_could_not_run_says_so_and_still_delivers(
+    db: sqlite3.Connection,
+) -> None:
+    """An unavailable proof is not approval, and it is not a reason to withhold.
+
+    Gable says it could not look at the flyer, and sends the flyer, because
+    Carmen can look at it herself and is the one who decides.
+    """
+    submission = _submission(rid="rid-novision")
+    _record(db, submission)
+    runner = _runner(db, Recorder())
+    runner.look_at = lambda _run_id, _image, _expected: Inspection(
+        looks_right=False,
+        confident=False,
+        checked=False,
+    )
+    result = runner.run(submission)
+    assert result.status == "delivered"
+    assert result.output_url
+    assert any("could not complete the visual inspection" in message for message in result.said)
+    assert not any("your flyer is ready" in message.lower() for message in result.said)

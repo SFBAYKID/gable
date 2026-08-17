@@ -658,41 +658,42 @@ class Runner:
             layout_verified=True,
         )
 
+        # A built flyer is delivered even when a check disliked it. Two real
+        # listings were withheld over how the supplied photograph was cropped —
+        # a roofline on one, a front entrance on the other — after Carmen had
+        # sent every value and the image herself. She got a description of a
+        # flyer she could not open, which leaves her with nothing to act on and
+        # every reason to build it by hand instead. Withholding also assumes
+        # Gable's judgement of her own photograph beats hers, which is backwards:
+        # she reviews every post before a client sees it, so the honest move is
+        # to send the flyer and say plainly what was noticed. Chase's call,
+        # 2026-08-17, after seeing both threads.
         if not checked.ok:
-            detail = checked.detail
-            spoken = checked.spoken
             result.output_url = output_url
-            if checked.needs_replacement_photo:
-                delivery = run_questions.request_replacement_photo(
-                    self.connection,
-                    run_id,
-                    spoken,
-                    detail,
-                    self.say,
-                    post_once=self.post_once,
-                    reconcile=self.reconcile,
-                    thread_ts=self.origin_thread_ts,
-                    output_file_id=output_id,
-                    output_url=output_url,
-                )
-                result.status = delivery.status
-                result.said.extend(delivery.said)
-                result.questions.extend(delivery.questions)
-                return result
-            message = safe(
+            noticed = safe(
                 paragraphs(
-                    spoken,
-                    "I have not sent it as finished.",
-                    "I kept the supplied image and draft, so this run can be retried "
-                    "without starting over.",
+                    checked.spoken,
+                    "Send another photo here if you want it framed differently and I will redo it.",
                 )
+            )
+            message = run_reporting.delivery_message(
+                self.connection,
+                run_id,
+                output_url=output_url,
+                run_notes=run_notes,
+                advisories=advisories,
+                left_blank=run_reporting.unfilled(resolution.fields, values),
+                price_missing_note=price_note(intake, "price" in resolution.fields),
+                noticed=noticed,
             )
             return self._outcome(
                 run_id,
                 message,
                 result,
-                status="needs_review",
-                detail=detail,
+                status="delivered",
+                pending_status="building",
+                detail=f"delivered with what the checks noticed: {checked.detail}",
+                confirmation_detail="Slack confirmed the delivery message",
                 output_file_id=output_id,
                 output_url=output_url,
             )
