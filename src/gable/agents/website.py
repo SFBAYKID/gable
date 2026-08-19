@@ -77,6 +77,11 @@ class ProfileLookup:
 
     profile: OfficialProfile | None = None
     problem: str = ""
+    #: A profile carrying this agent's name was found, but nothing on it matched
+    #: the request. That is the signal that the address on the request is not
+    #: this agent's — not that the website is missing them — and it reads very
+    #: differently to whoever has to fix it.
+    found_but_unproven: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -271,6 +276,44 @@ def _pause(label: str, detail: str) -> str:
     return (
         f"{label} — {detail} I left every submitted and filed contact detail unchanged. "
         "Correct the request or Agents Contact Information, then tell me to run again."
+    )
+
+
+def names_agree(submitted: str, contact: Contact) -> bool:
+    """Whether a filed roster row is the agent this request names.
+
+    Args:
+        submitted: The agent name on the request.
+        contact: One roster row.
+
+    Returns:
+        True when the filed name is the submitted one, or the submitted name is
+        the filed one plus a branding suffix.
+
+    Raises:
+        Nothing.
+    """
+    filed = _clean_name(f"{contact.first_name} {contact.last_name}")
+    if not filed or not submitted.strip():
+        return False
+    return _name_key(filed) == _name_key(submitted) or _is_branded_form_of(submitted, filed)
+
+
+def unidentified_pause(name: str) -> str:
+    """Say that nothing on the request establishes which agent it is for.
+
+    The form's email field holds whoever filled the form in. On 2026-08-19 one
+    person submitted two requests for two other agents, so that address proved
+    nothing about either. When it is not the named agent's and the roster has
+    no row for that name either, there is no evidence left, and picking a
+    same-named profile off the website would be guessing whose phone number
+    goes on a client's flyer.
+    """
+    return (
+        f"{name} — the email on this request belongs to whoever submitted the form rather "
+        f"than to {name}, and there is no row for {name} in Agents Contact Information, so "
+        "I have nothing that proves which agent this is for. Add them to Agents Contact "
+        "Information, then tell me to run again."
     )
 
 
@@ -706,7 +749,8 @@ def lookup_official_profile(
                 problem=(
                     "the official profile does not show the submitted email address "
                     "or the filed direct phone"
-                )
+                ),
+                found_but_unproven=True,
             )
         # Duplicate pages for one person agree with each other. Pages that
         # disagree on the direct line are not one person, and choosing between

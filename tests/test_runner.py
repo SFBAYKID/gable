@@ -85,8 +85,18 @@ def test_the_agent_phone_comes_from_the_roster(db: sqlite3.Connection) -> None:
 def test_contact_prerequisites_are_validated_before_the_first_slack_announcement(
     db: sqlite3.Connection,
 ) -> None:
-    """No photo question may precede an unresolved identity or direct phone."""
-    submission = _submission(rid="rid-contact-prerequisite", email="mike@example.test")
+    """No photo question may precede an unresolved identity or direct phone.
+
+    The name must be one the roster does not carry. A request whose email is
+    not the agent's is now identified by name instead — the form's email field
+    holds whoever submitted it — so an unknown email alone no longer leaves the
+    agent unresolved.
+    """
+    submission = _submission(
+        rid="rid-contact-prerequisite",
+        email="mike@example.test",
+        name="Nobody Filed",
+    )
     _record(db, submission)
     rec = Recorder()
     runner = _runner(db, rec)

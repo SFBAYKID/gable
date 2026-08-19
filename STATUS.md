@@ -68,6 +68,15 @@ designs in four minutes and got three non-events. A clean automatic re-read is
 silent now; every problem, warning, new design and explicit re-check still
 speaks.
 
+**The form's email is the submitter's, not the agent's.** Two requests stopped
+minutes apart, both filed by one person for other agents. Gable identified the
+agent by that address, so it proved nothing. It now falls back to the roster by
+name — exactly one row, profile still corroborating — which resolves Tonette
+Campbell outright, because her filed row and her profile already agreed on
+everything. An agent the roster does not carry still stops, and now says so.
+Mike Nugent is that case: no row exists for him despite Carmen believing she
+added one.
+
 **Still worth undoing by hand:** the agent name on Caleb's request row. Gable
 reads that tab and never writes to it, and nothing now depends on it being
 fixed — but it is still wrong in the source of record.

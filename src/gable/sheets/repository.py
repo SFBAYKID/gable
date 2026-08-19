@@ -344,6 +344,31 @@ def record_source_snapshot(
     return reconciled
 
 
+def all_salespeople(connection: Connection) -> list[dict[str, str]]:
+    """Every mirrored roster row, for matching an agent by name.
+
+    The form's email field is whoever filled the form in. On 2026-08-19 one
+    person submitted two requests for two other agents, so the address on the
+    row identified the submitter and not the agent whose flyer it is. Matching
+    by name needs the whole roster in hand; it is 39 rows, so this is a read
+    rather than a query per candidate spelling.
+
+    Args:
+        connection: An open database connection.
+
+    Returns:
+        Every roster row as a dict, in filed order.
+
+    Raises:
+        sqlite3.Error: on a query failure.
+    """
+    rows = connection.execute(
+        "SELECT email, first_name, last_name, phone, template, headshot_url, brokerage_url"
+        " FROM salespeople ORDER BY rowid"
+    ).fetchall()
+    return [dict(row) for row in rows]
+
+
 def find_salesperson(connection: Connection, email: str) -> dict[str, str]:
     """Look up an agent by email.
 
