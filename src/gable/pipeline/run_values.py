@@ -13,6 +13,7 @@ from sqlite3 import Connection
 from typing import Final
 
 from gable.db import store
+from gable.listings import details
 from gable.listings.intake import Intake
 from gable.listings.review import review_values
 from gable.sheets import repository as repo
@@ -141,15 +142,21 @@ def for_intake(
     name = " ".join(
         part for part in (person.get("first_name", ""), person.get("last_name", "")) if part
     )
+    # The agent's own description of their listing. Read only for what nothing
+    # else supplied: both 1921 Lincoln Ave requests said "3Bed/2 Bath" here on
+    # 2026-08-19 and both flyers printed a bathroom count from the design's
+    # sample content instead. Never overrides a value already established.
+    written = details.counts_in(intake.post_details or intake.extra_notes)
     values = {
         "address": intake.address,
         # A public list price is not a Sold closing price or a Price Reduction's
         # new price.  Those request types may use only the form-owned value.
         "price": intake.price
         or (known.get("list_price", "") if intake.accepts_public_list_price else ""),
-        "beds": known.get("beds", ""),
-        "baths": known.get("baths", ""),
-        "square_feet": _measure_only(known.get("square_feet", "")),
+        "beds": known.get("beds", "") or written.get("beds", ""),
+        "baths": known.get("baths", "") or written.get("baths", ""),
+        "square_feet": _measure_only(known.get("square_feet", ""))
+        or _measure_only(written.get("square_feet", "")),
         "agent_name": name or intake.agent_name,
         # A missing direct line stays missing. Preflight asks when the selected
         # design has a phone field; silently substituting the brokerage office

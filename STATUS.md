@@ -95,7 +95,16 @@ live app on 2026-08-19, and `shared_file_event` feeds it into the existing photo
 handoff. Not yet proven on a real upload; the next photo Carmen sends is the
 test.
 
-**Still worth undoing by hand:** the agent name on Caleb's request row. Gable
+**Gable now reads the counts agents write in their own details field.** Both
+1921 Lincoln Ave requests said "3Bed/2 Bath" there while their flyers printed a
+sample bathroom count — three on one, five on the other, for the same house.
+The answer was in hand and unread. Chase asked for the cause fixed and the two
+flyers left alone, so they still show the wrong figure and are not to be sent.
+
+**Still worth undoing by hand:** the agent name on Caleb's request row, and the
+Property Address cell on row 116, which now reads "Tonette Campbell" — her
+flyer built before that edit and carries the right address, but a re-run would
+not. Gable
 reads that tab and never writes to it, and nothing now depends on it being
 fixed — but it is still wrong in the source of record.
 

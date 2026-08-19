@@ -505,6 +505,15 @@ Gable must never:
    square footage and price are blanked when unfilled — the icon and its label
    stay, so the flyer reads as incomplete rather than as wrong — and Gable still
    names them.
+
+   **Before blanking, read the request's own details field.** Agents describe
+   their listing there in their own words, and both 1921 Lincoln Ave requests
+   said "3Bed/2 Bath" while their flyers printed a sample count instead.
+   Bedrooms, bathrooms and square footage are taken from that text when nothing
+   else supplied them; a researched or human-stated value still wins, and two
+   different counts for one field read as unstated rather than resolved. The
+   price is never taken from it — a list price, a closing price and a new price
+   are different values with different rules.
 9. **Retry a failing listing more than 3 times.** After that, fail it loudly and
    move on. Retry storms can take the 1 GB process down and spend in a loop.
 10. **Log a secret**, or echo a token into Slack.
