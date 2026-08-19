@@ -436,6 +436,12 @@ def test_a_failed_slack_post_retries_the_stored_verdict_without_reinspection(
 def test_a_changed_template_retries_a_failed_thread_notice_without_reinspection(
     tmp_path: Path,
 ) -> None:
+    """A notice that failed to post is retried without paying for vision again.
+
+    The changed revision must have something to say. A clean unprompted re-read
+    is silent now, so this drives the retry with a design whose second revision
+    fails its visual inspection.
+    """
     connection = connect(tmp_path / "gable.db")
     apply_migrations(connection)
     files: list[TemplateFile] = []
@@ -445,6 +451,8 @@ def test_a_changed_template_retries_a_failed_thread_notice_without_reinspection(
     def look(_file_id: str) -> Inspection:
         nonlocal visual_calls
         visual_calls += 1
+        if visual_calls == 2:
+            return Inspection(False, True, problems=["the title overlaps the photo"])
         return Inspection(True, True)
 
     def say(_text: str, thread: str | None) -> str:
@@ -695,3 +703,83 @@ def test_a_listing_rebuild_pays_for_no_source_inspection(tmp_path: Path) -> None
     assert looked == []
     recorded = store.template_audit(connection, "live-1")
     assert recorded is not None and recorded.status == "ready"
+
+
+def test_an_unprompted_clean_reread_says_nothing(tmp_path: Path) -> None:
+    """Carmen edited three designs in four minutes and got three non-events.
+
+    Nobody asked Gable to look, and it found nothing, so there is nothing to
+    report — in the channel where real listings arrive. A NEW design still
+    announces itself, because that is news.
+    """
+    connection = connect(tmp_path / "gable.db")
+    apply_migrations(connection)
+    files: list[TemplateFile] = []
+    said: list[str] = []
+
+    def say(text: str, thread: str | None) -> str:
+        said.append(text)
+        return thread or "thread-one"
+
+    triage = TemplateTriage(
+        connection,
+        lambda: list(files),
+        lambda _file_id: _presentation(),
+        say,
+        look_at=lambda _file_id: Inspection(True, True),
+    )
+    store.adopt_template_catalog(connection, [("baseline", "Baseline", "zero")])
+
+    files.append(TemplateFile("new-1", "New Listing", "one"))
+    assert triage.scan_new() == 1
+    assert len(said) == 1, "a new design is still announced once"
+    assert "I checked the new" in said[0]
+
+    # Carmen edits it three times; none of those is news.
+    for revision in ("two", "three", "four"):
+        files[0] = TemplateFile("new-1", "New Listing", revision)
+        assert triage.scan_new() == 1
+    assert len(said) == 1, "a clean re-read of an edited design stays silent"
+
+    stored = store.template_audit(connection, "new-1")
+    assert stored is not None
+    assert stored.modified_time == "four", "the audit is still recorded"
+    assert stored.status == "ready"
+    assert not stored.notification_pending, "nothing is left queued to say later"
+    connection.close()
+
+
+def test_a_reread_that_finds_a_problem_still_speaks(tmp_path: Path) -> None:
+    """Silence is only for a clean result; a broken edit must always be said."""
+    connection = connect(tmp_path / "gable.db")
+    apply_migrations(connection)
+    files: list[TemplateFile] = []
+    said: list[str] = []
+    looks: list[Inspection] = [
+        Inspection(True, True),
+        Inspection(False, True, problems=["the title overlaps the photo"]),
+    ]
+
+    def say(text: str, thread: str | None) -> str:
+        said.append(text)
+        return thread or "thread-one"
+
+    triage = TemplateTriage(
+        connection,
+        lambda: list(files),
+        lambda _file_id: _presentation(),
+        say,
+        look_at=lambda _file_id: looks[min(len(said), len(looks) - 1)],
+    )
+    store.adopt_template_catalog(connection, [("baseline", "Baseline", "zero")])
+    files.append(TemplateFile("new-1", "New Listing", "one"))
+    assert triage.scan_new() == 1
+
+    files[0] = TemplateFile("new-1", "New Listing", "two")
+    assert triage.scan_new() == 1
+
+    assert len(said) == 2
+    assert "overlaps" in said[1]
+    stored = store.template_audit(connection, "new-1")
+    assert stored is not None and stored.status == "needs_template"
+    connection.close()

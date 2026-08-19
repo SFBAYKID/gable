@@ -155,7 +155,9 @@ current run only after an exact official Corner House Realty profile confirms
 the submitted name and email. A credential such as REALTOR is never inferred.
 
 A profile that states no job title falls back to the brokerage-wide credential
-in `GABLE_DEFAULT_AGENT_CREDENTIAL`, which is `REALTOR`. Chase confirmed on
+in `GABLE_DEFAULT_AGENT_CREDENTIAL`, which is `Realtor` — written in title case
+so the placeholder-case rule can capitalise it only for a design that sets its
+credential in capitals. Chase confirmed on
 2026-08-19 that all 38 agents on the roster hold it, so this states a fact about
 the brokerage rather than guessing about a person, and the run event records
 which of the two answered. The profile always wins when it states a title.

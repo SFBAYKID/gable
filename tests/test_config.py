@@ -344,3 +344,19 @@ def test_env_example_documents_every_variable_the_code_reads() -> None:
     documented = set(re.findall(r"^([A-Z_]+)=", example, re.M))
     undocumented = sorted(read - documented)
     assert not undocumented, f".env.example is missing: {undocumented}"
+
+
+def test_the_default_credential_is_written_in_the_designs_own_case() -> None:
+    """Title case, so `fields` capitalises it only where a design wants that.
+
+    Under Contract draws its credential as "Realtor". A capitalised default is
+    never lowered, so REALTOR went into that box, no longer fit, and autofit
+    shrank the line from 23.95pt to 18.42pt — which is what Carmen saw as the
+    spacing shifting on her flyer.
+    """
+    assert _load().default_agent_credential == "Realtor"
+
+
+def test_the_default_credential_can_be_overridden_or_switched_off() -> None:
+    assert _load(GABLE_DEFAULT_AGENT_CREDENTIAL="Broker").default_agent_credential == "Broker"
+    assert _load(GABLE_DEFAULT_AGENT_CREDENTIAL="").default_agent_credential == ""

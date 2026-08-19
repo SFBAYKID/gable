@@ -263,9 +263,15 @@ class Settings:
                 "GABLE_SLIDE_HEIGHT_PX", 1350, minimum=100, maximum=MAX_TARGET_EDGE_PX
             ),
             firecrawl_api_key=reader.secret("FIRECRAWL_API_KEY", require_credentials),
-            default_agent_credential=reader.str_value(
-                "GABLE_DEFAULT_AGENT_CREDENTIAL", "REALTOR"
-            ).strip(),
+            # Title case, not capitals: `fields` upper-cases this to match a
+            # placeholder the designer set in capitals, and never lowers it. A
+            # capitalised default therefore wrote REALTOR into Under Contract's
+            # "Realtor" box, where the wider word no longer fit and autofit took
+            # it from 23.95pt to 18.42pt — which Carmen saw as the spacing
+            # shifting on her flyer.
+            default_agent_credential=reader.switchable_str_value(
+                "GABLE_DEFAULT_AGENT_CREDENTIAL", "Realtor"
+            ),
             photo_policy=reader.enum_value(
                 "GABLE_PHOTO_POLICY", PhotoPolicy, PhotoPolicy.RETRIEVE_ONLY
             ),
@@ -382,6 +388,19 @@ class _Reader:
     def str_value(self, name: str, default: str) -> str:
         """Read a string, falling back to `default` when unset or blank."""
         return self._raw(name) or default
+
+    def switchable_str_value(self, name: str, default: str) -> str:
+        """Read a string whose documented off-switch is setting it to nothing.
+
+        `str_value` reads blank as unset, which is right for a setting that must
+        always carry a value and wrong for one an operator turns off by
+        emptying it. `GABLE_DEFAULT_AGENT_CREDENTIAL=` is somebody saying
+        "print no credential", not somebody saying nothing — and `.env.example`
+        and `AGENTS.md` both promise that it works.
+        """
+        if name in self._environ:
+            return self._environ[name].strip()
+        return default
 
     def required(self, name: str) -> str:
         """Read a string that must be present and non-blank."""

@@ -154,6 +154,9 @@ class TemplateTriage:
                 item,
                 duplicate=name_counts[self._key(item.name)] > 1,
                 updated=updated,
+                # A design Carmen has just edited is one she knows about. Only
+                # a NEW design still announces a clean result.
+                quiet_when_clean=updated,
             )
             thread_ts = existing.slack_thread_ts if existing is not None else ""
             store.record_template_audit(
@@ -164,11 +167,11 @@ class TemplateTriage:
                 status,
                 message,
                 thread_ts,
-                notification_pending=True,
+                notification_pending=bool(message),
             )
             checked += 1
             pending = store.template_audit(self.connection, item.file_id)
-            if pending is not None:
+            if pending is not None and message:
                 deliver_template_notification(
                     self.connection,
                     pending,
@@ -184,6 +187,7 @@ class TemplateTriage:
         *,
         duplicate: bool,
         updated: bool,
+        quiet_when_clean: bool = False,
     ) -> tuple[str, str]:
         """Measure one new or changed Drive revision and choose its verdict."""
         if not item.is_slides:
@@ -197,6 +201,7 @@ class TemplateTriage:
             report,
             updated=updated,
             visual=visual,
+            quiet_when_clean=quiet_when_clean,
         )
 
     def recheck(
@@ -433,8 +438,18 @@ class TemplateTriage:
         updated: bool,
         visual: Inspection | None = None,
         visual_required: bool = True,
+        quiet_when_clean: bool = False,
     ) -> tuple[str, str]:
-        """Choose one precise Slack outcome from a measured report."""
+        """Choose one precise Slack outcome from a measured report.
+
+        With ``quiet_when_clean``, a design Gable re-read on its own and found
+        nothing wrong with returns no message at all. Carmen edited three
+        designs in four minutes on 2026-08-19 and got three notifications
+        saying nothing had happened, in the channel where real listings arrive.
+        Nobody asked Gable to look, so a clean answer is not news. Every
+        problem, every warning, and every design Gable is *asked* to check
+        still speaks.
+        """
         if report.blockers:
             message = report.blockers[0].say
             if updated:
@@ -484,6 +499,8 @@ class TemplateTriage:
         # still get their own exact measurement before anything is copied.
         if report.warnings:
             return safe(report.warnings[0].say.replace("the new ", f"the {timing} ", 1)), "ready"
+        if quiet_when_clean:
+            return "", "ready"
         prefix = "I read the updated" if updated else "I checked the new"
         message = safe(
             f"{prefix} {name} design from Generic Templates. I did not find a "

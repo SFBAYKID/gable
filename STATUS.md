@@ -59,6 +59,15 @@ and names the fault. Chase spotted this one; that is three times in one morning
 that a correct refusal was wearing a wrong sentence, which is worth treating as
 a pattern rather than three bugs.
 
+**Two more from the same afternoon, both fixed.** The credential default
+shipped in capitals, and because the case rule only ever capitalises, REALTOR
+went into a box drawn for "Realtor" and autofit shrank the line — Carmen saw
+that as the spacing shifting. It is title case now. And an unprompted template
+re-read that found nothing was announcing itself in #calvo; Carmen edited three
+designs in four minutes and got three non-events. A clean automatic re-read is
+silent now; every problem, warning, new design and explicit re-check still
+speaks.
+
 **Still worth undoing by hand:** the agent name on Caleb's request row. Gable
 reads that tab and never writes to it, and nothing now depends on it being
 fixed — but it is still wrong in the source of record.
