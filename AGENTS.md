@@ -154,6 +154,16 @@ allowed fallback fills a workbook blank or a source-required credential for the
 current run only after an exact official Corner House Realty profile confirms
 the submitted name and email. A credential such as REALTOR is never inferred.
 
+The name and the email identify the agent, in that order. The form's email
+field holds whoever filled the form in, which is not always the agent — on
+2026-08-19 one person submitted two requests for two other agents. So when the
+address on a request does not belong to the agent it names, the roster decides
+instead: exactly one filed row carrying that name, whose own email then stands
+in as the agent's. Zero rows or several is not something to guess at, and
+neither is picking a same-named page off the website. In that case Gable says
+the request identifies nobody and asks for the agent to be filed in Agents
+Contact Information.
+
 A profile that states no job title falls back to the brokerage-wide credential
 in `GABLE_DEFAULT_AGENT_CREDENTIAL`, which is `Realtor` — written in title case
 so the placeholder-case rule can capitalise it only for a design that sets its
