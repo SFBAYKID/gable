@@ -43,6 +43,9 @@ _TIMEOUT_SECONDS: Final[int] = 20
 #: pathological search result rather than fetching the whole site.
 _MAX_CANDIDATE_PROFILES: Final[int] = 3
 _MAX_RESPONSE_BYTES: Final[int] = 2 * 1024 * 1024
+#: Punctuation that can sit at the edge of a written name without being part of
+#: it — the comma in "Caleb Olawuyi, Realtor" is the case that reached Carmen.
+_EDGE_PUNCTUATION: Final[str] = ",.;:!?()[]{}\"'"
 _TITLE_TAG: Final[re.Pattern[str]] = re.compile(r"<[^>]+>")
 
 Fetch = Callable[[str], tuple[bytes, str]]
@@ -102,6 +105,19 @@ def _name_key(value: str) -> str:
     return " ".join(value.split()).casefold()
 
 
+def _name_words(value: str) -> list[str]:
+    """Split a name into comparable words, discarding only edge punctuation.
+
+    An agent who appends a credential to their own name writes "Caleb Olawuyi,
+    Realtor". The comma belongs to the branding, not to the surname, so a
+    prefix test that reads the second word as "olawuyi," can never match the
+    official "Caleb Olawuyi" — and Gable had just told Carmen to write the name
+    that way. Punctuation inside a word is preserved, so "O'Brien" and
+    "Smith-Jones" stay one word each and stay distinct from "OBrien".
+    """
+    return [word for word in (w.strip(_EDGE_PUNCTUATION) for w in _name_key(value).split()) if word]
+
+
 def _clean_name(value: str) -> str:
     """Collapse whitespace without changing any submitted spelling."""
     return " ".join(value.split())
@@ -141,15 +157,18 @@ def _is_branded_form_of(submitted: str, profile_title: str) -> bool:
     Raises:
         Nothing.
     """
-    submitted_key = _name_key(submitted)
-    title_key = _name_key(profile_title)
-    if not title_key or not submitted_key or title_key == submitted_key:
+    submitted_words = _name_words(submitted)
+    title_words = _name_words(profile_title)
+    if not title_words or not submitted_words or title_words == submitted_words:
         return False
     # Two words is the floor: a lone first name is not enough to nominate a
     # profile, even though the contact-detail check would still have to pass.
-    if len(title_key.split()) < 2:
+    if len(title_words) < 2:
         return False
-    return submitted_key.startswith(f"{title_key} ")
+    return (
+        len(submitted_words) > len(title_words)
+        and submitted_words[: len(title_words)] == title_words
+    )
 
 
 def _partial_workbook_name_matches(submitted: str, contact: Contact) -> bool:
@@ -215,6 +234,27 @@ def _phone_cross_check(
             "the official website profile phone does not match the contact-workbook phone.",
         )
     return ""
+
+
+def _credential_pause(label: str) -> str:
+    """Write the one pause a human cannot resolve by editing what they hold.
+
+    The generic contact remedy — correct the request or Agents Contact
+    Information — is false for a missing credential, because `validate_contact`
+    accepts a title only from the official profile and the roster workbook has
+    no title column to put one in. Carmen was told that remedy three times for
+    Caleb Olawuyi on 2026-08-19: she answered "Realtor" in the thread, filed
+    him in Agents Contact Information, and finally appended the credential to
+    his name on the request, which broke the profile match as well. A message
+    that names an impossible fix costs more than one that names no fix at all.
+    """
+    return (
+        f"{label} — every contact detail is correct. This design also prints a credential, "
+        "and I am only allowed to take that from the agent's profile on the official Corner "
+        "House Realty website, where the job-title field is empty. Telling me the credential "
+        "here, or filing it in Agents Contact Information, cannot reach me. Once the job "
+        "title is on that profile, tell me to run again."
+    )
 
 
 def _pause(label: str, detail: str) -> str:
@@ -376,12 +416,7 @@ def validate_contact(
             )
         )
     if require_title and not profile.title.strip():
-        return ContactCheck(
-            problem=_pause(
-                label,
-                "the official website profile has no title or credential for this agent.",
-            )
-        )
+        return ContactCheck(problem=_credential_pause(label))
 
     # Website evidence is allowed to fill only what the exact workbook row did
     # not establish.  Existing workbook values are retained byte-for-byte.
@@ -572,8 +607,10 @@ def lookup_official_profile(
         # profile. A branded name therefore needs a second, shorter query before
         # there is anything to match against.
         results = _titles(name)
-        words = name.split()
+        words = _name_words(name)
         if not results and len(words) > 2:
+            # The retry drops the branding and any punctuation attached to it.
+            # "Caleb Olawuyi, Realtor" searched whole returns nothing at all.
             results = _titles(" ".join(words[:2]))
 
         exact: list[tuple[str, str]] = []

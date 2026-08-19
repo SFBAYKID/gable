@@ -9,7 +9,12 @@ import pytest
 
 from gable.slackapp.app import answer_mention, build_app, process_mention
 from gable.slackapp.brain import Decision
-from gable.slackapp.routing import EventReplayGuard, MessageRoute, ThreadOwnership
+from gable.slackapp.routing import (
+    EventReplayGuard,
+    MessageRoute,
+    ThreadOwnership,
+    addresses_someone_else,
+)
 
 CHANNEL = "C0B02721MNK"
 GABLE_USER = "UGABLE"
@@ -636,3 +641,74 @@ def test_a_thread_reply_needs_no_mention(monkeypatch: pytest.MonkeyPatch) -> Non
 
     assert thought == ["can you make the price bigger?"]
     assert said and said[0]["text"] == "On it."
+
+
+def test_a_reply_addressed_to_another_person_is_left_alone() -> None:
+    """Chase telling Carmen to wait is not an instruction for Gable.
+
+    In Caleb Olawuyi's thread on 2026-08-19 Gable answered "@Carmen one sec let
+    me look at this" with "Take your time, Chase", and had already answered
+    Carmen's "@Chase? I'm not sure what to do here". Both were addressed to a
+    person by name.
+    """
+    client = RootClient()
+
+    route = ThreadOwnership().route(
+        _event(parent_user_id=GABLE_USER, text="<@UCARMEN> one sec let me look at this"),
+        client,
+        bot_user_id=GABLE_USER,
+        bot_id=GABLE_BOT,
+    )
+
+    assert route is MessageRoute.IGNORE
+
+
+def test_an_owned_thread_still_answers_when_nobody_else_is_named() -> None:
+    """The silence rule must not cost Carmen her ordinary unaddressed replies."""
+    route = ThreadOwnership().route(
+        _event(parent_user_id=GABLE_USER, text="I have a photo for the template."),
+        RootClient(),
+        bot_user_id=GABLE_USER,
+        bot_id=GABLE_BOT,
+    )
+
+    assert route is MessageRoute.THREAD_REPLY
+
+
+def test_a_reply_naming_gable_alongside_a_person_is_still_gables() -> None:
+    """An explicit mention of Gable always wins over anyone else named."""
+    route = ThreadOwnership().route(
+        _event(
+            parent_user_id=GABLE_USER,
+            text=f"<@UCARMEN> I'll have <@{GABLE_USER}|gable> run it again",
+        ),
+        RootClient(),
+        bot_user_id=GABLE_USER,
+        bot_id=GABLE_BOT,
+    )
+
+    assert route is MessageRoute.THREAD_REPLY
+
+
+def test_a_photo_is_still_taken_even_when_the_uploader_addresses_someone_else() -> None:
+    """The photo is what the thread is for; the caption's audience is not."""
+    route = ThreadOwnership().route(
+        _event(
+            parent_user_id=GABLE_USER,
+            subtype="file_share",
+            files=[{"id": "F1"}],
+            text="<@UCARMEN> is this the one?",
+        ),
+        RootClient(),
+        bot_user_id=GABLE_USER,
+        bot_id=GABLE_BOT,
+    )
+
+    assert route is MessageRoute.FILE_SHARE
+
+
+def test_addressing_check_is_inert_without_a_known_bot_identity() -> None:
+    """An unknown own-id must not silence every mention-bearing reply."""
+    assert addresses_someone_else("<@UCARMEN> hello", bot_user_id="") is False
+    assert addresses_someone_else("", bot_user_id=GABLE_USER) is False
+    assert addresses_someone_else("<!here> anyone about?", bot_user_id=GABLE_USER) is False

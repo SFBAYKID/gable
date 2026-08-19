@@ -215,8 +215,12 @@ def test_required_title_is_not_inferred_when_exact_profile_has_none() -> None:
     )
 
     assert checked.ready is False
-    assert "no title or credential" in checked.problem
     assert checked.title == ""
+    # The remedy has to be true. Carmen was told three times to correct a
+    # credential in the request or the workbook; neither can carry one.
+    assert "job-title field is empty" in checked.problem
+    assert "Correct the request or Agents Contact Information" not in checked.problem
+    assert "cannot reach me" in checked.problem
 
 
 def test_required_title_lookup_flags_website_and_workbook_phone_conflict() -> None:
@@ -520,3 +524,64 @@ def test_two_pages_giving_different_direct_lines_are_still_refused() -> None:
 
     assert found.profile is None
     assert "more than one direct phone number" in found.problem
+
+
+def test_a_credential_written_into_the_name_still_finds_the_official_profile() -> None:
+    """Caleb Olawuyi, 2026-08-19: Gable's own instruction broke its own lookup.
+
+    Told to add REALTOR to the request, Carmen wrote the name as "Caleb
+    Olawuyi, Realtor". Searching that whole string returns nothing from
+    WordPress, and the two-word retry then failed to match "Caleb Olawuyi"
+    because the comma was read as part of the surname.
+    """
+    branded = "Caleb Olawuyi, Realtor"
+    full_url = f"{OFFICIAL_PAGES_API}?" + urllib.parse.urlencode(
+        {"search": branded, "per_page": "20", "_fields": "link,title"}
+    )
+    retry_url = f"{OFFICIAL_PAGES_API}?" + urllib.parse.urlencode(
+        {"search": "caleb olawuyi", "per_page": "20", "_fields": "link,title"}
+    )
+    profile_url = "https://cornerhouserealty.com/caleb-olawuyi/"
+    responses = {
+        full_url: (b"[]", full_url),
+        retry_url: (
+            json.dumps([{"link": profile_url, "title": {"rendered": "Caleb Olawuyi"}}]).encode(),
+            retry_url,
+        ),
+        profile_url: (
+            b"""
+            <div class="cbl__widget cbl__widget--job_title">
+              <div class="cb-title">REALTOR</div>
+            </div>
+            <div class="contact-button__dropdown">
+              <div><a href="mailto:caleb%40cornerhouserealty.com">email</a></div>
+              <div><a href="tel:443-301-4659">phone</a></div>
+            </div>
+            """,
+            profile_url,
+        ),
+    }
+
+    found = lookup_official_profile(
+        branded,
+        "caleb@cornerhouserealty.com",
+        fetch=lambda url: responses[url],
+    )
+
+    assert found.profile is not None, found.problem
+    assert found.profile.phone == "443-301-4659"
+    assert found.profile.title == "REALTOR"
+
+
+def test_a_shorter_official_name_is_still_not_a_different_agent() -> None:
+    """Punctuation tolerance must not loosen who counts as the same person."""
+    from gable.agents.website import _is_branded_form_of
+
+    assert _is_branded_form_of("Caleb Olawuyi, Realtor", "Caleb Olawuyi") is True
+    assert _is_branded_form_of("Bobby Carr The Dog Walking Realtor", "Bobby Carr") is True
+    # A different first name, a lone first name, and an equal name all refuse.
+    assert _is_branded_form_of("Bobby Carr The Dog Walking Realtor", "Bob Carr") is False
+    assert _is_branded_form_of("Caleb Olawuyi, Realtor", "Caleb") is False
+    assert _is_branded_form_of("Caleb Olawuyi", "Caleb Olawuyi") is False
+    # The suffix must follow the whole official name, not replace part of it.
+    assert _is_branded_form_of("Caleb Olawuyi, Realtor", "Caleb Olawuyi Open Houses") is False

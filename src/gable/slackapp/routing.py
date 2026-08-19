@@ -5,6 +5,10 @@ through this module. Ordinary replies and file shares are accepted only when
 the thread root was written by Gable or originally mentioned Gable. A lookup
 failure stays silent: replying in another agent's thread is worse than requiring
 one explicit mention after a temporary Slack failure.
+
+Owning a thread is not the same as being spoken to. A reply that names another
+person and not Gable is two humans talking in front of it, and Gable stays out
+of it — see `addresses_someone_else`.
 """
 
 from __future__ import annotations
@@ -26,6 +30,9 @@ DEFAULT_REPLAY_CACHE_SIZE: Final[int] = 2048
 # stay outside the conversational path.
 _ROUTABLE_SUBTYPES: Final[frozenset[str]] = frozenset(("", "file_share", "thread_broadcast"))
 
+#: Slack's user-mention markup, with or without the trailing display name.
+_USER_MENTION: Final[re.Pattern[str]] = re.compile(r"<@([UW][A-Z0-9]+)(?:\|[^>]*)?>")
+
 
 class MessageRoute(Enum):
     """The only ordinary-message paths Gable is allowed to take."""
@@ -45,6 +52,38 @@ def has_shared_files(event: dict[str, Any]) -> bool:
     """
     files = event.get("files")
     return isinstance(files, list) and bool(files)
+
+
+def addresses_someone_else(text: str, *, bot_user_id: str) -> bool:
+    """Return whether a reply speaks to another person rather than to Gable.
+
+    Carmen and Chase share Gable's listing threads and talk to each other
+    inside them. "@Carmen one sec let me look at this" is Chase asking Carmen
+    to wait; Gable answered it with "Take your time, Chase" on 2026-08-19, and
+    had already answered "@Chase? I'm not sure what to do here" in the same
+    thread. Both were addressed to a person by name, and neither was a question
+    for Gable.
+
+    An explicit mention of Gable always wins, so "@Carmen I'll have @Gable run
+    it again" is still Gable's to answer. A message mentioning nobody is
+    ordinary thread conversation and stays Gable's, which is how Carmen replies
+    without addressing it every time.
+
+    Args:
+        text: The raw message text, with Slack's mention markup intact.
+        bot_user_id: Gable's Slack bot-user id.
+
+    Returns:
+        True when the message mentions at least one user and none of them is
+        Gable.
+
+    Raises:
+        Nothing.
+    """
+    mentioned = {match.group(1) for match in _USER_MENTION.finditer(text or "")}
+    if not mentioned or not bot_user_id:
+        return False
+    return bot_user_id not in mentioned
 
 
 class EventReplayGuard:
@@ -155,7 +194,12 @@ class ThreadOwnership:
         if not self._belongs_to_gable(event, client, bot_user_id=bot_user_id, bot_id=bot_id):
             return MessageRoute.IGNORE
         if subtype == "file_share" or has_shared_files(event):
+            # A photo in Gable's own listing thread is still the photo it asked
+            # for, whoever the uploader was talking to, so the check below is
+            # deliberately limited to conversation.
             return MessageRoute.FILE_SHARE
+        if addresses_someone_else(str(event.get("text") or ""), bot_user_id=bot_user_id):
+            return MessageRoute.IGNORE
         return MessageRoute.THREAD_REPLY
 
     def remember_owned(self, channel: str, thread_ts: str) -> None:

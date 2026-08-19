@@ -154,6 +154,21 @@ allowed fallback fills a workbook blank or a source-required credential for the
 current run only after an exact official Corner House Realty profile confirms
 the submitted name and email. A credential such as REALTOR is never inferred.
 
+Because it is never inferred, nobody can supply one either. A credential typed
+in the thread or filed in Agents Contact Information does not reach Gable — the
+roster workbook has no title column, and `validate_contact` reads the title only
+from the profile. When a design prints a credential and the profile's job-title
+field is empty, Gable says exactly that and names the profile as the only place
+it can be fixed. It must never ask for the credential to be added to the request
+or the workbook: Carmen was sent around that loop four times for Caleb Olawuyi
+on 2026-08-19, and the third attempt — appending "Realtor" to his name on the
+request — also broke the profile match.
+
+An agent name that carries branding still matches the official profile. "Caleb
+Olawuyi, Realtor" and "Bobby Carr The Dog Walking Realtor" both nominate their
+official page; identity is still proven by a contact detail on that page, never
+by the name.
+
 ### 2.5 Batch delivered
 
 ```
@@ -221,6 +236,14 @@ with it.
 
 Inside one of those threads, Carmen or Chase does not repeat `@gable` on every
 message. The listing thread is already the context.
+
+Owning the thread is not the same as being spoken to. When a reply names another
+person and does not name Gable — "@Carmen one sec let me look at this", or
+"@Chase? I'm not sure what to do here" — two humans are talking in front of
+Gable and it stays out of it. Naming Gable alongside somebody else is still
+Gable's to answer, and a reply naming nobody is ordinary thread conversation.
+A shared photo is taken either way: the photo is what the thread is for,
+whoever the caption was addressed to.
 
 Inside a thread started by Monarch Website Watcher, another app, or a person who
 did not address Gable in the root, Gable stays silent unless the new message

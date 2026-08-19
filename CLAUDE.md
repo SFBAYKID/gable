@@ -294,6 +294,20 @@ call on 2026-08-12:
     point of item 4.3-style evidence: the fallback in `intake.COLUMNS` documents
     a shape that no longer exists and must never become load-bearing.
 
+12. **A real agent profile can carry an empty job-title field, so "the site is
+    the only source of a credential" is a policy that can strand a working
+    agent.** Read live 2026-08-19: `cornerhouserealty.com/caleb-olawuyi/`
+    serves Caleb Olawuyi's email and direct phone from its contact block and a
+    `cbl__widget--job_title` whose `cb-title` div is literally empty. He is a
+    real, listed agent with a complete contact workbook row, and every design
+    that prints a credential is unbuildable for him until somebody edits that
+    page — which is not something Carmen can do from Slack. The refusal is the
+    policy working as designed, not a bug; whether the policy should admit a
+    human-supplied credential is Chase's call and is open in `STATUS.md`. Also
+    confirmed the same day: the WordPress page search returns `[]` for the whole
+    string "Caleb Olawuyi, Realtor" and returns his pages for "caleb olawuyi",
+    which is why the two-word retry exists and why it must strip punctuation.
+
 Each of these cost a real failure to learn. They are in the decision log with
 their evidence.
 
