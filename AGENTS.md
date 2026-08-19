@@ -494,6 +494,14 @@ Gable must never:
    the design's own placeholder is deliberately left showing for Carmen to type
    over. What is forbidden is the silence: calling a flyer finished while a
    placeholder sits on it unmentioned. Say which ones, every time.
+
+   **Except where the placeholder cannot be read as a gap.** "PROPERTY ADDRESS"
+   is obviously not an address; the bare "3" a design draws in its bathrooms
+   slot is indistinguishable from a real bathroom count, and leaving it showing
+   states a fact about somebody's house that nobody supplied. Beds, baths,
+   square footage and price are blanked when unfilled — the icon and its label
+   stay, so the flyer reads as incomplete rather than as wrong — and Gable still
+   names them.
 9. **Retry a failing listing more than 3 times.** After that, fail it loudly and
    move on. Retry storms can take the 1 GB process down and spend in a loop.
 10. **Log a secret**, or echo a token into Slack.

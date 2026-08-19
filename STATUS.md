@@ -77,6 +77,16 @@ everything. An agent the roster does not carry still stops, and now says so.
 Mike Nugent is that case: no row exists for him despite Carmen believing she
 added one.
 
+**A flyer stated a fact nobody supplied.** Mike Nugent's read "3 Bathrooms"
+because that is what New Listing is drawn with and Carmen had given only beds,
+square footage and price. The rule that leaves a design's placeholder showing
+was written for "PROPERTY ADDRESS", which reads as a gap; a bare number reads
+as data. Auditing the 31 flyers delivered since going live found three: Andy
+Jang's bedrooms, Lina Mariner's asking price, and Mike Nugent's bathrooms.
+Those slots are now blanked when unfilled. **The two older flyers were
+delivered to Carmen and may have gone further — they are worth checking with
+her.**
+
 **Still worth undoing by hand:** the agent name on Caleb's request row. Gable
 reads that tab and never writes to it, and nothing now depends on it being
 fixed — but it is still wrong in the source of record.

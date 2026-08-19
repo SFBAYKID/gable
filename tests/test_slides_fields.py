@@ -31,3 +31,38 @@ def test_a_bare_realtor_credential_is_data_not_brand_copy() -> None:
 
     assert resolution.fields == {"agent_title": "Realtor"}
     assert fields.replacements(resolution, {"agent_title": ""}) == {}
+
+
+def test_an_unfilled_stat_is_blanked_rather_than_left_as_the_designs_number() -> None:
+    """Three delivered flyers stated a number nobody supplied.
+
+    Mike Nugent's flyer read "3 Bathrooms" because New Listing is drawn with
+    three, and Carmen had given only beds, square footage and price. A reader
+    cannot tell that from a supplied figure, so it is a claim about somebody's
+    house that nobody made.
+    """
+    resolution = fields.Resolution(
+        fields={"beds": "4", "baths": "3", "square_feet": "2,430", "price": "$350,000"},
+        also={},
+    )
+
+    pairs = fields.replacements(
+        resolution, {"beds": "3", "square_feet": "1,880", "price": "$379,000"}
+    )
+
+    assert pairs["3"] == "", "the bathrooms slot is emptied, not left showing"
+    assert pairs["4"] == "3"
+    assert pairs["2,430"] == "1,880"
+    assert pairs["$350,000"] == "$379,000"
+
+
+def test_a_placeholder_that_reads_as_a_gap_is_still_left_showing() -> None:
+    """The rule is narrow: only slots whose placeholder looks like real data."""
+    resolution = fields.Resolution(
+        fields={"address": "PROPERTY ADDRESS", "listing_note": "Ready to Buy?"},
+        also={},
+    )
+
+    pairs = fields.replacements(resolution, {})
+
+    assert pairs == {}, "an obvious placeholder still survives to be asked about"

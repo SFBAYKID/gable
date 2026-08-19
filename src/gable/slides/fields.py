@@ -512,6 +512,13 @@ _MATCH_PLACEHOLDER_CASE: Final[frozenset[str]] = frozenset({"agent_title"})
 #: counts. The word belongs to the design, so a filled value keeps it.
 _MEASUREMENT_FIELDS: Final[frozenset[str]] = frozenset({"beds", "baths", "square_feet"})
 
+#: Fields whose placeholder is a plausible value rather than a visible gap. A
+#: bare "3" in a bathrooms slot cannot be told from a real bathroom count, and
+#: three delivered flyers carried one: Andy Jang's bedrooms, Lina Mariner's
+#: asking price, Mike Nugent's bathrooms. Blanked, so the flyer reads as
+#: incomplete rather than as wrong. See DECISIONS.md, 2026-08-19.
+_BLANK_WHEN_UNFILLED: Final[frozenset[str]] = frozenset({"beds", "baths", "square_feet", "price"})
+
 #: The digits and separators at the start of a measurement, e.g. `2,450` in
 #: "2,450 SQFT" or in "2,450 square feet".
 _LEADING_NUMBER: Final[re.Pattern[str]] = re.compile(r"^\s*([\d,]*\d)")
@@ -752,9 +759,14 @@ def _open_house_part(literal: str, value: str) -> str:
 def replacements(resolution: Resolution, values: dict[str, str]) -> dict[str, str]:
     """Turn resolved fields plus data into literal find/replace pairs.
 
-    Only fields with a value are included. A field the data cannot fill is left
-    alone so its placeholder stays visible — that is how a gap survives long
-    enough for someone to be asked about it.
+    Only fields with a value are included, so a field the data cannot fill is
+    left alone and its placeholder stays visible — that is how a gap survives
+    long enough for someone to be asked about it.
+
+    The exception is a placeholder nobody can read as a gap. A stat slot is
+    drawn with a real-looking number, so leaving it showing states a fact about
+    somebody's house that nobody supplied. Those are blanked; see
+    `_BLANK_WHEN_UNFILLED`.
 
     Args:
         resolution: What the template's text means.
@@ -766,17 +778,19 @@ def replacements(resolution: Resolution, values: dict[str, str]) -> dict[str, st
     Raises:
         Nothing.
     """
-    pairs = {
-        literal: _as_written(name, literal, values[name])
-        for name, literal in resolution.fields.items()
-        if values.get(name, "").strip()
-    }
+    pairs: dict[str, str] = {}
+    for name, literal in resolution.fields.items():
+        value = values.get(name, "").strip()
+        if value:
+            pairs[literal] = _as_written(name, literal, value)
+        elif name in _BLANK_WHEN_UNFILLED:
+            pairs[literal] = ""
     # Every other literal carrying the same field, so a design that labels one
     # thing twice does not ship with the second label still showing.
     for name, extras in resolution.also.items():
         value = values.get(name, "").strip()
-        if not value:
+        if not value and name not in _BLANK_WHEN_UNFILLED:
             continue
         for literal in extras:
-            pairs[literal] = _as_written(name, literal, value)
+            pairs[literal] = _as_written(name, literal, value) if value else ""
     return pairs
