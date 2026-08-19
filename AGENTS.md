@@ -259,7 +259,10 @@ person and does not name Gable — "@Carmen one sec let me look at this", or
 Gable and it stays out of it. Naming Gable alongside somebody else is still
 Gable's to answer, and a reply naming nobody is ordinary thread conversation.
 A shared photo is taken either way: the photo is what the thread is for,
-whoever the caption was addressed to.
+whoever the caption was addressed to. It is also taken however Slack announces
+it — attached to the message, or in the separate `file_shared` notice Slack
+sends when it attaches the file a moment after the message. One upload is
+placed once, because both routes identify a photo by its file id.
 
 Inside a thread started by Monarch Website Watcher, another app, or a person who
 did not address Gable in the root, Gable stays silent unless the new message

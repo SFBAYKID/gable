@@ -233,6 +233,77 @@ def _submission(stored: store.StoredSubmission) -> repo.Submission:
     )
 
 
+def shared_file_event(event: dict[str, Any], client: Any) -> dict[str, Any] | None:  # noqa: ANN401
+    """Turn a ``file_shared`` notice into the message-shaped event the handoff reads.
+
+    Slack's current upload flow can post the message first and attach the file a
+    moment later. The ``message`` event then arrives with no ``files`` array at
+    all, and the upload is announced only by ``file_shared`` — which Gable did
+    not subscribe to until 2026-08-19. That is why Caleb Olawuyi's photo never
+    reached it while Carmen's next one did: a race, not a broken path.
+
+    The result is deliberately shaped like the message event, so exactly one
+    code path fits and places a photograph however Slack chose to announce it.
+
+    Args:
+        event: Slack's ``file_shared`` event.
+        client: Slack Web API client.
+
+    Returns:
+        A message-shaped event carrying the file, its channel and its thread, or
+        ``None`` when the file cannot be placed in exactly one thread. ``None``
+        is the safe answer: the ordinary message path may still carry it, and
+        guessing a thread would put somebody's photo on another listing.
+
+    Raises:
+        Nothing. A lookup failure is logged and becomes ``None``.
+    """
+    file_id = str(event.get("file_id") or (event.get("file") or {}).get("id") or "").strip()
+    if not file_id:
+        return None
+    try:
+        # https://docs.slack.dev/reference/methods/files.info/
+        answer = client.files_info(file=file_id)
+    except Exception:
+        logger.exception("could not read the details of shared file %s", file_id)
+        return None
+    info = answer.get("file") if isinstance(answer, dict) else None
+    if not isinstance(info, dict):
+        return None
+    if not str(info.get("mimetype") or "").startswith("image/"):
+        return None
+
+    shares = info.get("shares")
+    placements: list[tuple[str, dict[str, Any]]] = []
+    if isinstance(shares, dict):
+        for group in shares.values():
+            if not isinstance(group, dict):
+                continue
+            for channel_id, entries in group.items():
+                if not isinstance(entries, list):
+                    continue
+                placements.extend(
+                    (str(channel_id), entry) for entry in entries if isinstance(entry, dict)
+                )
+    # One share is the ordinary case. Several means the same file sits in more
+    # than one place, and choosing between them is the guess this refuses.
+    if len(placements) != 1:
+        return None
+    channel_id, placement = placements[0]
+    thread_ts = str(placement.get("thread_ts") or placement.get("ts") or "")
+    if not thread_ts:
+        return None
+    return {
+        "channel": channel_id,
+        "thread_ts": thread_ts,
+        "ts": str(placement.get("ts") or ""),
+        "user": str(info.get("user") or event.get("user_id") or ""),
+        "parent_user_id": str(placement.get("parent_user_id") or ""),
+        "text": "",
+        "files": [{"id": file_id, "mimetype": str(info.get("mimetype") or "")}],
+    }
+
+
 def process_file_share(
     event: dict[str, Any],
     say: Any,  # noqa: ANN401 - Bolt injection, untyped upstream
@@ -377,9 +448,14 @@ class PhotoHandoff:
             if run is None:
                 return "I could not match this thread to a listing, so I left the upload alone."
             run_id = run.run_id
-            event_id = str(
-                event.get("client_msg_id") or event.get("event_ts") or event.get("ts") or file_id
-            ).strip()
+            # The file id is the one identifier both announcement paths share.
+            # An upload can be announced twice — by the message that carried it,
+            # and by the `file_shared` event Slack sends when it attaches the
+            # file a moment later — and keying on the message would let one
+            # photo rebuild the flyer twice. Re-sending the same image to the
+            # same run therefore reads as already handled, which is correct:
+            # that photo is already on the flyer.
+            event_id = file_id
             if not event_id:
                 return (
                     "Slack did not identify that photo message, so I left the listing "

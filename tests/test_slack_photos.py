@@ -19,10 +19,7 @@ from gable.pipeline.runner import RunResult
 from gable.sheets import repository as repo
 from gable.slackapp.brain import Decision
 from gable.slackapp.editing import SlideEditor
-from gable.slackapp.photos import (
-    PhotoHandoffError,
-    _SlackOnlyRedirectHandler,
-)
+from gable.slackapp.photos import PhotoHandoffError, _SlackOnlyRedirectHandler
 from gable.slackapp.recovery import notify_pending_run_questions
 from tests.photo_support import (
     PUBLIC_URL,

@@ -26,6 +26,7 @@
     "event_subscriptions": {
       "bot_events": [
         "app_mention",
+        "file_shared",
         "message.channels"
       ]
     },

@@ -38,7 +38,7 @@ from gable.slackapp.context import (
     first_name_of,
     thread_history,
 )
-from gable.slackapp.photos import process_file_share
+from gable.slackapp.photos import process_file_share, shared_file_event
 from gable.slackapp.routing import (
     EventReplayGuard,
     MessageRoute,
@@ -531,5 +531,47 @@ def build_app(
             )
         except Exception:
             logger.exception("message handler failed")
+
+    @app.event("file_shared")
+    def handle_file_shared(
+        event: dict[str, Any],
+        client: Any,  # noqa: ANN401 - Slack WebClient, untyped upstream
+        context: Any,  # noqa: ANN401 - Bolt context, untyped upstream
+    ) -> None:
+        """Place a photo Slack announced separately from the message carrying it.
+
+        Slack can post the message first and attach the file a moment later, so
+        the `message` event arrives with no files at all. Caleb Olawuyi's photo
+        was lost that way on 2026-08-19 and Gable asked Carmen for an image she
+        had already sent. Everything downstream is the ordinary file-share path:
+        the same ownership rule, the same handler, and the same per-file
+        identity, so an upload announced by both routes is only placed once.
+        """
+        try:
+            shaped = shared_file_event(event, client)
+            if shaped is None:
+                return
+            if allowed_channel and shaped.get("channel") != allowed_channel:
+                return
+            if not speaker_allowed(str(shaped.get("user") or ""), allowed_user_ids):
+                return
+            route = thread_ownership.route(
+                shaped,
+                client,
+                bot_user_id=str(context.get("bot_user_id") or ""),
+                bot_id=str(context.get("bot_id") or ""),
+            )
+            if route is not MessageRoute.FILE_SHARE:
+                return
+            if not replay_guard.first_delivery(shaped, route="human_message"):
+                return
+
+            def say(text: str = "", thread_ts: str | None = None) -> None:
+                """Bolt gives no thread-aware `say` for a file event, so bind one."""
+                client.chat_postMessage(channel=shaped["channel"], text=text, thread_ts=thread_ts)
+
+            process_file_share(shaped, say, client, file_share_handler)
+        except Exception:
+            logger.exception("file_shared handler failed")
 
     return app

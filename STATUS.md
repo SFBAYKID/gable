@@ -87,6 +87,14 @@ Those slots are now blanked when unfilled. **The two older flyers were
 delivered to Carmen and may have gone further — they are worth checking with
 her.**
 
+**The photo bug is fixed at the root.** Gable was never subscribed to Slack's
+`file_shared` event, so when Slack posted a message first and attached the file
+a moment later, the upload was never announced to it at all — that is why
+Caleb's photo vanished and Carmen's next one worked. The event was added to the
+live app on 2026-08-19, and `shared_file_event` feeds it into the existing photo
+handoff. Not yet proven on a real upload; the next photo Carmen sends is the
+test.
+
 **Still worth undoing by hand:** the agent name on Caleb's request row. Gable
 reads that tab and never writes to it, and nothing now depends on it being
 fixed — but it is still wrong in the source of record.
