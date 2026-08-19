@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from sqlite3 import Connection
 from typing import Any, Final
 
@@ -17,6 +17,22 @@ from gable.slides import fitting, layout, preflight
 from gable.voice import MAX_DELIVERY_CHARS, paragraphs, safe
 
 logger = logging.getLogger("gable.runner")
+
+
+@dataclass
+class RunResult:
+    """What one run did, in the words Gable would use."""
+
+    run_id: str
+    status: str
+    said: list[str] = field(default_factory=list)
+    output_url: str = ""
+    questions: list[str] = field(default_factory=list)
+
+    @property
+    def needs_a_human(self) -> bool:
+        """True when the run stopped to ask something."""
+        return self.status in {"needs_info", "needs_photo", "needs_template", "needs_review"}
 
 
 @dataclass(frozen=True, slots=True)

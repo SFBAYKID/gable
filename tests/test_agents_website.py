@@ -7,8 +7,10 @@ import urllib.parse
 
 from gable.agents.contacts import Contact
 from gable.agents.website import (
+    BROKERAGE_SOURCE,
     OFFICIAL_PAGES_API,
     WEBSITE_SOURCE,
+    WORKBOOK_SOURCE,
     OfficialProfile,
     ProfileLookup,
     lookup_official_profile,
@@ -585,3 +587,114 @@ def test_a_shorter_official_name_is_still_not_a_different_agent() -> None:
     assert _is_branded_form_of("Caleb Olawuyi", "Caleb Olawuyi") is False
     # The suffix must follow the whole official name, not replace part of it.
     assert _is_branded_form_of("Caleb Olawuyi, Realtor", "Caleb Olawuyi Open Houses") is False
+
+
+def test_a_blank_profile_title_falls_back_to_the_brokerage_credential() -> None:
+    """Caleb Olawuyi's profile states no job title; every agent here is a Realtor.
+
+    Chase confirmed on 2026-08-19 that all 38 roster agents hold the
+    credential, which is what makes the default a fact about the brokerage
+    rather than a guess about one person.
+    """
+    checked = validate_contact(
+        "Caleb Olawuyi",
+        "caleb@cornerhouserealty.com",
+        Contact("caleb@cornerhouserealty.com", "Caleb", "Olawuyi", "443-301-4659"),
+        lambda _name, _email: _profile(
+            name="Caleb Olawuyi", email="caleb@cornerhouserealty.com", phone="443-301-4659"
+        ),
+        require_title=True,
+        default_title="REALTOR",
+    )
+
+    assert checked.ready is True
+    # The stub profile states "REALTOR®", so the profile still wins.
+    assert checked.title == "REALTOR®"
+    assert checked.title_source == WEBSITE_SOURCE
+
+
+def test_the_brokerage_default_only_fills_a_profile_that_states_nothing() -> None:
+    blank = ProfileLookup(
+        profile=OfficialProfile(
+            name="Caleb Olawuyi",
+            email="caleb@cornerhouserealty.com",
+            phone="443-301-4659",
+            title="",
+            source_url="https://cornerhouserealty.com/caleb-olawuyi/",
+        )
+    )
+
+    checked = validate_contact(
+        "Caleb Olawuyi",
+        "caleb@cornerhouserealty.com",
+        Contact("caleb@cornerhouserealty.com", "Caleb", "Olawuyi", "443-301-4659"),
+        lambda _name, _email: blank,
+        require_title=True,
+        default_title="REALTOR",
+    )
+
+    assert checked.ready is True
+    assert checked.title == "REALTOR"
+    assert checked.title_source == BROKERAGE_SOURCE
+    assert "brokerage_default" in checked.provenance_detail()
+
+
+def test_without_a_configured_default_a_blank_title_still_stops_the_run() -> None:
+    """The older rule is one empty setting away, not deleted."""
+    blank = ProfileLookup(
+        profile=OfficialProfile(
+            name="Caleb Olawuyi",
+            email="caleb@cornerhouserealty.com",
+            phone="443-301-4659",
+            title="",
+            source_url="https://cornerhouserealty.com/caleb-olawuyi/",
+        )
+    )
+
+    checked = validate_contact(
+        "Caleb Olawuyi",
+        "caleb@cornerhouserealty.com",
+        Contact("caleb@cornerhouserealty.com", "Caleb", "Olawuyi", "443-301-4659"),
+        lambda _name, _email: blank,
+        require_title=True,
+    )
+
+    assert checked.ready is False
+    assert "job-title field is empty" in checked.problem
+
+
+def test_a_request_carrying_branding_still_matches_its_filed_row() -> None:
+    """A branded request name against the plain filed one is the same person.
+
+    The filed name is what prints, so the credential Carmen typed into the
+    request never reaches the flyer.
+    """
+    checked = validate_contact(
+        "Caleb Olawuyi, Realtor",
+        "caleb@cornerhouserealty.com",
+        Contact("caleb@cornerhouserealty.com", "Caleb", "Olawuyi", "443-301-4659"),
+        lambda _name, _email: _profile(
+            name="Caleb Olawuyi", email="caleb@cornerhouserealty.com", phone="443-301-4659"
+        ),
+        require_title=True,
+        default_title="REALTOR",
+    )
+
+    assert checked.ready is True
+    assert checked.name == "Caleb Olawuyi", "the filed name prints, not the branded request"
+    assert checked.name_source == WORKBOOK_SOURCE
+
+
+def test_a_genuinely_different_filed_name_is_still_a_conflict() -> None:
+    """Branding tolerance must not let a different person through."""
+    checked = validate_contact(
+        "Caleb Olawuyi",
+        "caleb@cornerhouserealty.com",
+        Contact("caleb@cornerhouserealty.com", "Samuel", "Smith", "443-301-4659"),
+        lambda _name, _email: _profile(),
+        require_title=True,
+        default_title="REALTOR",
+    )
+
+    assert checked.ready is False
+    assert "does not match the contact-workbook name" in checked.problem

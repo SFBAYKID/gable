@@ -31,6 +31,9 @@ class ContactGate:
     #: request so an agent whose official page lists a brokerage address can
     #: still be proven from a personal one.
     official_lookup: Callable[[str, str, str], website.ProfileLookup]
+    #: The credential every agent at this brokerage holds. Fills a title only
+    #: when the proven profile leaves its own job title blank.
+    default_agent_credential: str = ""
     _looked_up: bool = field(default=False, init=False)
     _official_result: website.ProfileLookup = field(
         default_factory=website.ProfileLookup,
@@ -68,7 +71,8 @@ class ContactGate:
         Args:
             run_id: Current run whose event log records this prerequisite.
             require_title: Whether the selected source contains an agent-title
-                field that needs an exact credential from the official profile.
+                field. The credential comes from the agent's own profile when it
+                states one, and otherwise from the brokerage default.
 
         Returns:
             A ready contact or one human-actionable pause reason.
@@ -85,6 +89,7 @@ class ContactGate:
             ),
             self._lookup_once,
             require_title=require_title,
+            default_title=self.default_agent_credential,
         )
         if contact.ready:
             store.set_status(

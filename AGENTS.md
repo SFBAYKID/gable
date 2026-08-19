@@ -154,15 +154,19 @@ allowed fallback fills a workbook blank or a source-required credential for the
 current run only after an exact official Corner House Realty profile confirms
 the submitted name and email. A credential such as REALTOR is never inferred.
 
-Because it is never inferred, nobody can supply one either. A credential typed
-in the thread or filed in Agents Contact Information does not reach Gable — the
-roster workbook has no title column, and `validate_contact` reads the title only
-from the profile. When a design prints a credential and the profile's job-title
-field is empty, Gable says exactly that and names the profile as the only place
-it can be fixed. It must never ask for the credential to be added to the request
-or the workbook: Carmen was sent around that loop four times for Caleb Olawuyi
-on 2026-08-19, and the third attempt — appending "Realtor" to his name on the
-request — also broke the profile match.
+A profile that states no job title falls back to the brokerage-wide credential
+in `GABLE_DEFAULT_AGENT_CREDENTIAL`, which is `REALTOR`. Chase confirmed on
+2026-08-19 that all 38 agents on the roster hold it, so this states a fact about
+the brokerage rather than guessing about a person, and the run event records
+which of the two answered. The profile always wins when it states a title.
+
+Gable therefore never asks anyone for a credential. It must never ask for one to
+be added to the request or to Agents Contact Information: neither place can
+reach it, the workbook has no title column, and Carmen was sent around that loop
+four times for Caleb Olawuyi on 2026-08-19 — the third attempt, appending
+"Realtor" to his name on the request, also broke the profile match. With the
+setting empty, a blank profile title stops the run instead, which is the older
+rule and is one edit away.
 
 An agent name that carries branding still matches the official profile. "Caleb
 Olawuyi, Realtor" and "Bobby Carr The Dog Walking Realtor" both nominate their
@@ -469,8 +473,10 @@ Gable must never:
 7. **"Correct" a submitted or workbook name, email, or phone number from web
    data.** The official Corner House Realty site may fill only a missing
    workbook value or source-required credential for the current run after one
-   exact-name profile confirms the submitted email. Never infer a credential;
-   flag every discrepancy and change neither source.
+   exact-name profile confirms the submitted email. A credential the profile
+   does not state comes from `GABLE_DEFAULT_AGENT_CREDENTIAL`, the one
+   brokerage-wide fact Chase confirmed; nothing else about an agent is ever
+   filled from a default. Flag every discrepancy and change neither source.
 8. **Report a flyer ready without naming the fields it left unfilled.** A value
    nobody supplied no longer blocks delivery — it was asked for once (§2.7) and
    the design's own placeholder is deliberately left showing for Carmen to type

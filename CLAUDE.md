@@ -301,9 +301,11 @@ call on 2026-08-12:
     `cbl__widget--job_title` whose `cb-title` div is literally empty. He is a
     real, listed agent with a complete contact workbook row, and every design
     that prints a credential is unbuildable for him until somebody edits that
-    page — which is not something Carmen can do from Slack. The refusal is the
-    policy working as designed, not a bug; whether the policy should admit a
-    human-supplied credential is Chase's call and is open in `STATUS.md`. Also
+    page — which is not something Carmen can do from Slack. The refusal was the
+    policy working as designed, not a bug. Chase settled it the same day: all 38
+    roster agents hold the credential, so a blank profile title now falls back
+    to `GABLE_DEFAULT_AGENT_CREDENTIAL` and the per-person guess stays
+    forbidden. See the reversing row in `DECISIONS.md`. Also
     confirmed the same day: the WordPress page search returns `[]` for the whole
     string "Caleb Olawuyi, Realtor" and returns his pages for "caleb olawuyi",
     which is why the two-word retry exists and why it must strip punctuation.

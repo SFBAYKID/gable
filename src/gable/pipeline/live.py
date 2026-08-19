@@ -426,6 +426,7 @@ def build_runner(
         reconcile=reconcile,
         research=default_research(settings.firecrawl_api_key, connection),
         official_contact_lookup=lookup_official_profile,
+        default_agent_credential=settings.default_agent_credential,
         place_photo=place_photo,
         place_headshot=lambda fid, url, values: place_headshot(
             slides,

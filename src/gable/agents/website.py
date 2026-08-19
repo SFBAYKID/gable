@@ -3,9 +3,13 @@
 The Drive workbook remains the first source.  When an exact workbook row is
 absent or incomplete, or a selected source requires a credential the workbook
 does not collect, this module checks the one official Corner House Realty
-website for an exact-name profile.  A website value fills that gap for the
-current run; it never overwrites the workbook, changes a submitted value, or
-resolves a conflict by choosing whichever source looks more plausible.
+website for an exact-name profile.  A credential the profile does not state
+falls back to the configured brokerage-wide default, which is a fact about the
+brokerage rather than a guess about a person; the profile always wins when it
+states one, and the two are told apart in the recorded provenance.  A website
+value fills that gap for the current run; it never overwrites the workbook,
+changes a submitted value, or resolves a conflict by choosing whichever source
+looks more plausible.
 
 A *complete* workbook row is also cross-checked against that profile, because a
 complete row is not the same as a correct one.  Only the direct phone is
@@ -37,6 +41,11 @@ OFFICIAL_HOST: Final[str] = "cornerhouserealty.com"
 OFFICIAL_PAGES_API: Final[str] = f"https://{OFFICIAL_HOST}/wp-json/wp/v2/pages"
 WORKBOOK_SOURCE: Final[str] = "contact_workbook"
 WEBSITE_SOURCE: Final[str] = "official_website"
+#: A credential that comes from the configured brokerage-wide default rather
+#: than from this agent's own profile. Named separately so a run event says
+#: which of the two answered, and so an audit can find every flyer that leaned
+#: on the default.
+BROKERAGE_SOURCE: Final[str] = "brokerage_default"
 _TIMEOUT_SECONDS: Final[int] = 20
 #: How many same-named candidate pages are worth reading before giving up. Two
 #: is the real case — a profile and its open-houses twin — and the cap bounds a
@@ -294,6 +303,7 @@ def validate_contact(
     official_lookup: Callable[[str, str], ProfileLookup],
     *,
     require_title: bool = False,
+    default_title: str = "",
 ) -> ContactCheck:
     """Prove name, email, and direct phone before any listing announcement.
 
@@ -305,9 +315,11 @@ def validate_contact(
             incomplete workbook value or a source-required title, and it
             cross-checks the direct phone on an otherwise complete row. It
             never resolves a conflict by choosing a winner.
-        require_title: Whether this exact source has an agent-title field. A
-            REALTOR credential is never inferred merely because someone is an
-            agent; it must appear on the exact official profile.
+        require_title: Whether this exact source has an agent-title field.
+        default_title: The credential every agent at this brokerage holds, used
+            only when the proven profile states no title of its own. Empty
+            restores the older rule, under which a blank profile job title
+            stops the run.
 
     Returns:
         Resolved values with field-level provenance, or a precise pause reason.
@@ -339,7 +351,15 @@ def validate_contact(
             # different person.  A populated component that disagrees is a real
             # conflict and must never be web-corrected.
             incomplete = not (workbook.first_name.strip() and workbook.last_name.strip())
-            if not incomplete or not _partial_workbook_name_matches(name, workbook):
+            # A request carrying the filed name plus a suffix is the branding
+            # case the official-profile match already allows, and the filed name
+            # is what prints. Caleb Olawuyi's request read "Caleb Olawuyi,
+            # Realtor" against a filed "Caleb Olawuyi" — same person, same
+            # email, and refusing there helps nobody.
+            branded = _is_branded_form_of(name, workbook_name)
+            if not branded and (
+                not incomplete or not _partial_workbook_name_matches(name, workbook)
+            ):
                 return ContactCheck(
                     problem=_pause(
                         label,
@@ -348,7 +368,12 @@ def validate_contact(
                     )
                 )
 
-    name_ready = bool(workbook_name and _name_key(workbook_name) == _name_key(name))
+    name_ready = bool(
+        workbook_name
+        and (
+            _name_key(workbook_name) == _name_key(name) or _is_branded_form_of(name, workbook_name)
+        )
+    )
     email_ready = workbook is not None
     phone_ready = bool(workbook is not None and _phone_is_usable(workbook.phone))
     if name_ready and email_ready and phone_ready and workbook is not None and not require_title:
@@ -415,7 +440,12 @@ def validate_contact(
                 "the official website profile phone does not match the contact-workbook phone.",
             )
         )
-    if require_title and not profile.title.strip():
+    # The profile's own title always wins; the brokerage default only fills a
+    # blank one. Chase confirmed on 2026-08-19 that all 38 agents on the roster
+    # hold the credential, which is what makes a default honest here: it states
+    # a fact about the brokerage rather than guessing about a person.
+    resolved_title = profile.title.strip() or default_title.strip()
+    if require_title and not resolved_title:
         return ContactCheck(problem=_credential_pause(label))
 
     # Website evidence is allowed to fill only what the exact workbook row did
@@ -424,11 +454,13 @@ def validate_contact(
         name=workbook_name if name_ready else profile.name,
         email=email,
         phone=workbook.phone.strip() if phone_ready and workbook is not None else profile.phone,
-        title=profile.title.strip() if require_title else "",
+        title=resolved_title if require_title else "",
         name_source=WORKBOOK_SOURCE if name_ready else WEBSITE_SOURCE,
         email_source=WORKBOOK_SOURCE if email_ready else WEBSITE_SOURCE,
         phone_source=WORKBOOK_SOURCE if phone_ready else WEBSITE_SOURCE,
-        title_source=WEBSITE_SOURCE if require_title else "",
+        title_source=(
+            (WEBSITE_SOURCE if profile.title.strip() else BROKERAGE_SOURCE) if require_title else ""
+        ),
         source_url=profile.source_url,
     )
 

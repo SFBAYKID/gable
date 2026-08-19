@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from sqlite3 import Connection
 from typing import Any
 
@@ -28,6 +28,10 @@ from gable.pipeline import (
 from gable.pipeline import questions as run_questions
 from gable.pipeline.contact_gate import ContactGate
 from gable.pipeline.orchestrator import Outcome, agent_slots, judge, plan
+
+# Re-exported: RunResult moved to run_reporting when this file reached the
+# 800-line ceiling, so importers still say `from gable.pipeline.runner import`.
+from gable.pipeline.run_reporting import RunResult as RunResult
 from gable.pipeline.vision import Inspection, default_look_at
 from gable.sheets import repository as repo
 from gable.slides import fields as template_fields
@@ -41,22 +45,6 @@ logger = logging.getLogger("gable.runner")
 def _ignore_headshot(_file_id: str, _url: str, _values: dict[str, str]) -> None:
     """Default test seam for designs without a live Slides client."""
     return
-
-
-@dataclass
-class RunResult:
-    """What one run did, in the words Gable would use."""
-
-    run_id: str
-    status: str
-    said: list[str] = field(default_factory=list)
-    output_url: str = ""
-    questions: list[str] = field(default_factory=list)
-
-    @property
-    def needs_a_human(self) -> bool:
-        """True when the run stopped to ask something."""
-        return self.status in {"needs_info", "needs_photo", "needs_template", "needs_review"}
 
 
 @dataclass
@@ -126,6 +114,10 @@ class Runner:
             )
         )
     )
+    #: The credential every agent at this brokerage holds, printed when a design
+    #: has a title field and the agent's official profile leaves its job title
+    #: blank. Empty means a blank profile title stops the run, as it used to.
+    default_agent_credential: str = ""
     #: Publishes this agent's headshot and returns a URL Slides can fetch.
     #: Preflight stops if the design has a headshot well and this stays empty.
     headshot_for: Callable[[str], str] = lambda _name: ""
@@ -253,7 +245,12 @@ class Runner:
     def _sequence(self, run_id: str, intake: Intake, result: RunResult) -> RunResult:
         """The ordered steps. Split out so `run` owns only the failure boundary."""
         self.progress("is checking the agent contact information...")
-        contact_gate = ContactGate(self.connection, intake, self.official_contact_lookup)
+        contact_gate = ContactGate(
+            self.connection,
+            intake,
+            self.official_contact_lookup,
+            default_agent_credential=self.default_agent_credential,
+        )
         contact = contact_gate.check(run_id)
         if not contact.ready:
             return self._ask(run_id, intake, contact.problem, [], result, status="needs_info")

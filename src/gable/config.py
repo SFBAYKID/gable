@@ -132,6 +132,12 @@ class Settings:
     # --- Firecrawl ---
     firecrawl_api_key: str
 
+    # --- Agent credential ---
+    #: The credential every agent at this brokerage holds, printed on designs
+    #: with a title field when the official profile leaves its job title blank.
+    #: A profile that states a title always wins; this only fills a gap.
+    default_agent_credential: str
+
     # --- Photo policy ---
     photo_policy: PhotoPolicy
 
@@ -257,6 +263,9 @@ class Settings:
                 "GABLE_SLIDE_HEIGHT_PX", 1350, minimum=100, maximum=MAX_TARGET_EDGE_PX
             ),
             firecrawl_api_key=reader.secret("FIRECRAWL_API_KEY", require_credentials),
+            default_agent_credential=reader.str_value(
+                "GABLE_DEFAULT_AGENT_CREDENTIAL", "REALTOR"
+            ).strip(),
             photo_policy=reader.enum_value(
                 "GABLE_PHOTO_POLICY", PhotoPolicy, PhotoPolicy.RETRIEVE_ONLY
             ),

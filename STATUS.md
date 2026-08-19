@@ -36,31 +36,29 @@ something it was right about. The refusal was sound; the sentence was not.
    already answered Carmen's "@Chase? I'm not sure what to do here". A reply
    naming a person other than Gable is now left alone.
 
-### Chase's call — blocking Caleb's flyer
+### Settled the same day: one brokerage-wide credential
 
-**May a human supply a credential?** Today only the website may, and Caleb's
-page leaves it blank, so his Under Contract flyer cannot be built at all until
-somebody edits that page. Two ways out:
+Chase confirmed all 38 roster agents are Realtors and asked for the code change
+rather than a per-agent website edit. `GABLE_DEFAULT_AGENT_CREDENTIAL=REALTOR`
+now fills a title the agent's own profile leaves blank. The per-person guess
+stays forbidden, a profile that states a title still wins, provenance separates
+`official_website` from `brokerage_default`, and emptying the variable restores
+the old refusal exactly. See the reversing row in `DECISIONS.md`.
 
-- **Add "REALTOR" to Caleb's profile on cornerhouserealty.com.** No code
-  changes, nothing to review, and it fixes the source everything else already
-  trusts. Whoever maintains the site can do it in a minute. This is the
-  recommendation.
-- **Let Carmen or Chase state a credential in the thread, recorded with
-  provenance.** "Never infer" was written against Gable guessing that an agent
-  is a REALTOR because they sell houses. A named human stating a fact they know
-  is not inference — but it is a real change to the contact rules, and it needs
-  a title column in Agents Contact Information to survive a rerun, so it is not
-  a five-minute change and it is not mine to make.
+Caleb was also added to Agents Contact Information, and the workbook name check
+now tolerates a request carrying branding — his request still reads "Caleb
+Olawuyi, Realtor", and without that it would have failed on a name conflict the
+moment he was filed. The filed name is what prints, so the credential Carmen
+typed into the request never reaches the flyer.
 
-Until one is chosen, any agent whose profile has an empty job title is blocked
-on every design that prints a credential. Nobody has counted how many of the
-roster that is — worth checking if the answer is not "add it to the profile".
+**Still worth undoing by hand:** the agent name on Caleb's request row. Gable
+reads that tab and never writes to it, and nothing now depends on it being
+fixed — but it is still wrong in the source of record.
 
-**One thing still needs undoing by hand:** the agent name on Caleb's request row
-reads "Caleb Olawuyi, Realtor". Gable reads that tab and never writes to it, so
-Carmen or Chase has to put it back to "Caleb Olawuyi" — otherwise it prints on
-the flyer, and it conflicts with his workbook row.
+**Worth acting on next:** `runner.py` sat at exactly 800 lines, so one setting
+broke the ceiling and `RunResult` was moved out to buy room. `_sequence` is a
+single 489-line method; that is the real design signal, and splitting it is its
+own task rather than something to wedge into a hotfix.
 
 ## 2026-08-17 — Reels and Stories are skipped, silently
 
