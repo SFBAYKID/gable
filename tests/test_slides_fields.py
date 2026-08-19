@@ -66,3 +66,22 @@ def test_a_placeholder_that_reads_as_a_gap_is_still_left_showing() -> None:
     pairs = fields.replacements(resolution, {})
 
     assert pairs == {}, "an obvious placeholder still survives to be asked about"
+
+
+def test_two_fields_sharing_one_placeholder_are_reported() -> None:
+    """A design drawn 3 bed / 3 bath would fill both slots with one number.
+
+    `replacements` is keyed by the literal, so the second field overwrites the
+    first and `replace_text` swaps every occurrence. The standalone-literal
+    guard cannot see it: both occurrences really are standalone. None of the
+    six designs does this today; a redrawn one could.
+    """
+    resolution = fields.Resolution(fields={"beds": "3", "baths": "3"}, also={})
+
+    assert fields.fields_sharing_a_literal(resolution) == {"3": ["beds", "baths"]}
+
+
+def test_an_unambiguous_design_reports_nothing() -> None:
+    resolution = fields.Resolution(fields={"beds": "4", "baths": "3"}, also={})
+
+    assert fields.fields_sharing_a_literal(resolution) == {}

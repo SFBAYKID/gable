@@ -486,6 +486,21 @@ def analyze(
             )
         )
 
+    shared = fields.fields_sharing_a_literal(resolution)
+    if shared:
+        literal, names = next(iter(sorted(shared.items())))
+        readable = " and ".join(name.replace("_", " ") for name in sorted(names))
+        issues.append(
+            Issue(
+                "ambiguous_literal",
+                f"I checked the {template_label} design before building. Its {readable} "
+                f"sections both read {literal!r}, so I cannot tell which is which and "
+                "would have to write the same value into both. Make them different, "
+                "then tell me to check it again.",
+                blocking=True,
+            )
+        )
+
     if not resolution.is_usable_for(category):
         issues.append(
             Issue(
