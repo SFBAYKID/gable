@@ -51,6 +51,14 @@ Olawuyi, Realtor", and without that it would have failed on a name conflict the
 moment he was filed. The filed name is what prints, so the credential Carmen
 typed into the request never reaches the flyer.
 
+**A third message defect, same shape as the first two.** Gable announced the
+listing by its address and then said "I still need the address". The check is
+right — no state, and the design prints street, city, state and ZIP — but the
+sentence contradicted the message above it. It now echoes the address in hand
+and names the fault. Chase spotted this one; that is three times in one morning
+that a correct refusal was wearing a wrong sentence, which is worth treating as
+a pattern rather than three bugs.
+
 **Still worth undoing by hand:** the agent name on Caleb's request row. Gable
 reads that tab and never writes to it, and nothing now depends on it being
 fixed — but it is still wrong in the source of record.

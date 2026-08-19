@@ -407,7 +407,9 @@ class Runner:
         if not allow_blank and template_manifest.needs_a_whole_address(
             template_manifest.manifest_for(template_label), values
         ):
-            outstanding.add_value("address")
+            # Named precisely, not as a missing value: see
+            # `needs.incomplete_address` for the announcement it contradicted.
+            outstanding.add_blocker(needs.incomplete_address(values.get("address", "")))
 
         # A listing flyer without its photograph is not a draft. The template
         # has already been checked, so the upload can resume this same run and

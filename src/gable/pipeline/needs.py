@@ -27,6 +27,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Final
 
+from gable.listings.address import STATE_CODES
 from gable.listings.intake import Question
 
 #: Research names the same value differently from the form. Anything absent
@@ -256,6 +257,38 @@ class Needs:
         if self.blocked_status:
             return self.blocked_status
         return "needs_photo" if self.photo else "needs_info"
+
+
+def incomplete_address(supplied: str) -> str:
+    """Ask for the rest of an address that was supplied but cannot be printed.
+
+    Not "I still need the address". Gable opens every listing thread by naming
+    the property, so on 2026-08-19 it announced "4216 Norfolk Avenue, Baltimore
+    21216" and then told Carmen it still needed the address — which reads as a
+    fault in Gable and sends her looking for something she had already sent.
+    The check itself is right: that address has no state, and the design prints
+    street, city, state and ZIP.
+
+    Args:
+        supplied: The address as the request gives it, already tidied.
+
+    Returns:
+        One sentence naming what is missing and showing what is in hand.
+
+    Raises:
+        Nothing.
+    """
+    address = " ".join(supplied.split())
+    tokens = {word.strip(",").upper() for word in address.split()}
+    fault = (
+        "it has no state"
+        if not tokens & STATE_CODES
+        else "it is not in the street, city, state and ZIP order the design prints"
+    )
+    return (
+        f"I have this listing at {address}, but {fault}, so I cannot print it on the "
+        "flyer. Send me the whole address and I will build it."
+    )
 
 
 #: The parser can prove who is listing and who is hosting, but the generic

@@ -151,3 +151,25 @@ def test_a_blocker_alone_still_stops_the_build() -> None:
     outstanding.add_blocker("More than one agent-photo spot.", "needs_info")
     assert outstanding.anything
     assert outstanding.status() == "needs_info"
+
+
+def test_an_incomplete_address_is_named_rather_than_called_missing() -> None:
+    """Caleb Olawuyi, 2026-08-19: Gable announced the address, then asked for it.
+
+    The check is right — the design prints street, city, state and ZIP, and
+    this submission has no state — but "I still need the address" contradicts
+    the announcement Gable had just posted and reads as a fault of its own.
+    """
+    said = needs.incomplete_address("4216 Norfolk Avenue, Baltimore 21216")
+
+    assert "4216 Norfolk Avenue, Baltimore 21216" in said, "show what is in hand"
+    assert "no state" in said
+    assert "I still need the address" not in said
+
+
+def test_an_out_of_order_address_is_not_reported_as_a_missing_state() -> None:
+    """A state that is present but misplaced gets the other half of the truth."""
+    said = needs.incomplete_address("Baltimore MD 4216 Norfolk Avenue 21216")
+
+    assert "no state" not in said
+    assert "street, city, state and ZIP" in said
