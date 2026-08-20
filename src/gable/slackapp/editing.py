@@ -211,6 +211,13 @@ class SlideEditor:
         if which not in {"hero", "headshot"}:
             return "Tell me whether you mean the hero photo or the headshot before I replace it."
         if run.status not in {"delivered", "needs_review"}:
+            # "Waiting on something else" is false when the thing it is waiting
+            # on IS the photograph, which is exactly the state someone asks to
+            # replace one from. Naming the upload is also the whole remedy: the
+            # ordinary file handoff takes a photo in any paused state that
+            # asked for one, so there is nothing here for this tool to do.
+            if which == "hero" and (run.status == "needs_photo" or run.awaiting_photo):
+                return "Send me the property photo here and I will build with it."
             return (
                 "This listing is already waiting on something else, so I left its current "
                 "flyer and status unchanged."
@@ -431,6 +438,14 @@ class SlideEditor:
         if run.status == "needs_review":
             return "This flyer is paused because its checks did not prove it is ready."
         if run.status in {"needs_info", "needs_template"}:
+            # One status names the work only a person can do; it does not name
+            # everything outstanding. Answering "what is it waiting for" with
+            # the blocker alone hid a photo request made in the same message.
+            if run.awaiting_photo:
+                return (
+                    "This listing is paused while it waits for the missing detail, and it is "
+                    "still waiting for the property photo."
+                )
             return "This listing is paused while it waits for the missing detail."
         if run.status in {"pending", "building"}:
             return "This listing is still being worked on."

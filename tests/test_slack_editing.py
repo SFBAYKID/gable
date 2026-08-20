@@ -446,3 +446,37 @@ def test_review_status_does_not_claim_visual_review_was_the_only_problem(tmp_pat
 
     assert said == "This flyer is paused because its checks did not prove it is ready."
     connection.close()
+
+
+def test_replacing_the_photo_on_a_run_that_wants_one_names_the_upload() -> None:
+    """Saying it waits on something else is false when that something is the photo.
+
+    It is also the state someone asks to replace a photo from, and the ordinary
+    file handoff already takes one in any paused state that asked -- so there
+    is nothing for this tool to do except say where to send it.
+    """
+    waiting = store.RunRow(
+        run_id="run-1",
+        response_row_id="response-1",
+        status="needs_template",
+        awaiting_photo=True,
+    )
+
+    said = SlideEditor._status(waiting)
+
+    assert "still waiting for the property photo" in said
+
+
+def test_a_paused_run_owed_nothing_photographic_keeps_its_plain_status() -> None:
+    """The ordinary blocked run must not start claiming to want a photo."""
+    blocked = store.RunRow(
+        run_id="run-2",
+        response_row_id="response-2",
+        status="needs_template",
+        awaiting_photo=False,
+    )
+
+    said = SlideEditor._status(blocked)
+
+    assert "property photo" not in said
+    assert "waits for the missing detail" in said
