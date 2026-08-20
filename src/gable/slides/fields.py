@@ -178,7 +178,7 @@ _MEASUREMENT_FIELDS: Final[frozenset[str]] = frozenset({"beds", "baths", "square
 #: three delivered flyers carried one: Andy Jang's bedrooms, Lina Mariner's
 #: asking price, Mike Nugent's bathrooms. Blanked, so the flyer reads as
 #: incomplete rather than as wrong. See DECISIONS.md, 2026-08-19.
-_BLANK_WHEN_UNFILLED: Final[frozenset[str]] = frozenset({"beds", "baths", "square_feet", "price"})
+BLANK_WHEN_UNFILLED: Final[frozenset[str]] = frozenset({"beds", "baths", "square_feet", "price"})
 
 #: The digits and separators at the start of a measurement, e.g. `2,450` in
 #: "2,450 SQFT" or in "2,450 square feet".
@@ -645,7 +645,7 @@ def replacements(resolution: Resolution, values: dict[str, str]) -> dict[str, st
     The exception is a placeholder nobody can read as a gap. A stat slot is
     drawn with a real-looking number, so leaving it showing states a fact about
     somebody's house that nobody supplied. Those are blanked; see
-    `_BLANK_WHEN_UNFILLED`.
+    `BLANK_WHEN_UNFILLED`.
 
     Args:
         resolution: What the template's text means.
@@ -662,13 +662,13 @@ def replacements(resolution: Resolution, values: dict[str, str]) -> dict[str, st
         value = values.get(name, "").strip()
         if value:
             pairs[literal] = _as_written(name, literal, value)
-        elif name in _BLANK_WHEN_UNFILLED:
+        elif name in BLANK_WHEN_UNFILLED:
             pairs[literal] = ""
     # Every other literal carrying the same field, so a design that labels one
     # thing twice does not ship with the second label still showing.
     for name, extras in resolution.also.items():
         value = values.get(name, "").strip()
-        if not value and name not in _BLANK_WHEN_UNFILLED:
+        if not value and name not in BLANK_WHEN_UNFILLED:
             continue
         for literal in extras:
             pairs[literal] = _as_written(name, literal, value) if value else ""

@@ -77,7 +77,11 @@ def test_an_unanswered_value_leaves_its_placeholder_and_still_delivers(
     assert rec.copied is True
     delivered = "\n".join(rec.said)
     assert "Open the flyer" in delivered
-    assert "placeholder is still there" in delivered, "she has to know what is unfilled"
+    # A stat slot is emptied rather than left showing the design's own number,
+    # so the sentence says that instead of telling her to type over a
+    # placeholder her flyer does not have.
+    assert "left those spaces empty" in delivered, "she has to know what is unfilled"
+    assert "placeholder is still there" not in delivered
 
 
 def test_a_second_pass_does_not_ask_for_the_same_values_again(

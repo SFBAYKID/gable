@@ -327,6 +327,22 @@ def used_small_source_fit(connection: Connection, run_id: str) -> bool:
     return row is not None
 
 
+#: The plain words for the fields a design leaves EMPTY when nobody supplies
+#: them, rather than showing its own sample. Derived from the set the filler
+#: actually uses, so the two can never drift into telling Carmen to type over
+#: something that is not on her flyer.
+_BLANKED_WORDS: Final[frozenset[str]] = frozenset(
+    name_for(field) for field in template_fields.BLANK_WHEN_UNFILLED
+)
+
+
+def _listed_words(items: list[str]) -> str:
+    """Join names the way a person reads them: a, b and c."""
+    if len(items) == 1:
+        return items[0]
+    return ", ".join(items[:-1]) + f" and {items[-1]}"
+
+
 def blank_note(left_blank: list[str]) -> str:
     """Say which values kept the design's placeholder, and how to fill them.
 
@@ -344,12 +360,32 @@ def blank_note(left_blank: list[str]) -> str:
     kept = [name for name in left_blank if name.strip()]
     if not kept:
         return ""
-    listed = kept[0] if len(kept) == 1 else ", ".join(kept[:-1]) + f" and {kept[-1]}"
-    pronoun = "it" if len(kept) == 1 else "them"
-    return (
-        f"Nobody gave me the {listed}, so the design's own placeholder is still there. "
-        f"Type over {pronoun}, or send {pronoun} here and I will run it again."
-    )
+    # A stat slot is EMPTIED when nobody supplies it, not left showing the
+    # design's sample number -- Chase's rule of 2026-08-19, because "3
+    # Bathrooms" from the sample listing reads as this house's bathroom count.
+    # This sentence still said the placeholder was "still there" and told
+    # Carmen to type over it. Effie Fafaleos' delivered flyer had a blank where
+    # the price goes and a message pointing her at a placeholder that was not
+    # on it. Naming the wrong remedy is the defect this whole day was about.
+    emptied = [name for name in kept if name in _BLANKED_WORDS]
+    showing = [name for name in kept if name not in _BLANKED_WORDS]
+    parts: list[str] = []
+    if emptied:
+        pronoun = "it" if len(emptied) == 1 else "them"
+        space = "that space" if len(emptied) == 1 else "those spaces"
+        number = "number" if len(emptied) == 1 else "numbers"
+        parts.append(
+            f"Nobody gave me the {_listed_words(emptied)}, so I left {space} empty rather "
+            f"than showing the design's own {number}. Send {pronoun} here and I will run it "
+            "again."
+        )
+    if showing:
+        pronoun = "it" if len(showing) == 1 else "them"
+        parts.append(
+            f"Nobody gave me the {_listed_words(showing)}, so the design's own placeholder is "
+            f"still there. Type over {pronoun}, or send {pronoun} here and I will run it again."
+        )
+    return " ".join(parts)
 
 
 def delivery_message(
