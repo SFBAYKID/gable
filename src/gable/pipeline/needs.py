@@ -78,9 +78,15 @@ def internal_name(readable_name: str) -> str:
 #: listing whose address is still unreadable, so an unanswered address stops
 #: the flyer either way — it just stops without having cost an extra turn.
 #:
-#: A price reduction with no new price is NOT here. Nothing downstream can
-#: catch it, so a silent answer would ship a price-reduction flyer with no
-#: price on it.
+#: A price reduction with no new price rides it anyway, and so does an open
+#: house with no date, because `joins_one_ask` also lets any ABSENT value join.
+#: This comment used to claim they did not and was simply wrong about its own
+#: code. What makes that safe is not the batching rule but the blanking one:
+#: both fields are in `fields.BLANK_WHEN_UNFILLED`, so an unanswered value
+#: leaves an empty slot and the delivery message names it, rather than shipping
+#: the design's sample. `open_house` was added there on 2026-08-20 for exactly
+#: this reason -- the Open House design ships a previous listing's real date,
+#: and a client acts on a date by driving somewhere.
 BATCHABLE_CONTRADICTIONS: Final[frozenset[str]] = frozenset({"address"})
 
 

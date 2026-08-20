@@ -178,7 +178,16 @@ _MEASUREMENT_FIELDS: Final[frozenset[str]] = frozenset({"beds", "baths", "square
 #: three delivered flyers carried one: Andy Jang's bedrooms, Lina Mariner's
 #: asking price, Mike Nugent's bathrooms. Blanked, so the flyer reads as
 #: incomplete rather than as wrong. See DECISIONS.md, 2026-08-19.
-BLANK_WHEN_UNFILLED: Final[frozenset[str]] = frozenset({"beds", "baths", "square_feet", "price"})
+#:
+#: `open_house` belongs here by that same rule and was missed. The Open House
+#: design ships "Sunday, Aug 2, 2026" and "2-4PM" -- a previous listing's real
+#: open house, at 5066 Winesap Way. An unanswered date therefore did not read
+#: as a gap; it read as this house being open on a specific afternoon. It is
+#: the worst member of this set, because beds and baths are checked by anyone
+#: who visits and a date and time is acted on by driving somewhere.
+BLANK_WHEN_UNFILLED: Final[frozenset[str]] = frozenset(
+    {"beds", "baths", "square_feet", "price", "open_house"}
+)
 
 #: The digits and separators at the start of a measurement, e.g. `2,450` in
 #: "2,450 SQFT" or in "2,450 square feet".

@@ -85,3 +85,34 @@ def test_an_unambiguous_design_reports_nothing() -> None:
     resolution = fields.Resolution(fields={"beds": "4", "baths": "3"}, also={})
 
     assert fields.fields_sharing_a_literal(resolution) == {}
+
+
+def test_an_unanswered_open_house_leaves_an_empty_slot_not_a_previous_listing() -> None:
+    """The Open House design ships "Sunday, Aug 2, 2026" and "2-4PM".
+
+    That is a real previous open house, at 5066 Winesap Way. Left showing, it
+    does not read as a gap -- it reads as this house being open on a specific
+    afternoon, and a date and time is acted on by driving somewhere. It is the
+    worst member of the blanked set for that reason.
+    """
+    resolution = fields.resolve(["[PROPERTY ADDRESS]", "Sunday, Aug 2, 2026", "2-4PM"])
+
+    pairs = fields.replacements(
+        resolution, {"address": "1 Main St, Bowie, MD 20721", "open_house": ""}
+    )
+
+    assert pairs["Sunday, Aug 2, 2026"] == "", "the sample date must not survive"
+    assert pairs["2-4PM"] == "", "nor the sample time beside it"
+
+
+def test_an_answered_open_house_still_fills_both_boxes() -> None:
+    """Blanking must not cost the ordinary case anything."""
+    resolution = fields.resolve(["[PROPERTY ADDRESS]", "Sunday, Aug 2, 2026", "2-4PM"])
+
+    pairs = fields.replacements(
+        resolution,
+        {"address": "1 Main St, Bowie, MD 20721", "open_house": "Sat Aug 22 12pm to 2pm"},
+    )
+
+    assert pairs["Sunday, Aug 2, 2026"] == "Sat Aug 22"
+    assert pairs["2-4PM"] == "12-2PM"

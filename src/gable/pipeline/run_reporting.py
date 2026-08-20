@@ -373,11 +373,9 @@ def blank_note(left_blank: list[str]) -> str:
     if emptied:
         pronoun = "it" if len(emptied) == 1 else "them"
         space = "that space" if len(emptied) == 1 else "those spaces"
-        number = "number" if len(emptied) == 1 else "numbers"
         parts.append(
             f"Nobody gave me the {_listed_words(emptied)}, so I left {space} empty rather "
-            f"than showing the design's own {number}. Send {pronoun} here and I will run it "
-            "again."
+            f"than showing the design's own. Send {pronoun} here and I will run it again."
         )
     if showing:
         pronoun = "it" if len(showing) == 1 else "them"
@@ -579,8 +577,6 @@ def unfilled(fields: dict[str, str], values: dict[str, str]) -> list[str]:
     return [name_for(name) for name in fields if not values.get(name, "").strip()]
 
 
-#: Said when Slides accepted the fill and then would not return the text, so
-#: nothing can be verified. Two thoughts, two paragraphs.
 #: Said when a submission has burned its whole attempt budget. Named here with
 #: the other user-visible sentences rather than inline in the runner, so the
 #: words Gable can say are readable in one place.
@@ -597,6 +593,8 @@ BUILD_STEP_FAILED: Final[str] = (
     "steps failed. I stopped without sending it as finished."
 )
 
+#: Said when Slides accepted the fill and then would not return the text, so
+#: nothing can be verified. Two thoughts, two paragraphs.
 UNREADABLE_FLYER: Final[str] = paragraphs(
     "I filled the design, but Google Slides did not let me read it back to verify the values.",
     "I have not sent it as finished.",
