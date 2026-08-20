@@ -20,6 +20,7 @@ from typing import Any, Final
 
 from gable.db import store
 from gable.slackapp.brain import Decision
+from gable.slackapp.intents import OWED_A_PHOTO_LINE
 
 logger = logging.getLogger("gable.slack.context")
 
@@ -249,7 +250,7 @@ def listing_context(connection: Connection, thread_ts: str) -> str:
         # photograph parks in needs_template, and the reply shortcuts that read
         # only the status could not tell that a photo was still wanted.
         if run.awaiting_photo:
-            facts.append("This run has asked for the property photo and is waiting for it.")
+            facts.append(f"This run {OWED_A_PHOTO_LINE}.")
         if run.is_paused and run.failure_reason:
             facts.append(f"The run is waiting because: {_fact_value(run.failure_reason)}")
         return "\n".join(facts)

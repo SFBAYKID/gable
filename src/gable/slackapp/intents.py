@@ -150,6 +150,26 @@ def _paused_status(context: str) -> str:
     return ""
 
 
+#: The exact words `slackapp.context.listing_context` uses to say a run is
+#: still owed its property photograph. Defined HERE, in the module with no
+#: dependencies, and imported by `context` -- so the sentence that gets written
+#: and the sentence that gets read are one string. Two copies would drift and
+#: the reply routing would fail silently, which is the same shape as a run
+#: state that used to be keyed off a message literal.
+OWED_A_PHOTO_LINE: Final[str] = "has asked for the property photo and is waiting for it"
+
+
+def _owed_a_photo(context: str) -> bool:
+    """Whether this listing is still waiting for its property photograph.
+
+    Read from the context line rather than inferred from `Run status:`, because
+    a run owed a widened design AND a photograph parks in `needs_template` --
+    the status names the work only a person can do, not everything outstanding.
+    The sentence itself comes from `context`, so the two cannot drift apart.
+    """
+    return _paused_status(context) == "needs_photo" or OWED_A_PHOTO_LINE in context
+
+
 def _source_correction_context(context: str) -> bool:
     """Return whether re-reading a source cannot overwrite a finished flyer."""
     status = _paused_status(context)
@@ -177,7 +197,7 @@ def _rebuild_shortcut(
         "use the current template as is",
         "use current template as is",
     }
-    if folded in generic_rebuilds | retired_overrides and _paused_status(context) == "needs_photo":
+    if folded in generic_rebuilds | retired_overrides and _owed_a_photo(context):
         return _photo_wait_decision(context)
     if folded in generic_rebuilds | {
         "i updated the template",
@@ -253,7 +273,7 @@ def _rebuild_shortcut(
 
 def _paused_run_shortcut(message: str, context: str) -> Decision | None:
     """Keep photo-wait acknowledgements inside the persisted listing state."""
-    if _paused_status(context) != "needs_photo":
+    if not _owed_a_photo(context):
         return None
     folded = _fold_words(message)
     if folded in {"ye", "yes", "yeah", "yep", "ok", "okay", "done"}:

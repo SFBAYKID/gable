@@ -16,6 +16,7 @@ from gable.slackapp.context import (
     listing_context,
     thread_history,
 )
+from gable.slackapp.intents import OWED_A_PHOTO_LINE, _owed_a_photo
 
 CHANNEL = "C0B02721MNK"
 THREAD = "1786605927.301519"
@@ -417,4 +418,35 @@ def test_a_refused_photo_is_not_described_as_attached(tmp_path: Path) -> None:
 
     assert "a check refused" in context
     assert "A human-supplied hero photo is attached" not in context
+    connection.close()
+
+
+def test_the_written_sentence_and_the_read_sentence_are_one_string(
+    tmp_path: Path,
+) -> None:
+    """Two copies would drift and the reply routing would fail silently.
+
+    `intents` decides whether a short reply is a photo-wait acknowledgement by
+    reading the line `context` writes. Reword one and not the other and a run
+    owed its photo stops recognising "yes" -- with nothing to point at.
+    """
+    connection = connect(tmp_path / "g.db")
+    apply_migrations(connection)
+    run_id = _thread_run(connection, status="needs_template")
+    store.set_awaiting_photo(connection, run_id, True)
+
+    context = listing_context(connection, THREAD)
+
+    assert OWED_A_PHOTO_LINE in context, "the reader's own string must appear verbatim"
+    assert _owed_a_photo(context) is True
+    connection.close()
+
+
+def test_a_run_owed_nothing_photographic_is_not_read_as_waiting(tmp_path: Path) -> None:
+    """The signal must not fire on an ordinary blocked run."""
+    connection = connect(tmp_path / "g.db")
+    apply_migrations(connection)
+    _thread_run(connection, status="needs_template")
+
+    assert _owed_a_photo(listing_context(connection, THREAD)) is False
     connection.close()

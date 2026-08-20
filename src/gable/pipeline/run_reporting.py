@@ -31,8 +31,14 @@ class RunResult:
 
     @property
     def needs_a_human(self) -> bool:
-        """True when the run stopped to ask something."""
-        return self.status in {"needs_info", "needs_photo", "needs_template", "needs_review"}
+        """True when the run stopped to ask something.
+
+        Derived from `store.PAUSED` rather than typed out again. Hand-rolled
+        copies of that set are how the 2026-08-20 photo bug propagated: one of
+        them was three states where the store had four, and it silently lost
+        Carmen's upload.
+        """
+        return self.status in store.PAUSED
 
 
 @dataclass(frozen=True, slots=True)
