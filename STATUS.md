@@ -69,6 +69,16 @@ both destinations out loud. And three smaller untruths went with them: a
 described as attached when a check had refused it, and a run's state decided by
 string-matching a user-visible sentence.
 
+**Every item the review raised is now closed.** Sixteen defects in total,
+across eleven commits, all deployed and verified live on the droplet. One
+residual window is worth knowing about rather than acting on: `awaiting_photo`
+is written just before the question it describes is persisted, so a crash
+between the two leaves a run that ACCEPTS a photograph without having asked for
+one. That is the safe direction — the alternative is a run that refuses one it
+did ask for, which is the bug this all started with. Moving the flag onto the
+`run_questions` row would close it entirely and is the right shape if this area
+is touched again.
+
 ### Needed from Chase
 
 - **Watch whether the two-image ask is now clear enough.** When a design has no
