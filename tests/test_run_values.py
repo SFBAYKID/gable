@@ -305,3 +305,55 @@ def test_the_forms_own_open_house_is_used_when_nobody_answered(tmp_path: Path) -
 
     assert for_intake(connection, intake, {})["open_house"] == "08/01 12-2pm"
     connection.close()
+
+
+def _sold(**over: str) -> Intake:
+    """A Sold request, whose price may never come from public research."""
+    fields = {
+        "agent_email": "agent@example.com",
+        "agent_name": "Avery Agent",
+        "request_type": "Sold",
+        "address": "12 Main St, Bowie, MD 20721",
+        "post_details": "",
+        "open_house": "",
+        "new_price": "",
+        "closing_price": "",
+        "extra_notes": "",
+        "side": "",
+        "notes": "",
+    }
+    fields.update(over)
+    return Intake(**fields)
+
+
+def test_a_price_a_person_stated_reaches_a_sold_flyer(tmp_path: Path) -> None:
+    """Gable offers to add the price to a Sold listing, so the answer must land.
+
+    A publicly scraped list price is not a Sold closing price, which is why
+    research is refused for this request type. A person stating the price is a
+    different thing entirely, and the answer was being stored and then thrown
+    away -- so the same question came back and the listing could not finish.
+    """
+    connection = connect(tmp_path / "g.db")
+    apply_migrations(connection)
+    sold = _sold()
+    assert sold.accepts_public_list_price is False, "research must stay refused here"
+    store.remember_supplied_fact(connection, sold.address, "list_price", "$612,500")
+
+    values = for_intake(connection, sold, {"list_price": "$999,999"})
+
+    assert values["price"] == "$612,500", "what Carmen said, not what the web says"
+    connection.close()
+
+
+def test_the_form_column_still_outranks_a_stated_price(tmp_path: Path) -> None:
+    """Only research is overridden. The row's own value is the row's own value."""
+    connection = connect(tmp_path / "g.db")
+    apply_migrations(connection)
+    sold = _sold(closing_price="$700,000")
+    store.remember_supplied_fact(connection, sold.address, "list_price", "$612,500")
+
+    values = for_intake(connection, sold, {})
+
+    assert values["price"] == "$700,000"
+    connection.close()

@@ -189,6 +189,15 @@ def for_intake(
     when = stated.get("open_house", "").strip()
     if when:
         values["open_house"] = when
+    # A price a PERSON stated outranks research on every request type. The rule
+    # above is about a publicly scraped list price, which is not a Sold closing
+    # price or a Price Reduction's new price -- but Gable offers "if you give me
+    # the price I can add it" on exactly those, and the answer landed in the
+    # supplied-facts table and was then discarded, so the same question came
+    # back. The form column still wins; only research is overridden.
+    told_price = stated.get("list_price", "").strip()
+    if told_price and not intake.price:
+        values["price"] = told_price
     named = stated.get("client_name", "").strip()
     if named:
         values["client_name"] = named
