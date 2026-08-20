@@ -37,19 +37,30 @@ def test_a_date_with_no_time_names_no_open_house_hours() -> None:
     assert fields.open_house_occasions("") == 0
 
 
-def test_several_different_times_are_never_split_between_the_two_boxes() -> None:
-    """Promoting one asserts it as THE time while the others hide above it."""
+def test_only_the_first_occasion_reaches_the_two_boxes() -> None:
+    """The old split left the other two open houses standing in the date box.
+
+    It read "Friday, Aug. 21, Sat. Aug. 22 10am to 12pm, Sun, Aug. 23 11am to
+    1pm" above a time box saying "4pm to 6pm" -- one time asserting itself as
+    THE time while the others hid in the line above. Only the width check
+    stopped it reaching a flyer.
+    """
     value = "Friday, Aug. 21 4pm to 6pm, Sat. Aug. 22 10am to 12pm, Sun, Aug. 23 11am to 1pm"
 
     date_part = fields._open_house_part("SATURDAY, JUNE 7", value)
     time_part = fields._open_house_part("12PM - 2PM", value)
 
-    assert date_part == value, "the whole request stays intact rather than being carved up"
-    assert time_part == "", "no single time may claim the time box"
+    assert date_part == "Friday, Aug. 21"
+    assert time_part == "4pm to 6pm"
+    assert "Sat." not in date_part and "Sun" not in date_part
+    assert fields.first_open_house(value) == "Friday, Aug. 21 4pm to 6pm"
+    assert fields.dropped_open_houses(value) == (
+        "Sat. Aug. 22 10am to 12pm, Sun, Aug. 23 11am to 1pm"
+    )
 
 
-def test_several_open_houses_are_reported_as_a_question_not_a_narrow_box() -> None:
-    """End to end: the issue Carmen sees names a remedy she can act on."""
+def test_several_open_houses_build_the_first_and_name_what_was_left_off() -> None:
+    """End to end: a flyer exists, and the thread says exactly what it omits."""
     presentation = _presentation(
         _text("address", "[PROPERTY ADDRESS]", 500),
         _text("open-date", "SATURDAY, JUNE 7", 200),
@@ -66,14 +77,16 @@ def test_several_open_houses_are_reported_as_a_question_not_a_narrow_box() -> No
         },
     )
 
-    issue = next(item for item in report.blockers if item.code == "several_open_houses")
-    assert "3 open houses" in issue.say
-    assert "Which one should I put on the flyer?" in issue.say
-    # Answerable in the thread, so the run parks where a reply is understood.
-    assert issue.status == "needs_info"
-    # And the width complaint about the same field does not also go out.
+    # Nothing is blocked: the flyer gets built.
+    assert report.blockers == ()
+    issue = next(item for item in report.warnings if item.code == "several_open_houses")
+    assert "3 open houses" in issue.advisory
+    assert "Friday, Aug. 21 4pm to 6pm" in issue.advisory, "it names what it used"
+    assert "Sat. Aug. 22 10am to 12pm" in issue.advisory, "and what it did not"
+    assert "rebuild" in issue.advisory, "and how to change it"
+    # The width complaint about the same field does not also go out.
     assert not any(item.code == "unreadable_open_house" for item in report.issues)
-    assert not violations(issue.say)
+    assert not violations(issue.advisory)
 
 
 def test_one_open_house_that_fits_raises_no_question_at_all() -> None:

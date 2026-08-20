@@ -516,9 +516,12 @@ def set_awaiting_photo(
 ) -> None:
     """Record whether the ask about to go out includes the property photograph.
 
-    Written WITHOUT moving the run, for the same reason `approve_blank_fields`
-    is: the ask that follows owns the status transition, and a second writer
-    touching `status` here would race it.
+    Written WITHOUT moving the run: the ask that follows owns the status
+    transition, and a second writer touching `status` here would race it. It
+    still writes a `run_events` row inside the same savepoint, because the
+    module contract is that every change to a run is explainable from the log --
+    and "did this run ask for a photograph, and when" is exactly the fact the
+    next recurrence of this bug will need.
 
     This exists because one status cannot hold two truths. A run that needs a
     design widened AND needs its photo parks in `needs_template` -- the widening
@@ -534,10 +537,28 @@ def set_awaiting_photo(
     Raises:
         sqlite3.Error: on a write failure.
     """
-    connection.execute(
-        "UPDATE runs SET awaiting_photo = ?, updated_at = ? WHERE run_id = ?",
-        (1 if awaiting else 0, _now(), run_id),
-    )
+    now = _now()
+    with _transition(connection):
+        changed = connection.execute(
+            "UPDATE runs SET awaiting_photo = ?, updated_at = ? "
+            "WHERE run_id = ? AND awaiting_photo != ?",
+            (1 if awaiting else 0, now, run_id, 1 if awaiting else 0),
+        )
+        if changed.rowcount != 1:
+            # Either the run is gone or the flag already says this. Neither is
+            # an error, and neither deserves an event row claiming a change.
+            return
+        connection.execute(
+            "INSERT INTO run_events (run_id, at, status, detail) VALUES (?,?,?,?)",
+            (
+                run_id,
+                now,
+                "awaiting_photo",
+                "the outgoing ask includes the property photograph"
+                if awaiting
+                else "the outgoing ask does not include the property photograph",
+            ),
+        )
 
 
 def approve_blank_fields(

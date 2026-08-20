@@ -34,18 +34,38 @@ Worse, the width check was the only thing standing between that request and a
 bad flyer. The splitter's "two different times are two facts" rule was applied
 to bare times only, so this value was carved into "4pm to 6pm" in the time box
 beneath a date box still reading "Friday, Aug. 21, Sat. Aug. 22 10am to 12pm,
-Sun, Aug. 23 11am to 1pm". A wider box would have shipped that. The rule now
-applies however the times are written, and Gable asks which open house to print
-— a question Carmen can answer in the thread today.
+Sun, Aug. 23 11am to 1pm". A wider box would have shipped that.
+
+Chase settled what happens instead, the same day: **Gable cannot get stuck — it
+produces the flyer no matter what.** Asking is allowed; stopping is not. So the
+first open house goes on the flyer, and the delivery message names what was
+left off and offers to rebuild for another date. Carmen gets the link and the
+choice in one message.
+
+**3. A first fix broke the exit it was meant to open, and a review caught it.**
+The `awaiting_photo` signal was wired into the "may I build without a photo"
+gate, which also gates "may I re-measure the template". A `needs_template` run
+owed a photo would then have refused *"tell me to check the updated template
+again"* — the exact instruction its own blocker gives. Three more from the same
+review: `resume_claim.PHOTO_RESUME_STATES` did not include `needs_template`, so
+the real claim took an unguarded branch and lost the upload outright during the
+acknowledgement gap; startup recovery released an abandoned photo claim in
+silence for every paused state but `needs_photo`; and the CLI's
+`--hero-photo-url` never cleared the flag. All four are fixed, and the test
+double that hid the second one now routes through the real claim.
 
 ### Needed from Chase
 
-- **Do you want one flyer per open-house date?** Gable now asks Carmen to pick
-  one, which is the conservative reading. Building three is defensible and is a
-  product decision about her workflow, so it was not taken.
+- **An upload can answer the wrong ask.** When a design has no headshot on file
+  for its agent, Gable asks Carmen to add it to the Head Shots folder *and*
+  asks for the property photo in the same message. An image dropped in the
+  thread is now taken as the property photo. If she drags the headshot in
+  instead, it becomes the hero. The alternative is one extra question when both
+  images are outstanding, which cuts against the one-batched-ask rule — your
+  call, not mine.
 - **This request also asks for a photo collage** — "please make a photo collage
-  of the front of house, kitchen and office". Gable fits one hero photograph to
-  one frame and has no collage step. It does not currently say so.
+  of the front of house, kitchen and office". Noted as over the top; Gable fits
+  one hero photograph to one frame and says nothing about the collage.
 
 ## 2026-08-19 — Caleb Olawuyi's credential, and a loop Gable talked Carmen into
 

@@ -324,26 +324,33 @@ updated. Gable refreshes those sources before re-entering the same run.
 
 ### 2.7b More than the design can say
 
-A request can name more than one of something the design draws once. An Open
-House template has one date box and one time box; a request naming three open
-houses across three days does not fit them at any width.
+A request can name more than one of something the design draws once. The Open
+House template has one date box and one time box — measured at 245pt and 72pt,
+both a single line. A request naming three open houses across three days does
+not fit them at any width.
 
-Gable asks which one to print, and says so as a question rather than as a
-design fault:
+**Gable builds the flyer anyway and names what it left off.** It does not
+block, and it does not ask first:
 
 ```
-     This request names 3 open houses, and the Open House design has one
-     date and one time. Which one should I put on the flyer? Reply with
-     the day and hours and I will build it.
+     This request names 3 open houses and the Open House design holds one
+     date and one time, so I put the first on the flyer: Friday, Aug. 21
+     4pm to 6pm. It does not show Sat. Aug. 22 10am to 12pm, Sun, Aug. 23
+     11am to 1pm. Tell me which one you want instead and I will rebuild it.
 ```
 
-Status is `needs_info`, because the remedy is a reply in the thread. The
-previous behaviour asked Carmen to widen the template, which cannot work —
-no width holds three different hours in one time box, and a wider box would
-have shipped the value carved into an incoherent split ("4pm to 6pm" beneath
-a date line still reading "Sat. Aug. 22 10am to 12pm, Sun, Aug. 23 11am to
-1pm"). Two days at the *same* hours remain one open house and are never
-questioned.
+This rides with the finished flyer, so Carmen gets the link and the choice in
+one message. Chase's rule, 2026-08-20: **Gable cannot get stuck — it produces
+the flyer no matter what.** Asking is allowed; stopping is not. The previous
+behaviour asked Carmen to widen the template, which cannot work, and a wider
+box would have shipped the value carved into an incoherent split ("4pm to 6pm"
+beneath a date line still reading "Sat. Aug. 22 10am to 12pm, Sun, Aug. 23
+11am to 1pm").
+
+Two days at the *same* hours remain one open house and lose nothing. A design
+that sets date and time in **one** box takes the whole request, so nothing is
+dropped there either — only a separate time box forces a choice, because one
+time box holds one time.
 
 ### 2.8 Working — the thinking indicator
 

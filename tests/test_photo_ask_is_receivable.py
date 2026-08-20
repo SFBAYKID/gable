@@ -21,7 +21,7 @@ import pytest
 from gable.db import store
 from gable.db.schema import connect
 from gable.pipeline import needs
-from gable.slackapp.runtime import _needs_fresh_photo_upload
+from gable.slackapp.runtime import _may_build_without_a_photo
 from tests.photo_support import (
     THREAD,
     FakeSlackClient,
@@ -103,7 +103,7 @@ def test_a_run_owed_its_photo_is_never_released_to_build_without_one(
     run = store.run_by_id(connection, run_id)
     assert run is not None
 
-    assert _needs_fresh_photo_upload(connection, run) is True
+    assert _may_build_without_a_photo(connection, run) is False
     connection.close()
 
 

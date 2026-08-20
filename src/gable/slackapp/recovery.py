@@ -151,7 +151,13 @@ def recover_abandoned_photo_uploads(connection: Connection) -> tuple[str, ...]:
             elif run.photo_event_id == claim.event_id:
                 # The claim completed its work; only the release was lost.
                 _release(connection, claim, "the run had already recorded this upload")
-            elif run.status != "needs_photo":
+            elif not (run.status == "needs_photo" or (run.is_paused and run.awaiting_photo)):
+                # Same rule as the ingress that accepted the upload. Pinned to
+                # `needs_photo`, this released a photo accepted in any other
+                # paused state and said nothing: Carmen's image was gone, the
+                # thread was silent, and she waited on a flyer that would never
+                # come. The release detail also contradicted the run's own
+                # column, which is how a silent loss reads in the audit trail.
                 _release(connection, claim, "the listing is no longer waiting for a photo")
             elif store.has_pending_run_notification(connection, run.run_id):
                 # Something exact is already owed in this thread. A second
@@ -161,7 +167,10 @@ def recover_abandoned_photo_uploads(connection: Connection) -> tuple[str, ...]:
                 store.prepare_run_question(
                     connection,
                     run.run_id,
-                    "needs_photo",
+                    # Back to the state the ask left it in. A run owed a widened
+                    # design as well must not be moved to needs_photo, or the
+                    # reply saying the design is fixed stops routing.
+                    run.status if run.status in store.PAUSED else "needs_photo",
                     safe(
                         "I was interrupted while preparing the image you sent, so it "
                         "never reached this flyer. Please send it once more here."

@@ -49,23 +49,6 @@ _FIELDISH_UNKNOWN: Final[re.Pattern[str]] = re.compile(
 # measured against the box's real advance widths by `_title_that_fits`. Keeping
 # an estimate here as well blocked every Under Contract run the moment Carmen
 # edited that design, on a slot that renders "Realtor" perfectly well.
-TEMPLATE_CAPACITY_CHARS: Final[dict[str, int]] = {
-    "address": 52,
-    "price": 14,
-    "beds": 8,
-    "baths": 8,
-    "square_feet": 10,
-    "agent_name": 28,
-    "agent_phone": 18,
-    "agent_email": 42,
-    "client_name": 28,
-    "review_quote": 280,
-    "social_handle": 28,
-    "neighborhood": 32,
-    "website": 36,
-    "open_house": 38,
-}
-
 #: Fields whose empty state is the design's own words rather than a gap. The
 #: note panel on Under Contract ships reading "Ready to Buy? / DM me to find
 #: your next home." — a perfectly good call to action — and a submission with
@@ -345,104 +328,6 @@ def _title_that_fits(
     return {"agent_title": shorter}, Issue("shortened_agent_title", note, advisory=note)
 
 
-def _average_character_capacity(
-    box: fitting.TextBox,
-    lines: int | None = None,
-    font_size_pt: float | None = None,
-) -> int:
-    """Estimate average-character capacity at a selected readable type size."""
-    size = box.font_size_pt if font_size_pt is None else font_size_pt
-    if size <= 0 or box.width_emu <= 0:
-        return 0
-    available_lines = box.lines if lines is None else lines
-    available = (box.width_emu / fitting.EMU_PER_POINT) * max(1, available_lines) * fitting.SAFETY
-    weight = fitting.BOLD_MULTIPLIER if box.weight >= fitting.BOLD_WEIGHT else 1.0
-    return max(0, int(available / (size * 0.52 * weight)))
-
-
-def certify(
-    presentation: dict[str, Any],
-    template_label: str,
-    category: str,
-    *,
-    slide_px: tuple[int, int] = (1080, 1350),
-) -> Report:
-    """Check a newly filed template before a real listing depends on it.
-
-    Structural checks use the same evidence as listing preflight. Capacity
-    checks then measure each recognised field against a documented long-but-
-    normal character allowance. The estimate is described as approximate in
-    Slack; the actual listing value is measured again before every build.
-    """
-    text = [
-        text_content(element)
-        for page in presentation.get("slides", [])
-        for element in descendants(page.get("pageElements", []))
-        if text_content(element)
-    ]
-    resolution = fields.resolve(text)
-    structural = analyze(
-        presentation,
-        template_label,
-        category,
-        resolution,
-        {},
-        slide_px=slide_px,
-    )
-    issues = list(structural.issues)
-    boxes = text_boxes(presentation)
-    warned: set[str] = set()
-    for field_name, expected in TEMPLATE_CAPACITY_CHARS.items():
-        literals = [
-            literal
-            for literal in (
-                resolution.fields.get(field_name, ""),
-                *resolution.also.get(field_name, ()),
-            )
-            if literal
-        ]
-        for literal in literals:
-            matching = [box for box in boxes if box.text.strip() == literal.strip()]
-            for box in matching:
-                capacity = _average_character_capacity(
-                    box,
-                    1 if field_name in SINGLE_LINE_FIELDS else None,
-                )
-                readable_capacity = _average_character_capacity(
-                    box,
-                    1 if field_name in SINGLE_LINE_FIELDS else None,
-                    fitting.MIN_READABLE_PT + 0.1,
-                )
-                if capacity >= expected or readable_capacity >= expected or field_name in warned:
-                    continue
-                readable = field_name.replace("_", " ")
-                issues.append(
-                    Issue(
-                        f"capacity_{field_name}",
-                        (
-                            f"I checked the new {template_label} design. Its {readable} "
-                            f"section cannot hold the safe test of {expected} average "
-                            f"characters without dropping below the "
-                            f"{fitting.MIN_READABLE_PT:g}-point readability limit. Widen "
-                            "that section if you can. I will still fit each real value "
-                            "to it before I build."
-                        ),
-                        # Advisory, not a gate. This asks whether a box could
-                        # hold a long-but-normal value from anyone on the
-                        # roster, which is worth telling Carmen when she files a
-                        # design. Every real value is measured exactly against
-                        # this box before any flyer is built, so making the
-                        # estimate block also stopped every listing on that
-                        # design the moment she edited it.
-                        blocking=False,
-                    )
-                )
-                warned.add(field_name)
-                break
-
-    return Report(tuple(issues), structural.hero_width_px, structural.hero_height_px)
-
-
 def analyze(
     presentation: dict[str, Any],
     template_label: str,
@@ -659,27 +544,40 @@ def analyze(
             )
 
         # More open houses than the design can say. Effie Fafaleos' 2026-08-20
-        # request named three across three days; these designs draw one date and
-        # one time. Gable answered "Widen that section, then tell me to check
-        # the updated template again", which is a remedy that cannot work --
-        # no width holds three different hours in one time box, and a wider box
-        # would only have shipped the mangled split. Asking which one to print
-        # is a question Carmen can actually answer, in the thread, today.
-        occasions = (
-            fields.open_house_occasions(values.get("open_house", ""))
+        # request named three across three days; the measured Open House design
+        # draws one date box of 245pt and one time box of 72pt, both a single
+        # line. Gable answered "Widen that section, then tell me to check the
+        # updated template again", which is a remedy that cannot work -- no
+        # width holds three different hours in one time box.
+        #
+        # It does not block either. Chase's rule of 2026-08-17: a flyer that
+        # exists beats a withheld flyer plus a description of one, because
+        # Carmen reviews every post anyway and a built flyer is something she
+        # can act on. The first occasion goes on it and the rest are named
+        # here, so nothing is dropped quietly and a rebuild for another date
+        # costs her one sentence.
+        supplied_open_house = values.get("open_house", "")
+        # Asked of the design, not only of the value: a single box holding date
+        # and time together takes the whole request and loses nothing.
+        left_off = (
+            fields.open_house_left_off(resolution, supplied_open_house)
             if "open_house" in resolution.fields
-            else 0
+            else ""
         )
-        if occasions > 1:
+        if left_off:
+            occasions = fields.open_house_occasions(supplied_open_house)
             explained.add("open_house")
+            used = fields.first_open_house(supplied_open_house)
             issues.append(
                 Issue(
                     "several_open_houses",
-                    f"This request names {occasions} open houses, and the {template_label} "
-                    "design has one date and one time. Which one should I put on the flyer? "
-                    "Reply with the day and hours and I will build it.",
-                    blocking=True,
-                    status="needs_info",
+                    "",
+                    advisory=(
+                        f"This request names {occasions} open houses and the {template_label} "
+                        f"design holds one date and one time, so I put the first on the "
+                        f"flyer: {used}. It does not show {left_off}. Tell me which one you "
+                        "want instead and I will rebuild it."
+                    ),
                 )
             )
 
@@ -788,3 +686,15 @@ def blocking_after_release(report: Report, allow_blank_fields: bool) -> tuple[Is
     if not allow_blank_fields:
         return report.blockers
     return tuple(issue for issue in report.blockers if not issue.code.startswith("missing_value_"))
+
+
+# Re-exported: certification moved to `slides/certification.py` when this file
+# reached the 800-line ceiling, so callers still say `preflight.certify` and
+# `preflight.TEMPLATE_CAPACITY_CHARS`. Imported at the end because
+# `certification` imports the shared measurement helpers from here.
+from gable.slides.certification import (  # noqa: E402
+    TEMPLATE_CAPACITY_CHARS as TEMPLATE_CAPACITY_CHARS,
+)
+from gable.slides.certification import (  # noqa: E402
+    certify as certify,
+)

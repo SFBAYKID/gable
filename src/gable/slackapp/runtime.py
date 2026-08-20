@@ -63,17 +63,17 @@ GOOGLE_SCOPES: tuple[str, ...] = (
 )
 
 
-def _needs_fresh_photo_upload(connection: Connection, run: store.RunRow) -> bool:
-    """Return whether only an owned-thread upload may continue this run.
+def _owed_a_photo(connection: Connection, run: store.RunRow) -> bool:
+    """Return whether this run still has to receive a property photograph.
 
-    This includes the acknowledgement gap where a durable photo question exists
-    but the run remains needs_review until Slack confirms it.
+    True when the run's own state says it is waiting for one, when the ask that
+    went out included one, or during the acknowledgement gap where a durable
+    photo question exists but the run remains needs_review until Slack confirms.
     """
     return (
         run.status == "needs_photo"
-        # The same ask-not-status truth the photo ingress reads. Without it a
-        # run blocked on a design AND owed its photo answered "build it with
-        # blanks" by building a flyer with no property photograph on it.
+        # The ask, not the status: a run blocked on a design it needs widened
+        # and owed its photograph parks in `needs_template` and is owed both.
         or (run.is_paused and run.awaiting_photo)
         or store.has_pending_photo_question(
             connection,
@@ -81,6 +81,15 @@ def _needs_fresh_photo_upload(connection: Connection, run: store.RunRow) -> bool
             run.slack_thread_ts,
         )
     )
+
+
+def _may_build_without_a_photo(connection: Connection, run: store.RunRow) -> bool:
+    """Whether "build it with the blanks" may proceed on this run.
+
+    The release covers values nobody has. It never covers the photograph: a
+    flyer with no property photo is not a flyer.
+    """
+    return not _owed_a_photo(connection, run)
 
 
 def build_components(settings: Settings) -> RuntimeComponents:
@@ -312,7 +321,7 @@ def build_components(settings: Settings) -> RuntimeComponents:
                     return (
                         "I could not match this thread to a listing, so I have not built anything."
                     )
-                if _needs_fresh_photo_upload(action_connection, run):
+                if not _may_build_without_a_photo(action_connection, run):
                     # The release covers values nobody has, never the photograph.
                     # A flyer with no property photo is not a flyer.
                     return "I still need the property image in this thread before I can build."
@@ -397,7 +406,19 @@ def build_components(settings: Settings) -> RuntimeComponents:
                             reconcile=reconcile_slack,
                         )
                     return ""
-                if _needs_fresh_photo_upload(action_connection, run):
+                # Re-measuring a design needs no photograph, and refusing the
+                # recheck here would refuse the exact action Gable's own blocker
+                # instructs: "Widen that section, then tell me to check the
+                # updated template again." A run owed BOTH must still be able to
+                # do the template half, or the pause has no exit at all.
+                #
+                # `needs_photo` alone still refuses, because that state means
+                # the template was already cleared and only the image is
+                # outstanding; rechecking there would re-measure nothing and
+                # answer a question nobody asked.
+                if run.status == "needs_photo" or store.has_pending_photo_question(
+                    action_connection, run.run_id, run.slack_thread_ts
+                ):
                     # The retained URL is audit evidence for the rejected or
                     # superseded image, not permission to reuse it.  Only the
                     # next Slack upload may atomically replace that provenance

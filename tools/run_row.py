@@ -316,7 +316,13 @@ def main(argv: list[str] | None = None) -> int:
                 submission,
                 existing.run_id,
                 resume_fields=(
-                    {"photo_url": args.hero_photo_url, "photo_source": "carmen"}
+                    {
+            "photo_url": args.hero_photo_url,
+            "photo_source": "carmen",
+            # Answered. Left set, this run would accept any stray image
+            # dropped in its thread for as long as it stayed paused.
+            "awaiting_photo": 0,
+        }
                     if args.hero_photo_url
                     else None
                 ),

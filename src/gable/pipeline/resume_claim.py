@@ -26,13 +26,18 @@ logger = logging.getLogger("gable.resume")
 #: that asked for a photograph; `needs_review` is one whose flyer was built and
 #: withheld, which is where the visual gate parks a photo it will not accept;
 #: `needs_info` is one stopped on a preflight blocker, which now asks for the
-#: photograph in the same breath and so must be able to take it. All three hold
-#: an unsent draft, so a replacement image is welcome in any of them, and a run
-#: that refused one was a dead end — the only thing that fixes it was the only
-#: thing it would not take.
-PHOTO_RESUME_STATES: Final[frozenset[str]] = frozenset(
-    {"needs_photo", "needs_review", "needs_info"}
-)
+#: photograph in the same breath and so must be able to take it. `needs_template`
+#: is the same case and was missed: a design that has to be widened is exactly
+#: the blocker that batches a photo ask beside it, and leaving that state out
+#: sent the claim down the unguarded branch and lost it outright during the
+#: acknowledgement gap. Every paused state holds an unsent draft, so a
+#: replacement image is welcome in any of them, and a run that refused one was
+#: a dead end — the only thing that fixes it was the only thing it would not
+#: take.
+#:
+#: Derived from `store.PAUSED` rather than typed out, because hand-rolling a
+#: narrower copy of that set is how this bug class keeps propagating.
+PHOTO_RESUME_STATES: Final[frozenset[str]] = store.PAUSED
 
 #: Said when another worker owns the run. Deliberately not said when the loser
 #: is a duplicate delivery of the same upload; see `Claim.duplicate`.

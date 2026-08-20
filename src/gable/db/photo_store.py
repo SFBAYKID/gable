@@ -38,7 +38,14 @@ def _pending_photo_row(
         sqlite3.Row | None,
         connection.execute(
             f"SELECT {columns} FROM run_questions q JOIN runs r ON r.run_id = q.run_id "
-            "WHERE q.run_id = ? AND q.target_status = 'needs_photo' "
+            # `target_status` is where the ask PARKS the run, and a batched ask
+            # that names both a design to widen and the photograph parks in
+            # needs_template. Matching on it alone lost Carmen's upload during
+            # the acknowledgement gap: no row matched, the claim fell through to
+            # `claim_paused_run`, which refuses while an unconfirmed question
+            # exists, and she was told the listing was "already being
+            # rechecked". `runs.awaiting_photo` is the ask itself.
+            "WHERE q.run_id = ? AND (q.target_status = 'needs_photo' OR r.awaiting_photo = 1) "
             "AND q.thread_ts = ? AND q.confirmed_at = '' AND q.satisfied_at = '' "
             "AND ((r.status = 'needs_review' AND r.failure_reason = ?) "
             "OR (r.status = 'needs_photo' AND q.notification_kind = 'action')) "

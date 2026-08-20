@@ -361,6 +361,101 @@ def open_house_occasions(value: str) -> int:
     return len({"".join(item.split()).casefold() for item in times})
 
 
+#: A conjunction left at the front once the first occasion is cut away.
+_LEADING_JOINER: Final[re.Pattern[str]] = re.compile(r"^(?:and|&|then|plus)\s+", re.IGNORECASE)
+
+
+def open_house_left_off(resolution: Resolution, value: str) -> str:
+    """What this design cannot show of an open-house request, in its own words.
+
+    The answer depends on the design, not only on the value. A single box
+    holding date and time together takes the whole request; only a design with
+    a separate time box has to choose, because one time box holds one time.
+
+    Args:
+        resolution: The design's recognised placeholders.
+        value: The open-house details exactly as they were supplied.
+
+    Returns:
+        The occasions that will not reach the flyer, or "" when none are lost.
+
+    Raises:
+        Nothing.
+    """
+    literals = [resolution.fields.get("open_house", ""), *resolution.also.get("open_house", ())]
+    if any(_SAMPLE_OPEN_HOUSE_DATE_AND_TIME.match(item.strip()) for item in literals if item):
+        return ""
+    if open_house_occasions(value) < 2:
+        return ""
+    return dropped_open_houses(value)
+
+
+def _earliest_time(value: str) -> re.Match[str] | None:
+    """The first span in this text that counts as a time, by the splitter's rule.
+
+    `_bare_hours` deliberately finds the TRAILING range, because that is the one
+    a single open house ends with. Reused unchanged here it made "Aug 8, 11-1
+    and Aug 9, 2-4" report "2-4" as the first time, so the whole string looked
+    like one occasion and neither box was filled.
+
+    Args:
+        value: The open-house details exactly as they were supplied.
+
+    Returns:
+        The match, or None when the text names no time.
+
+    Raises:
+        Nothing.
+    """
+    inside = _TIME_RANGE_INSIDE.search(value)
+    if inside is not None:
+        return inside
+    trailing = _bare_hours(value)
+    if trailing is None:
+        return None
+    earlier = _bare_times_before(value, trailing.start())
+    return earlier[0] if earlier else trailing
+
+
+def first_open_house(value: str) -> str:
+    """Trim open-house details to the first date and time they name.
+
+    Args:
+        value: The open-house details exactly as they were supplied.
+
+    Returns:
+        The text up to and including the first time named, or the whole value
+        when it names no time at all.
+
+    Raises:
+        Nothing.
+    """
+    match = _earliest_time(value)
+    if match is None:
+        return value
+    return value[: match.end()].strip(" ,-\u2013\u2014\t")
+
+
+def dropped_open_houses(value: str) -> str:
+    """The occasions that will not reach the flyer, for Gable to name.
+
+    Args:
+        value: The open-house details exactly as they were supplied.
+
+    Returns:
+        The remainder after the first occasion, or "" when there is none.
+
+    Raises:
+        Nothing.
+    """
+    match = _earliest_time(value)
+    if match is None:
+        return ""
+    rest = value[match.end() :].strip(" ,-\u2013\u2014\t")
+    # "and Aug 9, 2-4" reads as a fragment when Gable names it in a sentence.
+    return _LEADING_JOINER.sub("", rest).strip(" ,-\u2013\u2014\t")
+
+
 def _open_house_part(literal: str, value: str) -> str:
     """Give a design's date box the date and its time box the time.
 
@@ -419,10 +514,23 @@ def _open_house_part(literal: str, value: str) -> str:
     # 22 10am to 12pm, Sun, Aug. 23 11am to 1pm". Only the width check stopped
     # that reaching a flyer; a wider box would have shipped it.
     #
-    # `open_house_occasions` reports the same count, so preflight can ask which
-    # one to print instead of asking for a design that cannot hold all three.
+    # `open_house_occasions` reports the same count, so the build can name what
+    # it left off. Chase's rule of 2026-08-17 decides what happens next: a flyer
+    # that exists beats a withheld flyer plus a description of one. The first
+    # occasion goes on it, the rest are named in the delivery message, and
+    # Carmen rebuilds for another date with one sentence if she wants it.
     if not same_time:
-        return "" if _wants_time(literal) else value
+        if _SAMPLE_OPEN_HOUSE_DATE_AND_TIME.match(literal.strip()):
+            # One box holding date and time together. The whole request goes in
+            # it and nothing has to be dropped; if it does not fit, the width
+            # check says so. Only a design with a SEPARATE time box forces a
+            # choice, because one time box holds one time.
+            return value
+        first = first_open_house(value)
+        if first == value:
+            # No first occasion could be isolated, so nothing may claim a box.
+            return "" if _wants_time(literal) else value
+        return _open_house_part(literal, first)
     if with_meridiem is not None:
         remainder = _TIME_RANGE_INSIDE.sub(" ", value)
     else:

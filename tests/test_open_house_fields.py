@@ -259,14 +259,21 @@ def test_two_days_at_the_same_bare_hours_write_that_time_once() -> None:
     assert "Aug 9" in pairs["Sunday, Aug 2, 2026"]
 
 
-def test_two_days_at_different_bare_hours_do_not_split() -> None:
-    """A promoted bare "2-4" would hide Saturday's own hours in the date line."""
+def test_two_days_at_different_bare_hours_keep_only_the_first() -> None:
+    """A promoted bare "2-4" used to hide Saturday's own hours in the date line.
+
+    Refusing to split at all was the first answer to that, and it left the whole
+    string in the date box where it overflowed. Only the FIRST occasion goes on
+    the flyer now, and the delivery message names the one left off — see
+    `preflight`'s `several_open_houses` advisory.
+    """
     resolution = fields.resolve(["Sunday, Aug 2, 2026", "2-4PM"])
 
     pairs = fields.replacements(resolution, {"open_house": "Aug 8, 11-1 and Aug 9, 2-4"})
 
-    assert pairs["Sunday, Aug 2, 2026"] == "Aug 8, 11-1 and Aug 9, 2-4"
-    assert pairs["2-4PM"] == ""
+    assert pairs["Sunday, Aug 2, 2026"] == "Aug 8"
+    assert pairs["2-4PM"] == "11-1"
+    assert fields.dropped_open_houses("Aug 8, 11-1 and Aug 9, 2-4") == "Aug 9, 2-4"
 
 
 def test_a_time_with_no_date_is_not_printed_twice() -> None:

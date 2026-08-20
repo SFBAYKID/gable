@@ -152,7 +152,7 @@ def test_a_rejected_photo_wait_cannot_rebuild_from_its_retained_audit_image(
     waiting = store.run_by_id(connection, run.run_id)
 
     assert waiting is not None
-    assert runtime._needs_fresh_photo_upload(connection, waiting)
+    assert runtime._owed_a_photo(connection, waiting)
     connection.close()
 
 
@@ -174,7 +174,7 @@ def test_an_initial_photo_wait_cannot_be_claimed_by_a_natural_language_rebuild(
     waiting = store.run_by_id(connection, run.run_id)
 
     assert waiting is not None
-    assert runtime._needs_fresh_photo_upload(connection, waiting)
+    assert runtime._owed_a_photo(connection, waiting)
     connection.close()
 
 
@@ -205,7 +205,7 @@ def test_a_pending_photo_question_blocks_rebuild_during_slack_acknowledgement_ga
     waiting = store.run_by_id(connection, run.run_id)
 
     assert waiting is not None and waiting.status == "needs_review"
-    assert runtime._needs_fresh_photo_upload(connection, waiting)
+    assert runtime._owed_a_photo(connection, waiting)
     connection.close()
 
 
@@ -227,5 +227,5 @@ def test_a_non_photo_pause_can_still_recheck_its_authoritative_source(tmp_path: 
     waiting = store.run_by_id(connection, run.run_id)
 
     assert waiting is not None
-    assert not runtime._needs_fresh_photo_upload(connection, waiting)
+    assert not runtime._owed_a_photo(connection, waiting)
     connection.close()

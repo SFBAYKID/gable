@@ -18,6 +18,7 @@ from PIL import Image
 from gable.db import store
 from gable.db.schema import apply_migrations, connect
 from gable.listings.intake import Intake
+from gable.pipeline.resume_claim import claim_for_resume
 from gable.pipeline.runner import RunResult
 from gable.sheets import repository as repo
 from gable.slackapp.photos import PhotoHandoff
@@ -108,14 +109,20 @@ class FakeRunner:
         # very narrowing that stranded the 2026-08-20 Open House run.
         assert expected_status in store.PAUSED
         fields = resume_fields or {}
-        claimed = store.claim_run_for_photo(
+        # Through the REAL claim, not straight to the store. Calling
+        # `claim_run_for_photo` here bypassed `PHOTO_RESUME_STATES`, which is
+        # where the paused-state decision actually lives, so a test could prove
+        # the store accepts a needs_template photo while production took a
+        # different, unguarded branch and lost it.
+        claim = claim_for_resume(
             self.connection,
             run_id,
-            THREAD,
             fields,
-            expected_status=expected_status or "needs_photo",
+            expected_status=expected_status,
+            origin_thread_ts=THREAD,
+            photo_event_id=str(fields.get("photo_event_id", "")),
         )
-        assert claimed
+        assert claim.won, f"the real claim refused a {expected_status} resume"
         store.set_status(self.connection, run_id, "delivered", "test delivered")
         return RunResult(
             run_id=run_id,
