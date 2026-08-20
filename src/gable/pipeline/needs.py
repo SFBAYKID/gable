@@ -126,7 +126,14 @@ PHOTO_ONLY_ASK: Final[str] = "Can you send me the image?"
 #: The same ask when a blocker sits above it. "Can you send me the image?" under
 #: a sentence about a missing headshot names two different images and reads as
 #: one, so the photograph is named explicitly wherever both appear together.
-PHOTO_ASK_BESIDE_A_BLOCKER: Final[str] = "Separately, can you send me the property photo?"
+#:
+#: It also names WHERE. The headshot blocker says "Add that image to Head
+#: Shots" -- a Drive folder -- and this says "here", meaning the thread. Two
+#: images, two destinations, and only the thread one is a request to upload.
+#: Without the destination an image dropped in the thread while a headshot is
+#: outstanding is genuinely ambiguous, and Gable takes it as the property
+#: photograph, which is how a face ends up where the house goes.
+PHOTO_ASK_BESIDE_A_BLOCKER: Final[str] = "Separately, can you send me the property photo here?"
 
 #: Said before a blocker that is about to repeat itself, once the photo it
 #: asked for alongside has arrived. Without it Carmen sends the photo and gets

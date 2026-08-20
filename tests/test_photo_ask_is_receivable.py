@@ -156,3 +156,78 @@ def test_nothing_says_it_holds_a_photo_while_still_asking_for_one() -> None:
 
     assert needs.PHOTO_HELD not in message
     assert needs.PHOTO_ASK_BESIDE_A_BLOCKER in message
+
+
+def test_a_rejected_photo_invites_a_replacement_that_needs_no_magic_words(
+    tmp_path: Path,
+) -> None:
+    """The one case where a replacement is certain was the hardest to send.
+
+    When the visual check concludes the photo shows a different house, the
+    flyer still goes out and the message says so -- Chase's 2026-08-17 rule.
+    But a delivered run only accepted a new image alongside an exact phrase,
+    and the `file_shared` route carries no text at all, so the reply Gable
+    invited could not arrive. `needs_replacement_photo` was computed for this
+    and nothing read it.
+    """
+    path = tmp_path / "gable.db"
+    run_id = _paused_database(path)
+    connection = connect(path)
+    store.set_status(
+        connection,
+        run_id,
+        "delivered",
+        "delivered with what the checks noticed",
+        output_file_id="deck-1",
+        output_url="https://docs.example/deck-1",
+        photo_url="http://images.example/wrong-house.jpg",
+        slack_thread_ts=THREAD,
+    )
+    store.set_awaiting_photo(connection, run_id, True)
+    connection.close()
+    seen: list[str] = []
+
+    said = _handoff(path, seen).handle(_event(), FakeSlackClient())
+
+    assert "not waiting for a photo" not in said
+    assert seen == ["response-1", run_id], "the invited replacement rebuilt the flyer"
+
+
+def test_a_stray_image_on_a_delivered_flyer_still_needs_the_words(tmp_path: Path) -> None:
+    """The guard that stops an accident rebuilding a finished flyer stands."""
+    path = tmp_path / "gable.db"
+    run_id = _paused_database(path)
+    connection = connect(path)
+    store.set_status(
+        connection,
+        run_id,
+        "delivered",
+        "delivered",
+        output_file_id="deck-1",
+        output_url="https://docs.example/deck-1",
+        slack_thread_ts=THREAD,
+    )
+    store.set_awaiting_photo(connection, run_id, False)
+    connection.close()
+    seen: list[str] = []
+
+    said = _handoff(path, seen).handle(_event(), FakeSlackClient())
+
+    assert seen == [], "nothing was rebuilt"
+    assert "not waiting for a photo" in said
+
+
+def test_a_run_with_no_flyer_does_not_claim_to_have_left_one_unchanged(
+    tmp_path: Path,
+) -> None:
+    """Leaving the current flyer unchanged describes a flyer that never existed."""
+    path = tmp_path / "gable.db"
+    run_id = _paused_database(path)
+    connection = connect(path)
+    store.set_status(connection, run_id, "failed", "a processing step failed")
+    connection.close()
+
+    said = _handoff(path, []).handle(_event(), FakeSlackClient())
+
+    assert "no flyer yet" in said
+    assert "left the current flyer unchanged" not in said

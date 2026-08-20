@@ -49,6 +49,14 @@ PHOTO_INGRESS_ROUTE: Final[str] = "file_share"
 NOT_WAITING_FOR_A_PHOTO: Final[str] = (
     "This listing is not waiting for a photo, so I left the current flyer unchanged."
 )
+
+#: The same refusal for a run that has no flyer to leave unchanged. A run that
+#: failed or was skipped has an empty `output_file_id`, and the sentence above
+#: reassures the sender about a flyer that does not exist -- which reads as
+#: Gable having quietly built something it will not show.
+NO_FLYER_TO_CHANGE: Final[str] = (
+    "This listing is not waiting for a photo, and it has no flyer yet. I left it as it is."
+)
 #: Returned instead of a message when the upload was declined and the message
 #: carried words of its own. Never spoken: it tells `process_file_share` that
 #: nothing has been said and the caller should answer the words as an ordinary
@@ -566,10 +574,21 @@ class PhotoHandoff:
                 # it again is a replacement, not a stray upload. Requiring the
                 # words keeps an image dropped into a delivered thread by
                 # accident from silently rebuilding what Carmen already has.
+                # `awaiting_photo` on a DELIVERED run means the visual check
+                # concluded that another photograph is the whole remedy -- the
+                # image shows a different house -- and Gable said so above the
+                # link. It is set nowhere else on a delivered run, so it is not
+                # the general "send another if you want it framed differently"
+                # invitation, and a stray image still needs the words.
+                #
+                # Without this the one case where a replacement is certainly
+                # wanted was also the case that required magic words, and the
+                # `file_shared` route carries none by construction.
+                invited = current is not None and current.awaiting_photo
                 if (
                     current is not None
                     and current.status == "delivered"
-                    and asks_to_run_again(str(event.get("text") or ""))
+                    and (invited or asks_to_run_again(str(event.get("text") or "")))
                     and store.prepare_photo_replacement_action(
                         connection, current.run_id, event_id, thread_ts
                     )
@@ -652,8 +671,9 @@ class PhotoHandoff:
                     # reassurance that belongs there.
                     finish("", "the run was not waiting for a photo; its words were answered")
                     return DECLINED_ANSWER_THE_WORDS
+                held_a_flyer = current is not None and bool(current.output_file_id)
                 return finish(
-                    NOT_WAITING_FOR_A_PHOTO,
+                    NOT_WAITING_FOR_A_PHOTO if held_a_flyer else NO_FLYER_TO_CHANGE,
                     "the run was not waiting for a photo",
                 )
             try:

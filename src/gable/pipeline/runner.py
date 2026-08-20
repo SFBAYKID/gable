@@ -675,6 +675,16 @@ class Runner:
         # 2026-08-17, after seeing both threads.
         if not checked.ok:
             result.output_url = output_url
+            # When another photograph is the whole remedy, the flyer still goes
+            # out -- Chase's 2026-08-17 rule, unchanged -- but the run records
+            # that a replacement is genuinely wanted, so the upload answering
+            # the sentence below is accepted without needing magic words. The
+            # verdict computed this and nothing read it, which made the one case
+            # where a replacement is certain the one case that was hardest to
+            # send. Set BEFORE the outcome, so a crash between them leaves a run
+            # that accepts the photo rather than one that refuses it.
+            if checked.needs_replacement_photo:
+                store.set_awaiting_photo(self.connection, run_id, True)
             noticed = safe(
                 paragraphs(
                     checked.spoken,

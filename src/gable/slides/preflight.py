@@ -454,7 +454,8 @@ def analyze(
                 "missing_headshot",
                 f"I checked the {template_label} design before building. It has an agent "
                 f"photo spot, but I could not find a headshot for {agent}. Add that image "
-                "to Head Shots, then tell me to run again.",
+                "to the Head Shots folder rather than to this thread, then tell me to run "
+                "again.",
                 blocking=True,
                 status="needs_info",
             )

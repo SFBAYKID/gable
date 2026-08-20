@@ -366,3 +366,55 @@ def test_a_context_read_failure_does_not_drop_the_human_reply() -> None:
     )
 
     assert decision.reply == "Send me the property image."
+
+
+def _thread_run(connection: Any, status: str) -> str:  # noqa: ANN401
+    """A recorded submission with one run owning THREAD, in the given state."""
+    assert store.record_submission(
+        connection, "response-ctx", 49, "today", _intake(), "hash-ctx", "Testing_1"
+    )
+    run = store.start_run(connection, "response-ctx")
+    store.set_status(
+        connection, run.run_id, status, "waiting", template_label="Sold", slack_thread_ts=THREAD
+    )
+    return str(run.run_id)
+
+
+def test_the_model_is_told_when_a_run_is_owed_its_photo(tmp_path: Path) -> None:
+    """Status names the work only a person can do, not everything outstanding.
+
+    A run owed a widened design AND its photograph parks in `needs_template`,
+    so the reply shortcuts that read only the status could not tell a photo was
+    still wanted.
+    """
+    connection = connect(tmp_path / "g.db")
+    apply_migrations(connection)
+    run_id = _thread_run(connection, status="needs_template")
+    store.set_awaiting_photo(connection, run_id, True)
+
+    context = listing_context(connection, THREAD)
+
+    assert "Run status: needs_template." in context
+    assert "asked for the property photo and is waiting for it" in context
+    connection.close()
+
+
+def test_a_refused_photo_is_not_described_as_attached(tmp_path: Path) -> None:
+    """`photo_url` survives a refusal as evidence, not as a usable photograph."""
+    connection = connect(tmp_path / "g.db")
+    apply_migrations(connection)
+    run_id = _thread_run(connection, status="needs_photo")
+    store.set_status(
+        connection,
+        run_id,
+        "needs_photo",
+        "the supplied photo shows a house number that conflicts with the address",
+        photo_url="http://images.example/wrong-house.jpg",
+        slack_thread_ts=THREAD,
+    )
+
+    context = listing_context(connection, THREAD)
+
+    assert "a check refused" in context
+    assert "A human-supplied hero photo is attached" not in context
+    connection.close()

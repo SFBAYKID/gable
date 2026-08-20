@@ -61,15 +61,24 @@ stats row. Gable measured that and said so, then delivered — right for a flyer
 wrong for a value it could have written the way the design writes it. Times are
 now compacted to the designs' own idiom: "4pm to 6pm" is "4-6PM".
 
+**5. The review's remaining items are closed.** A photo the visual check
+refused now invites its own replacement without needing an exact phrase (the
+verdict for that was computed and read by nothing). The two-image ask names
+both destinations out loud. And three smaller untruths went with them: a
+"I left the current flyer unchanged" said where no flyer existed, a hero photo
+described as attached when a check had refused it, and a run's state decided by
+string-matching a user-visible sentence.
+
 ### Needed from Chase
 
-- **An upload can answer the wrong ask.** When a design has no headshot on file
-  for its agent, Gable asks Carmen to add it to the Head Shots folder *and*
-  asks for the property photo in the same message. An image dropped in the
-  thread is now taken as the property photo. If she drags the headshot in
-  instead, it becomes the hero. The alternative is one extra question when both
-  images are outstanding, which cuts against the one-batched-ask rule — your
-  call, not mine.
+- **Watch whether the two-image ask is now clear enough.** When a design has no
+  headshot on file, Gable names two images at once. Both sentences now say
+  where each goes — the folder, or this thread — which was the actual failure
+  mode. It still takes any image in the thread as the property photo, so if
+  Carmen sends a headshot there anyway it becomes the hero. That is visible the
+  moment she opens the flyer and costs one cycle. If it happens, the harder
+  guard is a question when both are outstanding, at the cost of a round trip on
+  every run with a missing headshot.
 - **This request also asks for a photo collage** — "please make a photo collage
   of the front of house, kitchen and office". Noted as over the top; Gable fits
   one hero photograph to one frame and says nothing about the collage.

@@ -233,11 +233,23 @@ def listing_context(connection: Connection, thread_ts: str) -> str:
             if run.output_file_id
             else "No flyer has been built in this thread yet."
         )
-        facts.append(
-            "A human-supplied hero photo is attached to this run."
-            if run.photo_url
-            else "This run has no hero photo yet."
-        )
+        # `photo_url` survives a refusal as audit evidence for the image that
+        # was rejected, so it is not the question "does this run have a usable
+        # photograph". Saying it does, while Gable is asking for another one,
+        # invited the model to argue with its own outstanding request.
+        rejected = store.photo_was_rejected(connection, run.run_id)
+        if run.photo_url and not rejected:
+            facts.append("A human-supplied hero photo is attached to this run.")
+        elif run.photo_url:
+            facts.append("This run holds a hero photo that a check refused; another is needed.")
+        else:
+            facts.append("This run has no hero photo yet.")
+        # The status names the work only a person can do; it does not name
+        # everything the run is waiting for. A run owed a widened design AND a
+        # photograph parks in needs_template, and the reply shortcuts that read
+        # only the status could not tell that a photo was still wanted.
+        if run.awaiting_photo:
+            facts.append("This run has asked for the property photo and is waiting for it.")
         if run.is_paused and run.failure_reason:
             facts.append(f"The run is waiting because: {_fact_value(run.failure_reason)}")
         return "\n".join(facts)

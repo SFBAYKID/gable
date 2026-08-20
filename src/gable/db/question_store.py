@@ -27,6 +27,13 @@ SLACK_NOTIFICATION_PENDING: Final[str] = "a Slack notification is still waiting 
 # Compatibility name for callers that specifically inspect a pending question.
 QUESTION_NOTIFICATION_PENDING: Final[str] = SLACK_NOTIFICATION_PENDING
 
+#: The exact words that also mean "this run is now waiting for a photograph".
+#: Named because the state used to be decided by comparing the message text
+#: inline: reword it for voice and the run would silently stop moving to
+#: `needs_photo`, with nothing to point at. A constant cannot drift from
+#: itself, and the three places that need these words now share one.
+PHOTO_REPLACEMENT_MESSAGE: Final[str] = "Send me the new property photo."
+
 
 def _now() -> str:
     """Return the timestamp format shared by run persistence."""
@@ -211,9 +218,8 @@ def prepare_run_action_notification(
     if not root or str(run["slack_thread_ts"] or "") != root:
         raise ValueError("the edited run is not owned by this Slack thread")
     status = str(run["status"])
-    target_status = (
-        "needs_photo" if message.strip() == "Send me the new property photo." else status
-    )
+    # Compared against the constant, never against a literal typed here.
+    target_status = "needs_photo" if message.strip() == PHOTO_REPLACEMENT_MESSAGE else status
     return _prepare_run_notification(
         connection,
         run_id,
@@ -270,7 +276,7 @@ def prepare_photo_replacement_action(
         changed = connection.execute(
             "UPDATE runs SET status = 'needs_photo', updated_at = ?, failure_reason = ? "
             "WHERE run_id = ? AND status IN ('delivered', 'needs_review')",
-            (now, "Send me the new property photo.", run_id),
+            (now, PHOTO_REPLACEMENT_MESSAGE, run_id),
         )
         if changed.rowcount != 1:
             raise sqlite3.IntegrityError("the photo-replacement action lost its run claim")
@@ -284,7 +290,7 @@ def prepare_photo_replacement_action(
             "action",
             "needs_photo",
             "needs_photo",
-            "Send me the new property photo.",
+            PHOTO_REPLACEMENT_MESSAGE,
             question_label=clean_action_id,
             thread_ts=root,
             confirmation_detail="Slack confirmed the conversational change outcome",

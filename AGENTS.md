@@ -352,6 +352,23 @@ that sets date and time in **one** box takes the whole request, so nothing is
 dropped there either — only a separate time box forces a choice, because one
 time box holds one time.
 
+### 2.7c An empty slot beats a plausible one
+
+A value nobody supplies keeps the design's own placeholder, because a
+placeholder reads as a gap and a gap gets filled. That is only true when it
+actually reads as one. "PROPERTY ADDRESS" cannot be mistaken for an address;
+a bare "3" in a bathrooms slot cannot be told from a real bathroom count, and
+"Sunday, Aug 2, 2026 / 2-4PM" cannot be told from this house's open house.
+
+So **beds, baths, square footage, price and the open-house date and time are
+emptied** when nobody supplies them. The icon and its label stay, the flyer
+reads as incomplete rather than as confidently wrong, and the delivery message
+says which spaces were left empty. Delivery is never blocked over it.
+
+The open house is the worst member of that set and was the last one found: a
+wrong bathroom count is checked by anyone who visits, and a wrong date is acted
+on by driving somewhere.
+
 ### 2.8 Working — the thinking indicator
 
 Every user-triggered response starts Slack's **native purple Gable waiting
@@ -609,7 +626,7 @@ starting the row over, which is what happened to a real Open House listing on
 |---|---|---|
 | `needs_photo` | No supplied hero image, the upload could not be used, or inspection proved it contradicts the listing | Carmen or Chase uploads one in the owned thread. So does any other paused state that asked for the photograph — the ask is what makes an upload welcome, not the status |
 | `needs_template` | No exact request-type design, unsafe structure, unresolved new-template audit, or text that cannot fit legibly | The source is fixed or added, then Carmen or Chase asks in its thread to check again. When such a run also holds the photo it asked for, the repeated blocker opens with "I have the property photo." rather than the identical paragraph, which read as though the upload was lost |
-| `needs_info` | The one batched ask (§2.7) is outstanding, a value present in the row contradicts itself, a headshot is missing, or official contact fallback was unavailable, ambiguous, or conflicting | The reply answers what it can, or the source record or Head Shots folder is fixed and the run is rechecked. A value left unanswered does **not** hold this state — the flyer builds with that placeholder showing |
+| `needs_info` | The one batched ask (§2.7) is outstanding, a value present in the row contradicts itself, a headshot is missing, or official contact fallback was unavailable, ambiguous, or conflicting | The reply answers what it can, or the source record or Head Shots folder is fixed and the run is rechecked. A value left unanswered does **not** hold this state — the flyer builds, showing that field's placeholder, or an empty slot where the placeholder would read as a real value (§2.7c) |
 | `needs_review` | A build, readback, or placement problem meant no usable flyer exists to send | Carmen or Chase resolves the named problem and requests a recheck or retry. A flyer that DOES exist is never held here over what the vision pass thinks of it — see below |
 
 `rendered → checked` is the vision pass of ARCHITECTURE.md §4.7b. A flyer that
