@@ -16,7 +16,7 @@ import pytest
 from gable.db import store
 from gable.db.schema import apply_migrations, connect
 from gable.listings.enrich import Facts
-from gable.pipeline import run_reporting
+from gable.pipeline import needs, run_reporting, run_speech
 from tests.runner_support import Recorder
 from tests.runner_support import record as _record
 from tests.runner_support import runner as _runner
@@ -423,3 +423,57 @@ def test_an_ask_that_does_not_want_the_photo_records_that_too(
     assert run is not None
     assert result.needs_a_human, "this run did stop to ask something"
     assert run.awaiting_photo is False
+
+
+def test_a_long_ask_still_carries_the_photo_request(db: sqlite3.Connection) -> None:
+    """The ask is a report. Trimmed at the reply ceiling it lost its own point.
+
+    Three design blockers plus the photo and its values produced 1004
+    characters and were cut to 548, dropping both "Separately, can you send me
+    the property photo?" and the sentence that makes silence an answer -- while
+    the run recorded that it had asked for both. Carmen would have seen three
+    paragraphs about template widths, nothing she could send, and a listing
+    that waited on her forever.
+    """
+    outstanding = needs.Needs()
+    outstanding.photo = True
+    outstanding.add_values(["beds", "baths", "square_feet", "price"])
+    for field in ("agent name", "agent email", "neighborhood"):
+        outstanding.add_blocker(
+            f"I checked the New Listing design before building. The {field} would need about "
+            "60 percent more room, and shrinking it enough would take it below the 8-point "
+            "readability limit. Widen that section, then tell me to check the updated "
+            "template again.",
+            "needs_template",
+        )
+    submission = _submission(rid="rid-long-ask")
+    _record(db, submission)
+    run = store.start_run(db, submission.response_row_id)
+
+    asked = run_speech.record_the_ask(db, run.run_id, outstanding)
+
+    assert needs.PHOTO_ASK_BESIDE_A_BLOCKER in asked, "the request Carmen must answer"
+    assert needs.LEAVE_OUT_MARK in asked, "and the promise that makes one round enough"
+    stored = store.run_by_id(db, run.run_id)
+    assert stored is not None and stored.awaiting_photo is True
+    assert store.blanks_approved(db, run.run_id) is True
+
+
+def test_values_are_not_released_by_a_sentence_that_never_went_out(
+    db: sqlite3.Connection,
+) -> None:
+    """Approving blanks off words Carmen never saw loses those values for good."""
+    submission = _submission(rid="rid-truncated-promise")
+    _record(db, submission)
+    run = store.start_run(db, submission.response_row_id)
+
+    class _Truncated(needs.Needs):
+        def message(self) -> str:
+            return "I still need the price."
+
+    outstanding = _Truncated()
+    outstanding.add_value("price")
+
+    run_speech.record_the_ask(db, run.run_id, outstanding)
+
+    assert store.blanks_approved(db, run.run_id) is False

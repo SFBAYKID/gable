@@ -265,6 +265,17 @@ MAX_REPLY_CHARS: Final[int] = 600
 #: Still bounded, because an unbounded message is its own kind of unreadable.
 MAX_DELIVERY_CHARS: Final[int] = 1400
 
+#: Ceiling for the one batched ask. It is a report for the same reason the
+#: delivery message is: it carries every outstanding thing at once, and Carmen
+#: answers it in one reply. At 600 a listing with three design blockers plus the
+#: photo and its values produced 1004 characters and was cut to 548 -- losing
+#: BOTH "Separately, can you send me the property photo?" and the sentence that
+#: makes silence a usable answer, while the run recorded that it had asked for a
+#: photograph and approved building with the values blank. Carmen would have
+#: seen three paragraphs about template widths, no request for anything she
+#: could send, and a listing that then waited for her forever.
+MAX_ASK_CHARS: Final[int] = MAX_DELIVERY_CHARS
+
 #: Markdown that Slack does not render. `**bold**` shows the asterisks, and a
 #: `#` heading shows the hash, so both look like a mistake rather than emphasis.
 _MD_BOLD: Final[re.Pattern[str]] = re.compile(r"\*\*(.+?)\*\*", re.DOTALL)

@@ -11,14 +11,18 @@ thread. Does not own retries -- the outbox worker does.
 
 from __future__ import annotations
 
+import logging
 from sqlite3 import Connection
 from typing import Any
 
+from gable.db import store
 from gable.listings.intake import Intake
-from gable.pipeline import people
+from gable.pipeline import needs, people
 from gable.pipeline import questions as run_questions
 from gable.pipeline.run_reporting import RunResult
-from gable.voice import safe
+from gable.voice import MAX_ASK_CHARS, safe
+
+logger = logging.getLogger("gable.runner")
 
 #: Outcomes whose stored reason is the honest record of why a run stopped, and
 #: so must survive into `runs.failure_reason` rather than being reset on
@@ -127,7 +131,9 @@ def deliver_question(
     Raises:
         sqlite3.Error: on a write failure.
     """
-    asked = safe(question or "I need one more thing before I can build this.")
+    # The ask is a report, not a reply -- see `voice.MAX_ASK_CHARS`. Trimmed at
+    # the reply ceiling it dropped the photo request itself.
+    asked = safe(question or "I need one more thing before I can build this.", MAX_ASK_CHARS)
     opening = headline or people.opening_for(connection, intake, thread_ts)
     delivery = run_questions.prepare_and_deliver(
         connection,
@@ -145,3 +151,51 @@ def deliver_question(
     if delivery.questions:
         result.questions = [asked, *[q.ask for q in questions[1:]]]
     return result
+
+
+def record_the_ask(connection: Connection, run_id: str, outstanding: needs.Needs) -> str:
+    """Write down what the batched ask commits to, then return its exact words.
+
+    Built once and checked, so what is RECORDED follows what actually goes out.
+    Recording from the intended text let a 1004-character ask be trimmed to 548
+    -- losing both "Separately, can you send me the property photo?" and the
+    sentence that makes silence a usable answer -- while the run recorded that
+    it had asked for a photograph and approved building with the values blank.
+    Carmen would have seen three paragraphs about template widths, nothing she
+    could send, and a listing that then waited on her forever.
+
+    Args:
+        connection: The open database.
+        run_id: The run about to ask.
+        outstanding: Everything this run still needs.
+
+    Returns:
+        The exact message, already trimmed to the report ceiling, for the
+        caller to deliver unchanged.
+
+    Raises:
+        sqlite3.Error: on a write failure.
+    """
+    asked = safe(outstanding.message(), MAX_ASK_CHARS)
+    if outstanding.values:
+        if needs.LEAVE_OUT_MARK in asked:
+            # Saying so is what makes one round enough: from here, silence is
+            # an answer and an unsupplied value keeps its placeholder.
+            store.approve_blank_fields(
+                connection,
+                run_id,
+                "asked for every outstanding value and the photo in one message",
+            )
+        else:
+            # Releasing off a sentence Carmen never saw is how a value stops
+            # being asked for and never reaches a flyer.
+            logger.error("run %s asked for values without the sentence that releases them", run_id)
+    # Recorded before the ask goes out, because the status it parks in cannot
+    # carry it: a blocker owns `status` -- it names the work only a person can
+    # do outside Slack -- and the photo request rides in the same message.
+    # Without this the upload answering it is refused; see `set_awaiting_photo`.
+    store.set_awaiting_photo(connection, run_id, outstanding.photo)
+    named = needs.PHOTO_ONLY_ASK in asked or needs.PHOTO_ASK_BESIDE_A_BLOCKER in asked
+    if outstanding.photo and not named:
+        logger.error("run %s recorded a photo ask that its message does not carry", run_id)
+    return asked

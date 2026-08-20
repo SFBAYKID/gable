@@ -420,29 +420,19 @@ class Runner:
         # Everything Carmen could answer goes out in one message, once. She
         # replies once, and the next thing she sees is the link.
         if outstanding.anything:
-            if outstanding.values:
-                # Saying so is what makes one round enough: from here, silence
-                # is an answer and an unsupplied value keeps its placeholder.
-                store.approve_blank_fields(
-                    self.connection,
-                    run_id,
-                    "asked for every outstanding value and the photo in one message",
-                )
+            # What the ask commits to is written down from the words that
+            # actually go out, never from the words that were intended --
+            # see `run_speech.record_the_ask`.
+            asked = run_speech.record_the_ask(self.connection, run_id, outstanding)
             # The announcement opens the thread, so it belongs only to the first
             # ask. A run resumed inside its own thread must not carry one: the
             # question store refuses a headline that would replace an existing
             # root, and the run died reporting a failed processing step. Seen
             # live when a date clarification resumed a run still owed its photo.
-            # Recorded before the ask goes out, because the status the ask
-            # parks in cannot carry it. A blocker owns `status` -- it names the
-            # work only a person can do outside Slack -- and the photo request
-            # rides in the same message. Without this the upload answering that
-            # request is refused as unexpected; see `store.set_awaiting_photo`.
-            store.set_awaiting_photo(self.connection, run_id, outstanding.photo)
             return self._ask(
                 run_id,
                 intake,
-                outstanding.message(),
+                asked,
                 [],
                 result,
                 status=outstanding.status(),

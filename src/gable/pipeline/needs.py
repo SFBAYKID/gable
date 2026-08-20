@@ -104,6 +104,10 @@ def joins_one_ask(question: Question) -> bool:
 #: The sentence that makes an unanswered item safe to leave out. It is the
 #: whole reason one round of questions is enough: Carmen knows in advance that
 #: silence is an answer, so she never has to reply to decline.
+#: The distinctive phrase of `_LEAVE_OUT`, for checking that the promise
+#: actually reached Slack before acting on it.
+LEAVE_OUT_MARK: Final[str] = "stays as the design's own placeholder"
+
 _LEAVE_OUT: Final[str] = (
     "Answer in one reply with whatever you have. Anything you leave out stays "
     "as the design's own placeholder for you to fill in."
