@@ -23,6 +23,7 @@ from gable.pipeline import (
     research_gate,
     resume_claim,
     run_reporting,
+    run_speech,
     run_values,
 )
 from gable.pipeline import questions as run_questions
@@ -152,10 +153,7 @@ class Runner:
                 run_id=latest.run_id if latest else "",
                 status="failed",
             )
-            spoken = safe(
-                "I have already tried this listing three times, so I stopped before "
-                "starting it again. It needs a person to check what keeps failing."
-            )
+            spoken = safe(run_reporting.RUN_LIMIT_REACHED)
             result.said.append(spoken)
             self.say(spoken, latest.slack_thread_ts if latest else None)
             return result
@@ -224,10 +222,7 @@ class Runner:
                 result.status = current.status
                 result.output_url = current.output_url
                 return result
-            spoken = safe(
-                "I could not finish building this flyer because one of its processing "
-                "steps failed. I stopped without sending it as finished."
-            )
+            spoken = safe(run_reporting.BUILD_STEP_FAILED)
             try:
                 return self._outcome(
                     run_id,
@@ -416,6 +411,12 @@ class Runner:
         # compare the photo against the measured frame before anything builds.
         if not self.hero_photo_url:
             outstanding.photo = True
+        else:
+            # Says so when a blocker is about to repeat itself. An Open House
+            # run on 2026-08-20 asked for a widened design and the photo in one
+            # message; answering it with the same paragraph again, and nothing
+            # about the photo that just arrived, reads as though nothing landed.
+            outstanding.photo_in_hand = True
 
         # Everything Carmen could answer goes out in one message, once. She
         # replies once, and the next thing she sees is the link.
@@ -433,6 +434,12 @@ class Runner:
             # question store refuses a headline that would replace an existing
             # root, and the run died reporting a failed processing step. Seen
             # live when a date clarification resumed a run still owed its photo.
+            # Recorded before the ask goes out, because the status the ask
+            # parks in cannot carry it. A blocker owns `status` -- it names the
+            # work only a person can do outside Slack -- and the photo request
+            # rides in the same message. Without this the upload answering that
+            # request is refused as unexpected; see `store.set_awaiting_photo`.
+            store.set_awaiting_photo(self.connection, run_id, outstanding.photo)
             return self._ask(
                 run_id,
                 intake,
@@ -747,26 +754,22 @@ class Runner:
         output_url: str = "",
     ) -> RunResult:
         """Persist and attempt one exact non-question outcome message."""
-        delivered = run_questions.prepare_outcome_and_deliver(
+        return run_speech.deliver_outcome(
             self.connection,
+            self.say,
             run_id,
             message,
-            status,
-            self.say,
+            result,
+            status=status,
+            detail=detail,
+            thread_ts=self.origin_thread_ts,
             post_once=self.post_once,
             reconcile=self.reconcile,
             pending_status=pending_status,
-            thread_ts=self.origin_thread_ts,
-            confirmed_reason=detail if status in {"failed", "needs_review", "skipped"} else "",
             confirmation_detail=confirmation_detail,
-            transition_detail=detail,
             output_file_id=output_file_id,
             output_url=output_url,
         )
-        result.status = delivered.status
-        result.output_url = output_url
-        result.said.extend(delivered.said)
-        return result
 
     def _ask(
         self,
@@ -779,21 +782,17 @@ class Runner:
         headline: str = "",
     ) -> RunResult:
         """Persist one question, announce the listing, and confirm the pause."""
-        asked = safe(question or "I need one more thing before I can build this.")
-        opening = headline or people.opening_for(self.connection, intake, self.origin_thread_ts)
-        delivery = run_questions.prepare_and_deliver(
+        return run_speech.deliver_question(
             self.connection,
-            run_id,
-            asked,
-            status,
             self.say,
+            run_id,
+            intake,
+            question,
+            questions,
+            result,
+            status=status,
+            headline=headline,
+            thread_ts=self.origin_thread_ts,
             post_once=self.post_once,
             reconcile=self.reconcile,
-            headline=safe(opening) if opening else "",
-            thread_ts=self.origin_thread_ts,
         )
-        result.status = delivery.status
-        result.said.extend(delivery.said)
-        if delivery.questions:
-            result.questions = [asked, *[q.ask for q in questions[1:]]]
-        return result

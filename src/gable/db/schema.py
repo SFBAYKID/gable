@@ -27,7 +27,7 @@ from typing import Final
 
 #: Bumped whenever a migration is added. `apply_migrations` uses it to decide
 #: what still needs running.
-SCHEMA_VERSION: Final[int] = 13
+SCHEMA_VERSION: Final[int] = 14
 
 #: Each migration is (version, sql). They run in order and only once. Never edit
 #: one that has shipped — add another, the same rule as the decision log.
@@ -425,6 +425,23 @@ MIGRATIONS: Final[tuple[tuple[int, str], ...]] = (
         -- Defaults to empty, which means "build". Rows recorded before this
         -- migration therefore keep the behaviour they already had.
         ALTER TABLE submissions ADD COLUMN content_type TEXT NOT NULL DEFAULT '';
+        """,
+    ),
+    (
+        14,
+        """
+        -- Whether the last thing Gable asked this run's thread for included the
+        -- property photograph. The run's status cannot carry this: a run that
+        -- needs both a widened design and a photo parks in `needs_template`,
+        -- because that is the reason a person has work to do outside Slack, and
+        -- the photo ask rode along in the same message. The upload that
+        -- answered it was then refused with "this listing is not waiting for a
+        -- photo" -- Gable asking for something it had no state to receive.
+        -- Observed live on an Open House run 2026-08-20.
+        --
+        -- Defaults to 0, which reads as "not asked". Runs recorded before this
+        -- migration therefore behave exactly as they did.
+        ALTER TABLE runs ADD COLUMN awaiting_photo INTEGER NOT NULL DEFAULT 0;
         """,
     ),
 )

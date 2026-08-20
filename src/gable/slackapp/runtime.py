@@ -69,10 +69,17 @@ def _needs_fresh_photo_upload(connection: Connection, run: store.RunRow) -> bool
     This includes the acknowledgement gap where a durable photo question exists
     but the run remains needs_review until Slack confirms it.
     """
-    return run.status == "needs_photo" or store.has_pending_photo_question(
-        connection,
-        run.run_id,
-        run.slack_thread_ts,
+    return (
+        run.status == "needs_photo"
+        # The same ask-not-status truth the photo ingress reads. Without it a
+        # run blocked on a design AND owed its photo answered "build it with
+        # blanks" by building a flyer with no property photograph on it.
+        or (run.is_paused and run.awaiting_photo)
+        or store.has_pending_photo_question(
+            connection,
+            run.run_id,
+            run.slack_thread_ts,
+        )
     )
 
 

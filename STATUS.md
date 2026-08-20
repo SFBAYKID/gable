@@ -1,6 +1,51 @@
 # Gable — status, and what's needed from Chase
 
-Last updated 2026-08-19 by the building agent.
+Last updated 2026-08-20 by the building agent.
+
+## 2026-08-20 — Effie Fafaleos' Open House: a photo Gable asked for and refused
+
+One listing, two defects, both fixed and deployed. Carmen sent the photograph
+Gable had asked for and was told "This listing is not waiting for a photo, so I
+left the current flyer unchanged." No flyer, and nothing in the thread said why.
+
+**1. Gable asked for something it had no state to receive.** The run posted one
+message asking Carmen to widen the Open House design *and* to send the property
+photo, then parked in `needs_template`. Only `needs_photo` and `needs_review`
+accepted uploads, so the answer to half the message was refused, and the only
+exit was starting the row over. The photograph is now recorded on the run as its
+own fact (`runs.awaiting_photo`, schema v14) rather than inferred from the
+status, and any paused state that asked for one accepts it. A paused run that
+asked for nothing still declines a stray upload. The same signal closed a second
+hole found while fixing it: "build it with blanks" would release a run still
+owed its photo and build a flyer with no property photograph on it.
+
+This is the third instance of one class in two weeks — the credential remedy,
+the address ask, and now this — so the regression test is written against
+**every** paused state rather than the two that were reported, and a new paused
+state inherits the invariant instead of quietly falling outside it.
+
+**2. The blocker named a remedy that cannot work.** "The open house would need
+about 227 percent more room... Widen that section." The request named three
+open houses — `Friday, Aug. 21 4pm to 6pm, Sat. Aug. 22 10am to 12pm, Sun, Aug.
+23 11am to 1pm` — and the design draws one date box and one time box. No width
+holds three different hours in one time box.
+
+Worse, the width check was the only thing standing between that request and a
+bad flyer. The splitter's "two different times are two facts" rule was applied
+to bare times only, so this value was carved into "4pm to 6pm" in the time box
+beneath a date box still reading "Friday, Aug. 21, Sat. Aug. 22 10am to 12pm,
+Sun, Aug. 23 11am to 1pm". A wider box would have shipped that. The rule now
+applies however the times are written, and Gable asks which open house to print
+— a question Carmen can answer in the thread today.
+
+### Needed from Chase
+
+- **Do you want one flyer per open-house date?** Gable now asks Carmen to pick
+  one, which is the conservative reading. Building three is defensible and is a
+  product decision about her workflow, so it was not taken.
+- **This request also asks for a photo collage** — "please make a photo collage
+  of the front of house, kitchen and office". Gable fits one hero photograph to
+  one frame and has no collage step. It does not currently say so.
 
 ## 2026-08-19 — Caleb Olawuyi's credential, and a loop Gable talked Carmen into
 

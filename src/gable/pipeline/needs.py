@@ -118,6 +118,11 @@ PHOTO_ONLY_ASK: Final[str] = "Can you send me the image?"
 #: one, so the photograph is named explicitly wherever both appear together.
 PHOTO_ASK_BESIDE_A_BLOCKER: Final[str] = "Separately, can you send me the property photo?"
 
+#: Said before a blocker that is about to repeat itself, once the photo it
+#: asked for alongside has arrived. Without it Carmen sends the photo and gets
+#: back the identical paragraph, which reads as though the upload was lost.
+PHOTO_HELD: Final[str] = "I have the property photo."
+
 
 def readable(name: str) -> str:
     """Turn an internal field name into the words a person would use.
@@ -165,6 +170,10 @@ class Needs:
     blockers: list[str] = field(default_factory=list)
     #: The paused state a blocker asks for, when one did.
     blocked_status: str = ""
+    #: Whether the property photograph is already held. Only ever spoken beside
+    #: a blocker, where the alternative is repeating the same paragraph at
+    #: someone who has just answered half of it.
+    photo_in_hand: bool = False
 
     def add_value(self, name: str) -> None:
         """Record one missing value, ignoring blanks and repeats.
@@ -227,6 +236,11 @@ class Needs:
         if not self.anything:
             return ""
         lead = " ".join(self.blockers)
+        if lead and self.photo_in_hand and not self.photo:
+            # The photo arrived and the design still cannot hold it. Saying so
+            # is the difference between "still blocked" and "your upload went
+            # nowhere", which is how the unprefixed repeat read.
+            lead = f"{PHOTO_HELD} {lead}"
         photo_ask = PHOTO_ASK_BESIDE_A_BLOCKER if lead else PHOTO_ONLY_ASK
         if self.photo and not self.values:
             rest = photo_ask

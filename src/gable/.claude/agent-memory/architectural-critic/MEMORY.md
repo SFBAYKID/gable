@@ -1,0 +1,2 @@
+- [Two simultaneous waits](project-two-simultaneous-waits.md) — Gable's most-repeated defect: one `status` column asked to carry two waits, so Gable refuses the answer to its own question
+- [Photo-wait consumers](reference-gable-awaiting-photo-consumers.md) — every site that answers "is this run waiting for a photo?", and the hand-rolled status sets that shadow `store.PAUSED`

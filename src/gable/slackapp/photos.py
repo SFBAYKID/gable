@@ -549,6 +549,20 @@ class PhotoHandoff:
                     # is no finished flyer to overwrite and no need for the
                     # words that guard a delivered one.
                     or current.status == "needs_review"
+                    # Whatever Gable asked for, Gable can receive. A run that
+                    # needs a design widened AND needs its photo parks in
+                    # `needs_template`, because the widening is the part only a
+                    # person can do; the photo ask rode along in the same
+                    # message. On 2026-08-20 an Open House run asked exactly
+                    # that, and the screenshot answering it was refused with
+                    # "this listing is not waiting for a photo" -- a dead end
+                    # whose only exit was starting the row over.
+                    #
+                    # `awaiting_photo` is the ask itself rather than the status
+                    # it parked in, so this holds for every paused state. Safe
+                    # in all of them for the reason review is safe: none has
+                    # sent a flyer, so there is nothing to overwrite.
+                    or (current.is_paused and current.awaiting_photo)
                     or store.has_pending_photo_question(
                         connection,
                         current.run_id,
@@ -685,6 +699,10 @@ class PhotoHandoff:
                     "photo_source": "slack_upload",
                     "photo_event_id": event_id,
                     "ai_enhanced": 0,
+                    # Answered. Cleared with the provenance in the same claim,
+                    # never in a second write that a crash could skip and leave
+                    # this run accepting a stray upload forever.
+                    "awaiting_photo": 0,
                 },
                 # The state this upload was accepted in, not a fixed one.
                 # Pinning it to needs_photo made a review-state replacement

@@ -13,6 +13,7 @@ from pathlib import Path
 
 import pytest
 
+from gable.db import store
 from gable.db.schema import apply_migrations, connect
 from gable.listings.enrich import Facts
 from gable.pipeline import run_reporting
@@ -381,3 +382,40 @@ def test_one_property_with_a_zip_is_unaffected() -> None:
         "8517 Oglethorpe Street, New Carrollton 20784",
     ):
         assert template_manifest.names_one_property(good), good
+
+
+def test_an_ask_that_wants_the_photo_records_that_it_does(
+    db: sqlite3.Connection,
+) -> None:
+    """The link between the message and the state that can answer it."""
+    submission = _submission(rid="rid-records-the-photo-ask")
+    _record(db, submission)
+    rec = Recorder()
+    runner = _runner(db, rec, facts=Facts())
+    runner.hero_photo_url = ""
+
+    result = runner.run(submission)
+
+    run = store.run_by_id(db, result.run_id)
+    assert run is not None
+    assert run.awaiting_photo is True, "an upload must be able to answer this ask"
+
+
+def test_an_ask_that_does_not_want_the_photo_records_that_too(
+    db: sqlite3.Connection,
+) -> None:
+    """Left set, the run would take a stray upload forever after."""
+    submission = _submission(rid="rid-photo-already-held")
+    _record(db, submission)
+    rec = Recorder()
+    runner = _runner(db, rec, facts=Facts())
+    # The photo is already in hand, so whatever else this ask names, it is not
+    # the photograph.
+    runner.pick_template = lambda _category, _intake: ("", "")
+
+    result = runner.run(submission)
+
+    run = store.run_by_id(db, result.run_id)
+    assert run is not None
+    assert result.needs_a_human, "this run did stop to ask something"
+    assert run.awaiting_photo is False

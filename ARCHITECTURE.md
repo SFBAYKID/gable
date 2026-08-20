@@ -286,8 +286,18 @@ A run carries its `run_id`, the `response_row_id` it belongs to, its `status`
 (`pending`/`needs_photo`/`needs_info`/`needs_template`/`needs_review`/
 `delivered`/`skipped`/`failed`), the chosen template, the output file and URL,
 the `photo_url` with its `photo_source`, the `ai_generated` and `ai_enhanced`
-flags — **`ai_generated` must be true for any synthetic image** — a failure
-reason, the Slack thread it is speaking in, and UTC timestamps.
+flags — **`ai_generated` must be true for any synthetic image** — `awaiting_photo`,
+a failure reason, the Slack thread it is speaking in, and UTC timestamps.
+
+**`status` is not the whole of what a run is waiting for.** One batched message
+routinely asks for two things at once — a design a person must widen, and the
+property photo — and only one of them can be the status. The blocker wins it,
+because that names work outside Slack and the reply saying it is done routes on
+that state. `awaiting_photo` records the other half: whether the ask that went
+out included the photograph. An upload is accepted in **any** paused state whose
+run carries it, and a paused run that asked for nothing still declines a stray
+image. Anything that reads `status == "needs_photo"` as "this run wants a photo"
+is wrong by construction; read the flag beside it.
 
 **`response_row_id` is the idempotency key.** Before processing any row, its
 runs are checked for a terminal or paused status. Without this, every poll
@@ -588,6 +598,12 @@ when the photo is the problem — refusing one there was a dead end, because the
 only remedy was the only thing the run would not take. The resume claim requires
 the exact state the upload was accepted in, so a run that pauses for a different
 reason during the source refresh still refuses a stale image.
+
+The same argument generalises, and on 2026-08-20 it had to: a run parked in
+`needs_template` refused the photo it had asked for in the same message. No
+paused state has sent a flyer, so none of them has anything to overwrite. Any
+paused run whose `awaiting_photo` is set accepts an upload, and the resume claim
+still pins the exact state it was accepted in.
 
 ### 4.8 Deliver (`slackapp/`)
 

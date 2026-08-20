@@ -69,6 +69,7 @@ from gable.db.run_store import (
     run_attempt_count,
     run_by_id,
     run_for_thread,
+    set_awaiting_photo,
     set_status,
     start_run,
 )
@@ -141,6 +142,7 @@ __all__ = [
     "run_by_id",
     "run_for_thread",
     "satisfy_pending_photo_question",
+    "set_awaiting_photo",
     "set_status",
     "slack_event_claimed",
     "start_run",

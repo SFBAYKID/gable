@@ -545,6 +545,22 @@ def unfilled(fields: dict[str, str], values: dict[str, str]) -> list[str]:
 
 #: Said when Slides accepted the fill and then would not return the text, so
 #: nothing can be verified. Two thoughts, two paragraphs.
+#: Said when a submission has burned its whole attempt budget. Named here with
+#: the other user-visible sentences rather than inline in the runner, so the
+#: words Gable can say are readable in one place.
+RUN_LIMIT_REACHED: Final[str] = (
+    "I have already tried this listing three times, so I stopped before "
+    "starting it again. It needs a person to check what keeps failing."
+)
+
+#: Said when a step raised before any outcome was confirmed. Deliberately says
+#: nothing about the cause: the exception type goes to the audit trail, because
+#: its message can carry a signed URL or an id.
+BUILD_STEP_FAILED: Final[str] = (
+    "I could not finish building this flyer because one of its processing "
+    "steps failed. I stopped without sending it as finished."
+)
+
 UNREADABLE_FLYER: Final[str] = paragraphs(
     "I filled the design, but Google Slides did not let me read it back to verify the values.",
     "I have not sent it as finished.",

@@ -60,6 +60,7 @@ _RUN_UPDATE_FIELDS: Final[frozenset[str]] = frozenset(
         "ai_enhanced",
         "slack_thread_ts",
         "failure_reason",
+        "awaiting_photo",
     }
 )
 
@@ -115,6 +116,11 @@ class RunRow:
     ai_enhanced: bool = False
     approved_warning_codes: str = ""
     pending_warning_code: str = ""
+    #: Whether the last ask sent to this run's thread included the property
+    #: photograph. Read alongside `status`, never instead of it: a run blocked
+    #: on a design a person must widen parks in `needs_template` and is still
+    #: owed the photo it asked for in the same message.
+    awaiting_photo: bool = False
 
     @property
     def is_terminal(self) -> bool:
@@ -429,7 +435,8 @@ def claim_paused_run(
 _RUN_COLUMNS: Final[str] = (
     "run_id, response_row_id, status, template_file_id, template_label, "
     "output_file_id, output_url, slack_thread_ts, failure_reason, photo_url, "
-    "photo_source, photo_event_id, ai_enhanced, approved_warning_codes, pending_warning_code"
+    "photo_source, photo_event_id, ai_enhanced, approved_warning_codes, "
+    "pending_warning_code, awaiting_photo"
 )
 
 
@@ -491,6 +498,7 @@ def _to_run(row: sqlite3.Row) -> RunRow:
         ai_enhanced=bool(row["ai_enhanced"]),
         approved_warning_codes=str(row["approved_warning_codes"] or ""),
         pending_warning_code=str(row["pending_warning_code"] or ""),
+        awaiting_photo=bool(row["awaiting_photo"]),
     )
 
 
@@ -499,6 +507,37 @@ def _to_run(row: sqlite3.Row) -> RunRow:
 #: the sheet is what there is, so a gap is Carmen's decision rather than a dead
 #: end — she either supplies the value or says build it and she will fill it in.
 BUILD_WITH_BLANKS: Final[str] = "build_with_blank_fields"
+
+
+def set_awaiting_photo(
+    connection: sqlite3.Connection,
+    run_id: str,
+    awaiting: bool,
+) -> None:
+    """Record whether the ask about to go out includes the property photograph.
+
+    Written WITHOUT moving the run, for the same reason `approve_blank_fields`
+    is: the ask that follows owns the status transition, and a second writer
+    touching `status` here would race it.
+
+    This exists because one status cannot hold two truths. A run that needs a
+    design widened AND needs its photo parks in `needs_template` -- the widening
+    is the part a person must do outside Slack -- while the same message says
+    "Separately, can you send me the property photo?". Without this column the
+    upload answering that sentence is refused as unexpected.
+
+    Args:
+        connection: An open connection.
+        run_id: The run being asked about.
+        awaiting: Whether the outgoing message asks for the photograph.
+
+    Raises:
+        sqlite3.Error: on a write failure.
+    """
+    connection.execute(
+        "UPDATE runs SET awaiting_photo = ?, updated_at = ? WHERE run_id = ?",
+        (1 if awaiting else 0, _now(), run_id),
+    )
 
 
 def approve_blank_fields(

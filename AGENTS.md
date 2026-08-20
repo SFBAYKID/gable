@@ -322,6 +322,29 @@ conflicting profile still pauses; Carmen or Chase fixes the form row, contact
 workbook, or Head Shots folder, then replies in the listing thread that it is
 updated. Gable refreshes those sources before re-entering the same run.
 
+### 2.7b More than the design can say
+
+A request can name more than one of something the design draws once. An Open
+House template has one date box and one time box; a request naming three open
+houses across three days does not fit them at any width.
+
+Gable asks which one to print, and says so as a question rather than as a
+design fault:
+
+```
+     This request names 3 open houses, and the Open House design has one
+     date and one time. Which one should I put on the flyer? Reply with
+     the day and hours and I will build it.
+```
+
+Status is `needs_info`, because the remedy is a reply in the thread. The
+previous behaviour asked Carmen to widen the template, which cannot work —
+no width holds three different hours in one time box, and a wider box would
+have shipped the value carved into an incoherent split ("4pm to 6pm" beneath
+a date line still reading "Sat. Aug. 22 10am to 12pm, Sun, Aug. 23 11am to
+1pm"). Two days at the *same* hours remain one open house and are never
+questioned.
+
 ### 2.8 Working — the thinking indicator
 
 Every user-triggered response starts Slack's **native purple Gable waiting
@@ -563,12 +586,22 @@ needs_photo · needs_template · needs_info · needs_review
 ```
 
 The four `needs_*` states are **paused**, not failed. They wait for Carmen
-indefinitely and are re-checked from their owned Slack thread:
+indefinitely and are re-checked from their owned Slack thread.
+
+**A state names the work only a person can do; it does not name everything the
+run is waiting for.** One message often asks for two things — a design that
+needs widening *and* the property photo — and only one of them can be the
+status. The photograph is therefore recorded on the run as its own fact
+(`runs.awaiting_photo`), and an upload answering it is accepted in **any**
+paused state. Whatever Gable asks for in a message, Gable can receive: a run
+that asked for a photo and then refused one is a dead end whose only exit is
+starting the row over, which is what happened to a real Open House listing on
+2026-08-20.
 
 | State | What is missing | How it clears |
 |---|---|---|
-| `needs_photo` | No supplied hero image, the upload could not be used, or inspection proved it contradicts the listing | Carmen or Chase uploads one in the owned thread |
-| `needs_template` | No exact request-type design, unsafe structure, unresolved new-template audit, or text that cannot fit legibly | The source is fixed or added, then Carmen or Chase asks in its thread to check again |
+| `needs_photo` | No supplied hero image, the upload could not be used, or inspection proved it contradicts the listing | Carmen or Chase uploads one in the owned thread. So does any other paused state that asked for the photograph — the ask is what makes an upload welcome, not the status |
+| `needs_template` | No exact request-type design, unsafe structure, unresolved new-template audit, or text that cannot fit legibly | The source is fixed or added, then Carmen or Chase asks in its thread to check again. When such a run also holds the photo it asked for, the repeated blocker opens with "I have the property photo." rather than the identical paragraph, which read as though the upload was lost |
 | `needs_info` | The one batched ask (§2.7) is outstanding, a value present in the row contradicts itself, a headshot is missing, or official contact fallback was unavailable, ambiguous, or conflicting | The reply answers what it can, or the source record or Head Shots folder is fixed and the run is rechecked. A value left unanswered does **not** hold this state — the flyer builds with that placeholder showing |
 | `needs_review` | A build, readback, or placement problem meant no usable flyer exists to send | Carmen or Chase resolves the named problem and requests a recheck or retry. A flyer that DOES exist is never held here over what the vision pass thinks of it — see below |
 

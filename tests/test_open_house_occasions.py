@@ -1,0 +1,96 @@
+"""One design, one date, one time -- and what happens when a request names three.
+
+Split out of `test_slides_preflight.py` at the 800-line ceiling. Every case here
+comes from a real submission: Effie Fafaleos' 2026-08-20 Open House named three
+across three days, and Gable answered it by asking for a wider template.
+"""
+
+from __future__ import annotations
+
+from gable.slackapp.style import violations
+from gable.slides import fields
+from tests.test_slides_preflight import _analyze, _presentation, _text
+
+
+def test_three_open_houses_ask_which_one_rather_than_for_a_wider_box() -> None:
+    """Effie Fafaleos' 2026-08-20 request, which stranded a real listing.
+
+    The design has one date box and one time box. Three open houses do not fit
+    any width of those, so "Widen that section" was a remedy that could not
+    work -- and a wider box would have shipped the mangled split beneath.
+    """
+    value = "Friday, Aug. 21 4pm to 6pm, Sat. Aug. 22 10am to 12pm, Sun, Aug. 23 11am to 1pm"
+
+    assert fields.open_house_occasions(value) == 3
+
+
+def test_one_open_house_held_on_two_days_is_still_one_open_house() -> None:
+    """The same hours written twice must not become a question."""
+    assert fields.open_house_occasions("08/08/2026 11am-1pm , 08/09/2026 11am-1pm") == 1
+    assert fields.open_house_occasions("Aug 8, 11-1 and Aug 9, 11-1") == 1
+    assert fields.open_house_occasions("Saturday and Sunday, August 22-23, 12:00PM-2:00PM") == 1
+
+
+def test_a_date_with_no_time_names_no_open_house_hours() -> None:
+    """A value carrying no time at all is not a multi-occasion request."""
+    assert fields.open_house_occasions("7/11/2026") == 0
+    assert fields.open_house_occasions("") == 0
+
+
+def test_several_different_times_are_never_split_between_the_two_boxes() -> None:
+    """Promoting one asserts it as THE time while the others hide above it."""
+    value = "Friday, Aug. 21 4pm to 6pm, Sat. Aug. 22 10am to 12pm, Sun, Aug. 23 11am to 1pm"
+
+    date_part = fields._open_house_part("SATURDAY, JUNE 7", value)
+    time_part = fields._open_house_part("12PM - 2PM", value)
+
+    assert date_part == value, "the whole request stays intact rather than being carved up"
+    assert time_part == "", "no single time may claim the time box"
+
+
+def test_several_open_houses_are_reported_as_a_question_not_a_narrow_box() -> None:
+    """End to end: the issue Carmen sees names a remedy she can act on."""
+    presentation = _presentation(
+        _text("address", "[PROPERTY ADDRESS]", 500),
+        _text("open-date", "SATURDAY, JUNE 7", 200),
+        _text("open-time", "12PM - 2PM", 120),
+    )
+
+    report = _analyze(
+        presentation,
+        {
+            "address": "7631 Old Columbia Rd, Laurel, MD 20723",
+            "open_house": (
+                "Friday, Aug. 21 4pm to 6pm, Sat. Aug. 22 10am to 12pm, Sun, Aug. 23 11am to 1pm"
+            ),
+        },
+    )
+
+    issue = next(item for item in report.blockers if item.code == "several_open_houses")
+    assert "3 open houses" in issue.say
+    assert "Which one should I put on the flyer?" in issue.say
+    # Answerable in the thread, so the run parks where a reply is understood.
+    assert issue.status == "needs_info"
+    # And the width complaint about the same field does not also go out.
+    assert not any(item.code == "unreadable_open_house" for item in report.issues)
+    assert not violations(issue.say)
+
+
+def test_one_open_house_that_fits_raises_no_question_at_all() -> None:
+    """The check must not fire on the ordinary single open house."""
+    presentation = _presentation(
+        _text("address", "[PROPERTY ADDRESS]", 500),
+        _text("open-date", "SATURDAY, JUNE 7", 260),
+        _text("open-time", "12PM - 2PM", 160),
+    )
+
+    report = _analyze(
+        presentation,
+        {
+            "address": "7631 Old Columbia Rd, Laurel, MD 20723",
+            "open_house": "Saturday, Aug. 22 12pm to 2pm",
+        },
+    )
+
+    assert not any(item.code == "several_open_houses" for item in report.issues)
+    assert report.blockers == ()

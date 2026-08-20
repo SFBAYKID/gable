@@ -331,6 +331,36 @@ def _bare_hours(value: str) -> re.Match[str] | None:
     return found if _A_DAY_NUMBER.search(remainder) else None
 
 
+def open_house_occasions(value: str) -> int:
+    """How many different times this open-house text names.
+
+    Shares `_open_house_part`'s rule exactly, so the two can never disagree
+    about whether a value is splittable: the same times are gathered, and two
+    written the same way count once. "08/08 11am-1pm, 08/09 11am-1pm" is one
+    open house held twice and fits a single time box; three different hours do
+    not, and no width of box makes them.
+
+    Args:
+        value: The open-house details exactly as they were supplied.
+
+    Returns:
+        The number of distinct times named. Zero when no time was supplied.
+
+    Raises:
+        Nothing.
+    """
+    times = [match.group(0) for match in _TIME_RANGE_INSIDE.finditer(value)]
+    if not times:
+        found = _bare_hours(value)
+        if found is None:
+            return 0
+        times = [
+            *(match.group(0) for match in _bare_times_before(value, found.start())),
+            found.group(0),
+        ]
+    return len({"".join(item.split()).casefold() for item in times})
+
+
 def _open_house_part(literal: str, value: str) -> str:
     """Give a design's date box the date and its time box the time.
 
@@ -380,20 +410,28 @@ def _open_house_part(literal: str, value: str) -> str:
     # its own "11am-1pm". Two DIFFERENT times are two facts: dropping one would
     # be a lie about when the house is open, so that case is left as it was.
     same_time = len({"".join(item.split()).casefold() for item in times}) == 1
-    # A bare "2-4" promoted to the time box would assert itself as THE
-    # open-house time while Saturday's own hours hid in the date line, so
-    # bare forms carrying two different times do not split at all.
-    if with_meridiem is None and not same_time:
+    # Two DIFFERENT times do not split, however they are written. Promoting one
+    # to the time box asserts it as THE open-house time while the others hide in
+    # the date line above it. That rule was applied to bare forms only, so
+    # Effie Fafaleos' three open houses on 2026-08-20 -- "Friday, Aug. 21 4pm to
+    # 6pm, Sat. Aug. 22 10am to 12pm, Sun, Aug. 23 11am to 1pm" -- were split
+    # into "4pm to 6pm" beneath a date box reading "Friday, Aug. 21, Sat. Aug.
+    # 22 10am to 12pm, Sun, Aug. 23 11am to 1pm". Only the width check stopped
+    # that reaching a flyer; a wider box would have shipped it.
+    #
+    # `open_house_occasions` reports the same count, so preflight can ask which
+    # one to print instead of asking for a design that cannot hold all three.
+    if not same_time:
         return "" if _wants_time(literal) else value
-    if with_meridiem is not None and same_time:
+    if with_meridiem is not None:
         remainder = _TIME_RANGE_INSIDE.sub(" ", value)
     else:
         # Cut exactly the spans judged to be times, newest last. A blanket
         # sub of the bare pattern would also take the "8-9" out of
         # "August 8-9, 11-1", which is a pair of days.
-        spans = [(found.start(), found.end())]
-        if with_meridiem is None and same_time:
-            spans = [*((m.start(), m.end()) for m in earlier), *spans]
+        # Every bare span judged a time, in order. `earlier` is empty for the
+        # meridiem path, which never reaches here.
+        spans = [*((m.start(), m.end()) for m in earlier), (found.start(), found.end())]
         pieces, last = [], 0
         for start, stop in spans:
             pieces.append(value[last:start])

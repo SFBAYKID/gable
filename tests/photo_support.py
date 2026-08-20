@@ -103,7 +103,10 @@ class FakeRunner:
     ) -> RunResult:
         """Record a same-run resume without rendering Google Slides."""
         self.seen.extend([submission.response_row_id, run_id])
-        assert expected_status in {"needs_photo", "needs_review"}
+        # Any paused state, because any of them can be the one the run asked
+        # for its photo from. Pinned to two states, this double asserted the
+        # very narrowing that stranded the 2026-08-20 Open House run.
+        assert expected_status in store.PAUSED
         fields = resume_fields or {}
         claimed = store.claim_run_for_photo(
             self.connection,

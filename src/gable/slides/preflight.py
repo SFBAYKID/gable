@@ -617,6 +617,10 @@ def analyze(
     # A person may release this exact block by answering that Gable should build
     # anyway; the runner drops `missing_value_*` blockers in that case. The
     # check still runs so the reason is recorded either way.
+    # Fields whose problem has already been named in words Carmen can act on.
+    # The width complaint beneath would otherwise fire on the same field and
+    # ask for a wider box in the same breath as asking which value to use.
+    explained: set[str] = set()
     if values:
         missing = next(
             (
@@ -649,6 +653,31 @@ def analyze(
                     f"{blanked.replace('_', ' ')} in its own box, and what I have for this "
                     "listing does not include that part. What should it say? Leave it and "
                     "I will build without it.",
+                    blocking=True,
+                    status="needs_info",
+                )
+            )
+
+        # More open houses than the design can say. Effie Fafaleos' 2026-08-20
+        # request named three across three days; these designs draw one date and
+        # one time. Gable answered "Widen that section, then tell me to check
+        # the updated template again", which is a remedy that cannot work --
+        # no width holds three different hours in one time box, and a wider box
+        # would only have shipped the mangled split. Asking which one to print
+        # is a question Carmen can actually answer, in the thread, today.
+        occasions = (
+            fields.open_house_occasions(values.get("open_house", ""))
+            if "open_house" in resolution.fields
+            else 0
+        )
+        if occasions > 1:
+            explained.add("open_house")
+            issues.append(
+                Issue(
+                    "several_open_houses",
+                    f"This request names {occasions} open houses, and the {template_label} "
+                    "design has one date and one time. Which one should I put on the flyer? "
+                    "Reply with the day and hours and I will build it.",
                     blocking=True,
                     status="needs_info",
                 )
@@ -693,6 +722,8 @@ def analyze(
                     blocking=True,
                 )
             )
+            continue
+        if field_name in explained:
             continue
         for box in matching:
             issue = _replacement_issue(template_label, field_name, box, replacement)
