@@ -249,6 +249,51 @@ def _as_written(name: str, literal: str, value: str) -> str:
     return value
 
 
+#: A time range written longhand: "4pm to 6pm", "10:00 AM - 12:00 PM".
+_SPELLED_TIME_RANGE: Final[re.Pattern[str]] = re.compile(
+    r"^(\d{1,2})(?::(\d{2}))?\s*([ap]\.?m\.?)?\s*(?:-|\u2013|\u2014|to)\s*"
+    r"(\d{1,2})(?::(\d{2}))?\s*([ap]\.?m\.?)?$",
+    re.IGNORECASE,
+)
+
+
+def compact_time(text: str) -> str:
+    """Rewrite a time range in the compact form these designs are drawn for.
+
+    Effie Fafaleos' open house was supplied as "4pm to 6pm". The Open House
+    design's time box is 72pt wide and holds its own placeholder "2-4PM" at
+    24pt, so the longhand form wrapped to three lines and overflowed downward
+    into the stats row, printing "6pm" across "3 BATHS". Gable said the fit was
+    too small to read and delivered it anyway, which is the right call for a
+    flyer and the wrong one for a value it could simply have written the way
+    the design writes it.
+
+    A shared meridiem is stated once at the end, which is how every one of
+    these designs sets it.
+
+    Args:
+        text: One time range, already isolated from its date.
+
+    Returns:
+        The compact form, or the text unchanged when it is not a plain range.
+
+    Raises:
+        Nothing.
+    """
+    found = _SPELLED_TIME_RANGE.match(text.strip())
+    if found is None:
+        return text
+    start_hour, start_min, start_mer, end_hour, end_min, end_mer = found.groups()
+    start = f"{start_hour}:{start_min}" if start_min else start_hour
+    end = f"{end_hour}:{end_min}" if end_min else end_hour
+    left = (start_mer or "").replace(".", "").upper()
+    right = (end_mer or "").replace(".", "").upper()
+    if left and right and left != right:
+        return f"{start}{left}-{end}{right}"
+    # One meridiem, said once: "4pm to 6pm" is "4-6PM", never "4PM-6PM".
+    return f"{start}-{end}{right or left}"
+
+
 def _wants_time(literal: str) -> bool:
     """Whether this box is the design's time box rather than its date box."""
     return bool(_TIME_RANGE_ONLY.match(literal.strip()) or "TIME" in literal.upper())
@@ -486,7 +531,7 @@ def _open_house_part(literal: str, value: str) -> str:
         # twice, once in each box. Leaving the design's own "2-4PM" showing
         # would be worse still — that is a previous listing's real time.
         return "" if _wants_time(literal) else value
-    time_part = found.group(0).strip()
+    time_part = compact_time(found.group(0).strip())
     earlier: list[re.Match[str]] = []
     if with_meridiem is not None:
         times = [match.group(0) for match in _TIME_RANGE_INSIDE.finditer(value)]

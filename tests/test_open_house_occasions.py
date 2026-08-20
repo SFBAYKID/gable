@@ -51,7 +51,7 @@ def test_only_the_first_occasion_reaches_the_two_boxes() -> None:
     time_part = fields._open_house_part("12PM - 2PM", value)
 
     assert date_part == "Friday, Aug. 21"
-    assert time_part == "4pm to 6pm"
+    assert time_part == "4-6PM", "the design draws a 72pt time box; longhand overflowed it"
     assert "Sat." not in date_part and "Sun" not in date_part
     assert fields.first_open_house(value) == "Friday, Aug. 21 4pm to 6pm"
     assert fields.dropped_open_houses(value) == (
@@ -107,3 +107,31 @@ def test_one_open_house_that_fits_raises_no_question_at_all() -> None:
 
     assert not any(item.code == "several_open_houses" for item in report.issues)
     assert report.blockers == ()
+
+
+def test_a_longhand_time_is_written_the_way_the_design_writes_it() -> None:
+    """Effie Fafaleos' flyer printed "6pm" across "3 BATHS".
+
+    The Open House time box is 72pt wide and holds "2-4PM" at 24pt. "4pm to
+    6pm" wrapped to three lines and overflowed downward into the stats row.
+    Gable said the fit was too small to read and delivered it anyway -- right
+    for a flyer, wrong for a value it could have written compactly.
+    """
+    assert fields.compact_time("4pm to 6pm") == "4-6PM"
+    assert fields.compact_time("4 p.m. to 6 p.m.") == "4-6PM"
+    assert fields.compact_time("1 PM - 3 PM") == "1-3PM"
+    assert fields.compact_time("12:00 PM - 2:00 PM") == "12:00-2:00PM"
+
+
+def test_two_different_meridiems_both_survive() -> None:
+    """Both halves survive when the meridiems differ, or it says something else."""
+    assert fields.compact_time("10am to 12pm") == "10AM-12PM"
+    assert fields.compact_time("11am-1pm") == "11AM-1PM"
+
+
+def test_a_time_already_compact_or_unparsable_is_left_alone() -> None:
+    """Nothing is rewritten that was not a plain range to begin with."""
+    assert fields.compact_time("2-4PM") == "2-4PM"
+    assert fields.compact_time("11-1") == "11-1"
+    assert fields.compact_time("by appointment") == "by appointment"
+    assert fields.compact_time("") == ""

@@ -54,6 +54,13 @@ silence for every paused state but `needs_photo`; and the CLI's
 `--hero-photo-url` never cleared the flag. All four are fixed, and the test
 double that hid the second one now routes through the real claim.
 
+**4. The delivered flyer printed "6pm" across "3 BATHS".** Caught by looking at
+the rendered result rather than the log. "4pm to 6pm" does not fit a 72pt time
+box drawn for "2-4PM", so it wrapped to three lines and overflowed into the
+stats row. Gable measured that and said so, then delivered — right for a flyer,
+wrong for a value it could have written the way the design writes it. Times are
+now compacted to the designs' own idiom: "4pm to 6pm" is "4-6PM".
+
 ### Needed from Chase
 
 - **An upload can answer the wrong ask.** When a design has no headshot on file

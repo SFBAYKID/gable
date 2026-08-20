@@ -151,7 +151,7 @@ def test_a_date_keeps_no_joining_word_once_its_time_has_moved_boxes() -> None:
     pairs = fields.replacements(resolution, {"open_house": "08/01 and 08/02 from 12-2pm"})
 
     assert pairs["Sunday, Aug 2, 2026"] == "08/01 and 08/02"
-    assert pairs["2-4PM"] == "12-2pm"
+    assert pairs["2-4PM"] == "12-2PM", "written the way the design writes it"
 
 
 def test_a_date_that_reads_naturally_is_not_trimmed() -> None:
@@ -171,7 +171,7 @@ def test_two_days_at_the_same_hours_write_that_time_once() -> None:
         {"open_house": "08/08/2026 11am-1pm , 08/09/2026 11am-1pm"},
     )
 
-    assert pairs["SUNDAY, MAY 24TH\n1 PM - 3 PM"] == "08/08/2026, 08/09/2026\n11am-1pm"
+    assert pairs["SUNDAY, MAY 24TH\n1 PM - 3 PM"] == "08/08/2026, 08/09/2026\n11AM-1PM"
 
 
 def test_two_days_at_different_hours_keep_both_times() -> None:
