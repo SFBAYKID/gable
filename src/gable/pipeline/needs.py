@@ -200,6 +200,27 @@ class Needs:
         for name in names:
             self.add_value(name)
 
+    def note_photo(self, held_url: str, *, rejected: bool) -> None:
+        """Record whether the photograph is outstanding, held, or refused.
+
+        Three states, not two. A run holding a URL a check refused is not a run
+        holding a photograph: `runs.photo_url` is kept after a refusal as audit
+        evidence for the rejected image, never as permission to reuse it. So it
+        neither asks again here nor claims to have one, and the check that
+        refused it owns the sentence.
+
+        Args:
+            held_url: The fitted hero photo this run has, or "".
+            rejected: Whether a check has refused the photo it holds.
+
+        Raises:
+            Nothing.
+        """
+        if not held_url:
+            self.photo = True
+        elif not rejected:
+            self.photo_in_hand = True
+
     def add_blocker(self, say: str, status: str = "") -> None:
         """Record one preflight sentence that stops the build.
 

@@ -603,6 +603,36 @@ def approve_blank_fields(
         )
 
 
+def photo_was_rejected(connection: sqlite3.Connection, run_id: str) -> bool:
+    """Whether a check has refused the photograph this run currently holds.
+
+    `runs.photo_url` is kept after a refusal as audit evidence for the image
+    that was rejected, NOT as permission to reuse it. Anything that reads the
+    column as "this run has a usable photograph" is wrong; ask this instead.
+
+    Args:
+        connection: An open connection.
+        run_id: The run being asked about.
+
+    Returns:
+        True when the run holds a photo URL and its own history records that a
+        check refused it and asked for another.
+
+    Raises:
+        sqlite3.Error: on a query failure.
+    """
+    row = connection.execute(
+        "SELECT 1 FROM runs r WHERE r.run_id = ? AND r.photo_url != '' AND EXISTS ("
+        "  SELECT 1 FROM run_events e WHERE e.run_id = r.run_id"
+        "  AND (e.detail LIKE '%photo%' OR e.detail LIKE '%image%')"
+        "  AND (e.detail LIKE '%replace%' OR e.detail LIKE '%contradict%'"
+        "       OR e.detail LIKE '%conflict%' OR e.detail LIKE '%reject%')"
+        ") LIMIT 1",
+        (run_id,),
+    ).fetchone()
+    return row is not None
+
+
 def blanks_approved(connection: sqlite3.Connection, run_id: str) -> bool:
     """Whether this run may build with its unknown values left blank.
 

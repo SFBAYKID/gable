@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 from gable.slackapp.photos import shared_file_event
 
 
@@ -75,3 +77,67 @@ def test_a_file_with_no_share_and_a_failed_lookup_both_stay_silent() -> None:
     assert shared_file_event({"file_id": "F123"}, _FilesInfoClient(_info(shares={}))) is None
     assert shared_file_event({"file_id": "F1"}, _FilesInfoClient(None, fail=True)) is None
     assert shared_file_event({}, _FilesInfoClient(_info())) is None
+
+
+class _CaptionedClient:
+    """Announces a file share and can be asked what was said beside it."""
+
+    def __init__(self, text: str = "here is a better angle, run it again") -> None:
+        """Bind the caption this client will report."""
+        self.text = text
+        self.replies_calls = 0
+
+    def files_info(self, *, file: str) -> dict[str, Any]:
+        """Report one image shared into one thread."""
+        return {
+            "file": {
+                "id": file,
+                "mimetype": "image/jpeg",
+                "user": "U-CARMEN",
+                "shares": {
+                    "public": {"C0B02721MNK": [{"ts": "222.2", "thread_ts": "111.1"}]},
+                },
+            }
+        }
+
+    def conversations_replies(self, **_kwargs: Any) -> dict[str, Any]:  # noqa: ANN401
+        """Return the thread, including the message that carried the file."""
+        self.replies_calls += 1
+        return {
+            "messages": [
+                {"ts": "111.1", "text": "New Open House request"},
+                {"ts": "222.2", "text": self.text},
+            ]
+        }
+
+
+def test_the_words_sent_with_a_shared_file_are_recovered() -> None:
+    """`file_shared` names the file, not the message, so the caption was lost.
+
+    It is load-bearing twice: values stated beside a photo are recorded from
+    it, and a delivered flyer only accepts a replacement when the words ask for
+    one. The same upload therefore worked when Slack announced it as a message
+    and silently did not when Slack announced it as a file share.
+    """
+    client = _CaptionedClient()
+
+    shaped = shared_file_event({"file_id": "F1"}, client)
+
+    assert shaped is not None
+    assert shaped["text"] == "here is a better angle, run it again"
+    assert shaped["thread_ts"] == "111.1"
+    assert client.replies_calls == 1
+
+
+def test_a_caption_that_cannot_be_read_never_costs_the_photo() -> None:
+    """Empty is exactly what this route supplied before, so nothing regresses."""
+
+    class _Broken(_CaptionedClient):
+        def conversations_replies(self, **_kwargs: Any) -> dict[str, Any]:  # noqa: ANN401
+            raise RuntimeError("Slack is down")
+
+    shaped = shared_file_event({"file_id": "F1"}, _Broken())
+
+    assert shaped is not None
+    assert shaped["text"] == ""
+    assert shaped["files"][0]["id"] == "F1", "the photograph still arrives"

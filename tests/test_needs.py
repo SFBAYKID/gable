@@ -173,3 +173,29 @@ def test_an_out_of_order_address_is_not_reported_as_a_missing_state() -> None:
 
     assert "no state" not in said
     assert "street, city, state and ZIP" in said
+
+
+def test_a_refused_photo_is_neither_held_nor_asked_for_again() -> None:
+    """Three states, not two.
+
+    `runs.photo_url` survives a refusal as audit evidence for the image that
+    was rejected, never as permission to reuse it. Saying "I have the property
+    photo" from that URL would be false in the one case where Carmen most needs
+    to know it is not, and the check that refused it owns the sentence.
+    """
+    refused = needs.Needs()
+    refused.note_photo("http://images.example/wrong-house.jpg", rejected=True)
+
+    assert refused.photo is False, "the refusing check asks for the replacement"
+    assert refused.photo_in_hand is False, "and Gable must not claim to hold one"
+
+
+def test_a_usable_photo_is_held_and_a_missing_one_is_asked_for() -> None:
+    """The two ordinary states are unchanged."""
+    held = needs.Needs()
+    held.note_photo("http://images.example/house.jpg", rejected=False)
+    assert (held.photo, held.photo_in_hand) == (False, True)
+
+    missing = needs.Needs()
+    missing.note_photo("", rejected=False)
+    assert (missing.photo, missing.photo_in_hand) == (True, False)

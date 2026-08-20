@@ -293,15 +293,59 @@ def shared_file_event(event: dict[str, Any], client: Any) -> dict[str, Any] | No
     thread_ts = str(placement.get("thread_ts") or placement.get("ts") or "")
     if not thread_ts:
         return None
+    message_ts = str(placement.get("ts") or "")
     return {
         "channel": channel_id,
         "thread_ts": thread_ts,
-        "ts": str(placement.get("ts") or ""),
+        "ts": message_ts,
         "user": str(info.get("user") or event.get("user_id") or ""),
         "parent_user_id": str(placement.get("parent_user_id") or ""),
-        "text": "",
+        "text": _shared_caption(client, channel_id, thread_ts, message_ts),
         "files": [{"id": file_id, "mimetype": str(info.get("mimetype") or "")}],
     }
+
+
+def _shared_caption(client: Any, channel_id: str, thread_ts: str, message_ts: str) -> str:  # noqa: ANN401
+    """Recover the words sent with a file, which `file_shared` does not carry.
+
+    A `file_shared` notice names the file, not the message. Shaping it as an
+    empty-text event threw the caption away on this route, and the caption is
+    load-bearing in two places: values stated beside a photo are recorded from
+    it, and a delivered flyer only accepts a replacement image when the words
+    ask for one. So "here is a better angle, run it again" worked when Slack
+    announced the upload as a message and silently did not when Slack announced
+    it as a file share -- the same upload, two different outcomes.
+
+    Args:
+        client: Slack Web API client.
+        channel_id: The channel the file was shared in.
+        thread_ts: The thread root.
+        message_ts: The message that carried the file.
+
+    Returns:
+        The message text, or "" when it cannot be read. Empty is safe: it is
+        exactly what this route supplied before, so nothing regresses.
+
+    Raises:
+        Nothing. A lookup failure is logged and becomes "".
+    """
+    if not message_ts:
+        return ""
+    try:
+        # https://docs.slack.dev/reference/methods/conversations.replies/
+        answer = client.conversations_replies(
+            channel=channel_id, ts=thread_ts, latest=message_ts, inclusive=True, limit=20
+        )
+    except Exception:
+        logger.exception("could not read the words sent with a shared file")
+        return ""
+    messages = answer.get("messages") if isinstance(answer, dict) else None
+    if not isinstance(messages, list):
+        return ""
+    for item in messages:
+        if isinstance(item, dict) and str(item.get("ts") or "") == message_ts:
+            return str(item.get("text") or "")
+    return ""
 
 
 def process_file_share(

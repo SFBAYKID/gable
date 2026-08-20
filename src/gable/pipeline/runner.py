@@ -409,14 +409,13 @@ class Runner:
         # A listing flyer without its photograph is not a draft. The template
         # has already been checked, so the upload can resume this same run and
         # compare the photo against the measured frame before anything builds.
-        if not self.hero_photo_url:
-            outstanding.photo = True
-        else:
-            # Says so when a blocker is about to repeat itself. An Open House
-            # run on 2026-08-20 asked for a widened design and the photo in one
-            # message; answering it with the same paragraph again, and nothing
-            # about the photo that just arrived, reads as though nothing landed.
-            outstanding.photo_in_hand = True
+        # Held, outstanding, or refused -- see `Needs.note_photo`. A repeated
+        # blocker says "I have the property photo" so it does not read as though
+        # the upload that just arrived went nowhere.
+        outstanding.note_photo(
+            self.hero_photo_url,
+            rejected=store.photo_was_rejected(self.connection, run_id),
+        )
 
         # Everything Carmen could answer goes out in one message, once. She
         # replies once, and the next thing she sees is the link.
