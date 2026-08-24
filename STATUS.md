@@ -8,7 +8,11 @@ Reported by Chase on 2026-08-24 from the live thread. One listing, three asks,
 the same sentence each time — and the third one printed the state inside the
 clause denying it: *"I have this listing at 2519 Ann Arbor Lane, Bowie,
 Maryland 20716, but it has no state."* Two independent defects, both fixed,
-both with a regression test. Not yet deployed — the droplet is still on 59991e6.
+both with a regression test. Deployed 2026-08-24 (24e5519). The run itself was
+parked before the fix and could not restart itself, so it was resumed once by
+hand with `tools/run_row.py --resume`; it reused Carmen's photo, built in the
+same thread, printed `2519 Ann Arbor Lane, Bowie, MD 20716`, and Chase confirmed
+the flyer. A submission arriving from here needs no nudge.
 
 **1. A state written out was invisible.** The form said `2519 Ann Arbor Lane
 Bowie Maryland 20716`. Every check downstream reads a state as a two-letter
