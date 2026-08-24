@@ -141,3 +141,39 @@ def test_a_street_is_not_mistaken_for_a_country() -> None:
     """The pattern is anchored at the end, so these are untouched."""
     assert tidy("100 US Highway 1, Trenton, NJ 08608").endswith("NJ 08608")
     assert tidy("12 Usaquen Way, Baltimore, MD 21201") == "12 Usaquen Way, Baltimore, MD 21201"
+
+
+def test_a_state_written_out_becomes_the_code_every_design_prints() -> None:
+    """Deborah Manarin's Sold, 2026-08-21: `Bowie Maryland 20716`.
+
+    The state was there and every check downstream reads a postal code, so
+    Gable told Carmen the address "has no state" while printing the state in
+    the same sentence, and did it again after she answered.
+    """
+    assert tidy("2519 Ann Arbor Lane Bowie Maryland 20716") == (
+        "2519 Ann Arbor Lane, Bowie, MD 20716"
+    )
+    assert tidy("10 Elm St Charleston West Virginia 25301") == "10 Elm St, Charleston, WV 25301"
+    assert tidy("1 K St NW, Washington, District of Columbia 20001") == (
+        "1 K St NW, Washington, DC 20001"
+    )
+
+
+def test_a_street_named_after_a_state_is_not_read_as_the_state() -> None:
+    """Maryland Avenue runs through Baltimore, and Georgia Avenue through DC."""
+    assert tidy("3701 Maryland Ave Baltimore MD 21218") == "3701 Maryland Ave, Baltimore, MD 21218"
+    assert tidy("8720 georgia ave silver spring md 20910") == (
+        "8720 Georgia Ave, Silver Spring, MD 20910"
+    )
+
+
+def test_a_town_named_after_a_state_keeps_its_own_state() -> None:
+    """California, MD is a real town in St Mary's County."""
+    assert tidy("23120 Three Notch Rd California MD 20619") == (
+        "23120 Three Notch Rd, California, MD 20619"
+    )
+
+
+def test_a_state_name_is_never_the_whole_address() -> None:
+    """`Maryland 20716` names no property, so nothing is folded into a state."""
+    assert tidy("Maryland 20716") == "Maryland 20716"

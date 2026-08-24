@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from gable.listings.address import tidy
 from gable.pipeline import needs
 
 
@@ -165,6 +166,34 @@ def test_an_incomplete_address_is_named_rather_than_called_missing() -> None:
     assert "4216 Norfolk Avenue, Baltimore 21216" in said, "show what is in hand"
     assert "no state" in said
     assert "I still need the address" not in said
+
+
+def test_a_state_written_out_is_not_reported_as_a_missing_state() -> None:
+    """Deborah Manarin's Sold, 2026-08-21, said twice with the state on show.
+
+    `address.tidy` now folds the name into its code before this sentence is
+    written, so the value that reaches here carries one. The sentence must
+    never again name a fault the address it prints disproves.
+    """
+    said = needs.incomplete_address(tidy("2519 Ann Arbor Lane Bowie Maryland 20716"))
+
+    assert "no state" not in said
+    assert "MD" in said
+
+
+def test_a_missing_zip_is_named_as_a_missing_zip() -> None:
+    """ "Not in the order the design prints" sends somebody hunting a typo."""
+    said = needs.incomplete_address("2519 Ann Arbor Lane, Bowie, MD")
+
+    assert "no ZIP code" in said
+    assert "no state" not in said
+
+
+def test_an_address_missing_both_says_so_once() -> None:
+    """Two faults, one sentence — asking twice is what this module exists to stop."""
+    said = needs.incomplete_address("2519 Ann Arbor Lane, Bowie")
+
+    assert "no state or ZIP code" in said
 
 
 def test_an_out_of_order_address_is_not_reported_as_a_missing_state() -> None:

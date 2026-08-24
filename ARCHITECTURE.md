@@ -328,6 +328,12 @@ Raw row becomes an `Intake`. Header mapping supplies the fields, whitespace and
 email casing are normalised, the address is canonicalised without inventing a
 ZIP, and the request type chooses the relevant price column.
 
+The address tidier adds nothing and reorders nothing. It rewrites exactly one
+token: a state the submission wrote out becomes the postal code every design
+prints and every check downstream reads, and only when it sits where the state
+belongs — before the closing ZIP, or at the end — because Maryland Avenue and
+California, MD are both real.
+
 That phone format is deliberate. E.164 (`+18182597432`) is correct for dialling
 APIs and wrong for print — nobody puts a plus sign on a flyer. Gable's output is
 read by a human, so the human format wins.
@@ -402,9 +408,12 @@ A photo a human supplies is **final** — never
 second-guessed by a confidence score, never overwritten, never "improved" into a
 different subject.
 
-The private Slack URL is host-checked before the bot credential is attached,
-downloads are capped at 25 MB, and the published derivative records
-`photo_source=slack_upload`. The upload is oriented and stripped of metadata but
+The private Slack URL is host-checked before the bot credential is attached and
+downloads are capped at 25 MB (`slackapp/uploads.py`, which is only that
+boundary), and the published derivative records `photo_source=slack_upload`.
+Values stated in the message carrying the photo are recorded against the
+submission before the run resumes, so a corrected address in the caption is the
+one the flyer is built from. The upload is oriented and stripped of metadata but
 not cropped until preflight has measured the actual template frame.
 
 ### 4.5 Store photo (`photos/store.py`)

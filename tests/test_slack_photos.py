@@ -19,8 +19,8 @@ from gable.pipeline.runner import RunResult
 from gable.sheets import repository as repo
 from gable.slackapp.brain import Decision
 from gable.slackapp.editing import SlideEditor
-from gable.slackapp.photos import PhotoHandoffError, _SlackOnlyRedirectHandler
 from gable.slackapp.recovery import notify_pending_run_questions
+from gable.slackapp.uploads import PhotoHandoffError, _SlackOnlyRedirectHandler
 from tests.photo_support import (
     PUBLIC_URL,
     THREAD,
@@ -570,7 +570,7 @@ def test_values_sent_with_the_photo_are_recorded_before_the_run_resumes(
     seen: list[str] = []
     captions: list[tuple[str, str]] = []
 
-    def record(_connection: sqlite3.Connection, address: str, text: str) -> int:
+    def record(_connection: sqlite3.Connection, address: str, text: str, _row_id: str) -> int:
         # Ordering is the point: the values must be stored before the resume
         # that builds with them.
         assert seen == [], "the caption is read before the run is resumed"
@@ -585,12 +585,45 @@ def test_values_sent_with_the_photo_are_recorded_before_the_run_resumes(
     assert seen, "the run still resumed after the caption was read"
 
 
+def test_an_address_sent_with_the_photo_is_filed_against_its_submission(
+    tmp_path: Path,
+) -> None:
+    """Deborah Manarin's Sold, 2026-08-21, and the round trip it cost.
+
+    Carmen answered "2519 Ann Arbor Lane / Bowie, MD 20716" and attached the
+    photo in one message. The caption hook was called without the submission id,
+    so `record_stated` logged "a stated address arrived with no submission to
+    attach it to", dropped the address, and the resumed run asked for the
+    address it had just been given.
+    """
+    path = tmp_path / "gable.db"
+    _paused_database(path)
+    addresses: list[str] = []
+
+    def record(
+        connection: sqlite3.Connection, _address: str, _text: str, response_row_id: str
+    ) -> int:
+        assert response_row_id == "response-1", "the correction needs a submission to attach to"
+        store.remember_stated_address(
+            connection, response_row_id, "2519 Ann Arbor Lane, Bowie, MD 20716"
+        )
+        return 1
+
+    _handoff(path, [], record_caption=record, addresses=addresses).handle(
+        _event(text="2519 Ann Arbor Lane\nBowie, MD 20716"), FakeSlackClient()
+    )
+
+    assert addresses == ["2519 Ann Arbor Lane, Bowie, MD 20716"], (
+        "the build must use the corrected row, not the cached one"
+    )
+
+
 def test_a_caption_with_no_number_costs_no_paid_call(tmp_path: Path) -> None:
     path = tmp_path / "gable.db"
     _paused_database(path)
     calls: list[str] = []
 
-    def record(_connection: sqlite3.Connection, _address: str, text: str) -> int:
+    def record(_connection: sqlite3.Connection, _address: str, text: str, _row_id: str) -> int:
         calls.append(text)
         return 0
 
@@ -607,7 +640,7 @@ def test_a_caption_that_cannot_be_read_never_costs_the_photograph(
     run_id = _paused_database(path)
     seen: list[str] = []
 
-    def explode(_connection: sqlite3.Connection, _address: str, _text: str) -> int:
+    def explode(_connection: sqlite3.Connection, _address: str, _text: str, _row_id: str) -> int:
         raise RuntimeError("the conversational model was unavailable")
 
     _handoff(path, seen, record_caption=explode).handle(

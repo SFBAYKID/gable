@@ -1,6 +1,40 @@
 # Gable — status, and what's needed from Chase
 
-Last updated 2026-08-20 by the building agent.
+Last updated 2026-08-24 by the building agent.
+
+## 2026-08-21 — Deborah Manarin's Sold: asked three times for an address it had
+
+Reported by Chase on 2026-08-24 from the live thread. One listing, three asks,
+the same sentence each time — and the third one printed the state inside the
+clause denying it: *"I have this listing at 2519 Ann Arbor Lane, Bowie,
+Maryland 20716, but it has no state."* Two independent defects, both fixed,
+both with a regression test. Not yet deployed — the droplet is still on 59991e6.
+
+**1. A state written out was invisible.** The form said `2519 Ann Arbor Lane
+Bowie Maryland 20716`. Every check downstream reads a state as a two-letter
+postal code, so the address failed `manifest.ADDRESS_SHAPE`, and
+`needs.incomplete_address` — testing the same set — reported the fault as "no
+state". `address.tidy` now folds a written-out state into its code when it sits
+where the state belongs, which is the only token it rewrites. Maryland Avenue,
+Georgia Avenue and California, MD are all covered by tests, because every state
+name is also a street or a town.
+
+**2. The whole address she sent was dropped on the floor.** Carmen answered
+"2519 Ann Arbor Lane / Bowie, MD 20716" with the photo attached. The caption was
+read and the model extracted the address correctly; `runtime.record_photo_caption`
+then called `answers.record_stated` without the `response_row_id`, and an address
+is the one value that cannot be stored without it. The droplet log records it
+exactly: `a stated address arrived with no submission to attach it to`. The
+caption hook now takes the submission and the handoff reloads the row before
+resuming, so a corrected address in a caption is what the flyer is built from.
+
+`slackapp/uploads.py` — the Slack download boundary and nothing else — was split
+out of `photos.py` in the same change to stay under the 800-line ceiling.
+
+**Worth noting for the next agent:** neither defect was in the run state
+machine. Both were a value crossing a boundary in a shape the far side could not
+read, and both produced a *repeat* rather than an error, which is the failure
+mode Carmen sees as Gable not listening. §2.5's list is worth extending with it.
 
 ## 2026-08-20 — Effie Fafaleos' Open House: a photo Gable asked for and refused
 

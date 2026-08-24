@@ -268,6 +268,7 @@ def build_components(settings: Settings) -> RuntimeComponents:
         caption_connection: Connection,
         address: str,
         text: str,
+        response_row_id: str,
     ) -> int:
         """Store any listing values stated in the message carrying the photo.
 
@@ -275,6 +276,9 @@ def build_components(settings: Settings) -> RuntimeComponents:
             caption_connection: The photo handoff's own open connection.
             address: The freshly re-read property address to file them against.
             text: The upload message's text.
+            response_row_id: The submission, so a corrected address in the
+                caption is accepted rather than discarded. Omitting it dropped
+                the whole address Carmen sent with her photo on 2026-08-21.
 
         Returns:
             How many values were recorded.
@@ -286,7 +290,7 @@ def build_components(settings: Settings) -> RuntimeComponents:
         decision = guarded_think(text)
         if decision.tool != "supply_listing_value":
             return 0
-        return record_stated(caption_connection, address, decision.arguments)
+        return record_stated(caption_connection, address, decision.arguments, response_row_id)
 
     photo_handoff = PhotoHandoff(
         db_path=settings.db_path,

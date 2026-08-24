@@ -89,10 +89,18 @@ class FakeSlackClient:
 class FakeRunner:
     """Marks the same run delivered and records what it received."""
 
-    def __init__(self, connection: sqlite3.Connection, seen: list[str]) -> None:
-        """Bind the database and shared recorder."""
+    def __init__(
+        self,
+        connection: sqlite3.Connection,
+        seen: list[str],
+        addresses: list[str] | None = None,
+    ) -> None:
+        """Bind the database and shared recorders."""
         self.connection = connection
         self.seen = seen
+        #: The address each resume was handed, for tests that prove a value
+        #: stated with the photo reached the build rather than a cached row.
+        self.addresses = addresses
 
     def resume(
         self,
@@ -104,6 +112,8 @@ class FakeRunner:
     ) -> RunResult:
         """Record a same-run resume without rendering Google Slides."""
         self.seen.extend([submission.response_row_id, run_id])
+        if self.addresses is not None:
+            self.addresses.append(submission.intake.address)
         # Any paused state, because any of them can be the one the run asked
         # for its photo from. Pinned to two states, this double asserted the
         # very narrowing that stranded the 2026-08-20 Open House run.
@@ -135,7 +145,8 @@ def _handoff(
     path: Path,
     seen: list[str],
     image: bytes | None = None,
-    record_caption: Callable[[sqlite3.Connection, str, str], int] | None = None,
+    record_caption: Callable[[sqlite3.Connection, str, str, str], int] | None = None,
+    addresses: list[str] | None = None,
 ) -> PhotoHandoff:
     supplied = image if image is not None else _jpeg()
 
@@ -147,7 +158,7 @@ def _handoff(
     ) -> FakeRunner:
         assert url == PUBLIC_URL
         assert thread == THREAD
-        return FakeRunner(connection, seen)
+        return FakeRunner(connection, seen, addresses)
 
     return PhotoHandoff(
         db_path=path,
@@ -161,7 +172,7 @@ def _handoff(
         download=lambda _url, _token, _limit: supplied,
         publish=lambda _root, _base, fitted: PUBLIC_URL if fitted else "",
         verify=lambda _url: (True, "image/jpeg"),
-        record_caption=record_caption or (lambda _connection, _address, _text: 0),
+        record_caption=record_caption or (lambda _connection, _address, _text, _row_id: 0),
     )
 
 

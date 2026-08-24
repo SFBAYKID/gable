@@ -7,12 +7,18 @@ Spring, MD, 20902`. Each is understandable and none is presentable: this text
 is set at 44pt across the middle of a flyer that goes to a client.
 
 So the rules here are deliberately conservative. Capitalisation, punctuation and
-spacing are fixed; **nothing is added, corrected or reordered**, and the only
-thing removed is a trailing country, which no design prints and which fails
-every shape check downstream. A
-misspelled street stays misspelled and a missing state stays missing, because
-inventing either would put a different address on a flyer for a real property —
-which is worse than an untidy one, and invisible to anyone checking.
+spacing are fixed; **nothing is added or reordered**, and the only thing removed
+is a trailing country, which no design prints and which fails every shape check
+downstream. A misspelled street stays misspelled and a missing state stays
+missing, because inventing either would put a different address on a flyer for a
+real property — which is worse than an untidy one, and invisible to anyone
+checking.
+
+The one token this rewrites is a state the submission itself wrote out:
+`Bowie Maryland 20716` becomes `Bowie, MD 20716`. That says what the agent said,
+in the form every design prints and every check downstream reads. It is
+restricted to the name sitting where the state belongs, because every state name
+is also a street or a town.
 
 Does not handle: validating that the address exists, expanding or abbreviating
 street types, or inferring a state from a city. Those all require knowing
@@ -22,6 +28,8 @@ something the submission did not say.
 from __future__ import annotations
 
 import re
+from collections.abc import Mapping
+from types import MappingProxyType
 from typing import Final
 
 #: The fifty states plus DC, as postal codes. Used to recognise a state token so
@@ -81,6 +89,71 @@ STATE_CODES: Final[frozenset[str]] = frozenset(
         "WY",
     ]
 )
+
+#: The same states written out, lower cased. An agent types what they say, so
+#: `2519 Ann Arbor Lane Bowie Maryland 20716` arrived on 2026-08-21 and every
+#: check downstream reads the state as a postal code — which left Gable telling
+#: Carmen the address "has no state" while printing the state in the same
+#: sentence. Folding the name to its code writes down what the submission
+#: already said; it is never used to insert a state that is not written.
+STATE_NAMES: Final[Mapping[str, str]] = MappingProxyType(
+    {
+        "alabama": "AL",
+        "alaska": "AK",
+        "arizona": "AZ",
+        "arkansas": "AR",
+        "california": "CA",
+        "colorado": "CO",
+        "connecticut": "CT",
+        "delaware": "DE",
+        "district of columbia": "DC",
+        "florida": "FL",
+        "georgia": "GA",
+        "hawaii": "HI",
+        "idaho": "ID",
+        "illinois": "IL",
+        "indiana": "IN",
+        "iowa": "IA",
+        "kansas": "KS",
+        "kentucky": "KY",
+        "louisiana": "LA",
+        "maine": "ME",
+        "maryland": "MD",
+        "massachusetts": "MA",
+        "michigan": "MI",
+        "minnesota": "MN",
+        "mississippi": "MS",
+        "missouri": "MO",
+        "montana": "MT",
+        "nebraska": "NE",
+        "nevada": "NV",
+        "new hampshire": "NH",
+        "new jersey": "NJ",
+        "new mexico": "NM",
+        "new york": "NY",
+        "north carolina": "NC",
+        "north dakota": "ND",
+        "ohio": "OH",
+        "oklahoma": "OK",
+        "oregon": "OR",
+        "pennsylvania": "PA",
+        "rhode island": "RI",
+        "south carolina": "SC",
+        "south dakota": "SD",
+        "tennessee": "TN",
+        "texas": "TX",
+        "utah": "UT",
+        "vermont": "VT",
+        "virginia": "VA",
+        "washington": "WA",
+        "west virginia": "WV",
+        "wisconsin": "WI",
+        "wyoming": "WY",
+    }
+)
+
+#: "District of Columbia" is the longest state name, at three words.
+_MAX_STATE_NAME_WORDS: Final[int] = 3
 
 #: Compass directions stay upper case. Title casing turns "NW" into "Nw", which
 #: reads as a typo on a flyer.
@@ -195,6 +268,46 @@ def _word(token: str) -> str:
     return core.capitalize() + trailing
 
 
+def _fold_state_name(text: str) -> str:
+    """Write a spelled-out state as the postal code every design prints.
+
+    Args:
+        text: The address, already cased and split into space-delimited tokens.
+
+    Returns:
+        The same address with a trailing state name replaced by its two-letter
+        code, or unchanged when no token is unambiguously the state. Only the
+        name sitting immediately before the closing ZIP — or ending the address
+        — is folded, because every state name is also a street or a town:
+        "3701 Maryland Ave, Baltimore, MD 21218" must survive untouched.
+
+    Raises:
+        Nothing.
+    """
+    parts = text.split(" ")
+    # A code already present means any name elsewhere in the string is a place,
+    # not the state. "California, MD 20619" is a real Maryland town.
+    if any(part.strip(",.") in STATE_CODES for part in parts):
+        return text
+    end = len(parts)
+    if end and _ZIP.match(parts[-1].strip(",.")):
+        end -= 1
+    for length in range(_MAX_STATE_NAME_WORDS, 0, -1):
+        start = end - length
+        # Never the whole address: a bare "Maryland 20716" names no property.
+        if start <= 0:
+            continue
+        phrase = " ".join(part.strip(",.") for part in parts[start:end]).lower()
+        code = STATE_NAMES.get(phrase)
+        if code is None:
+            continue
+        # The comma pass below wants the state bare, but a comma the agent typed
+        # after it belongs to the string until then.
+        trailing = "," if parts[end - 1].endswith(",") else ""
+        return " ".join([*parts[:start], code + trailing, *parts[end:]])
+    return text
+
+
 def tidy(address: str) -> str:
     """Present a submitted address properly, without altering what it says.
 
@@ -281,6 +394,10 @@ def tidy(address: str) -> str:
             if boundary < len(parts) - 1:
                 parts[boundary] += ","
                 text = " ".join(parts)
+
+    # A state the agent wrote out becomes its code first, so the comma pass
+    # below sees it and the flyer's shape check can read it.
+    text = _fold_state_name(text)
 
     # A state code should be preceded by a comma and followed by the postcode
     # with only a space. "baltimore md 21228" becomes "Baltimore, MD 21228".

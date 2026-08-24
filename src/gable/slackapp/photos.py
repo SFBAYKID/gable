@@ -10,22 +10,17 @@ is never cropped twice. No new run or retry is opened.
 
 from __future__ import annotations
 
-import io
 import logging
 import sqlite3
 import threading
-import urllib.parse
-import urllib.request
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Final, Protocol
 
-from PIL import Image
-
 from gable.db import store
 from gable.db.schema import connect
-from gable.photos.fit import MAX_SOURCE_PIXELS, normalise_for_fitting
+from gable.photos.fit import normalise_for_fitting
 from gable.photos.store import PublishError, publish_local, verify_public
 from gable.pipeline import questions as run_questions
 from gable.pipeline.runner import RunResult
@@ -33,11 +28,11 @@ from gable.sheets import repository as repo
 from gable.slackapp.answers import carries_a_value
 from gable.slackapp.intents import asks_to_run_again
 from gable.slackapp.status import Working
+from gable.slackapp.uploads import MAX_UPLOAD_BYTES, PhotoHandoffError, download_private_image
 from gable.voice import safe
 
 logger = logging.getLogger("gable.slack.photos")
 
-MAX_UPLOAD_BYTES: Final[int] = 25 * 1024 * 1024
 # The durable claim family for one answering upload. Startup recovery reads it
 # to find uploads this process accepted but never finished.
 PHOTO_INGRESS_ROUTE: Final[str] = "file_share"
@@ -64,7 +59,6 @@ NO_FLYER_TO_CHANGE: Final[str] = (
 #: handler posts through the durable outbox and returns an empty string, so the
 #: declining sentence never reaches the caller to be recognised.
 DECLINED_ANSWER_THE_WORDS: Final[str] = "gable:answer-the-words-instead"
-_SLACK_HOST_SUFFIXES: Final[tuple[str, ...]] = (".slack.com", ".slack-edge.com")
 _PHOTO_LOCK_STRIPES: Final[int] = 32
 _PHOTO_LOCKS: Final[tuple[threading.Lock, ...]] = tuple(
     threading.Lock() for _ in range(_PHOTO_LOCK_STRIPES)
@@ -80,10 +74,6 @@ def _ignore_progress(_stage: str) -> None:
     """Default progress sink for direct calls outside the Slack event wrapper."""
 
 
-class PhotoHandoffError(Exception):
-    """A private upload could not safely become a public fitted image."""
-
-
 def _photo_lock(thread_ts: str) -> threading.Lock:
     """Return a bounded process-local lock for one listing thread.
 
@@ -94,33 +84,6 @@ def _photo_lock(thread_ts: str) -> threading.Lock:
     boundary; the database claim remains the cross-process authority.
     """
     return _PHOTO_LOCKS[hash(thread_ts) % _PHOTO_LOCK_STRIPES]
-
-
-def _is_slack_url(url: str) -> bool:
-    """Return whether an HTTPS URL is owned by Slack's file service."""
-    parsed = urllib.parse.urlparse(url)
-    host = (parsed.hostname or "").lower()
-    return parsed.scheme == "https" and any(
-        host.endswith(suffix) for suffix in _SLACK_HOST_SUFFIXES
-    )
-
-
-class _SlackOnlyRedirectHandler(urllib.request.HTTPRedirectHandler):
-    """Prevent urllib from forwarding the bot token to a redirect off Slack."""
-
-    def redirect_request(
-        self,
-        req: urllib.request.Request,
-        fp: Any,  # noqa: ANN401 - urllib's response type is intentionally private
-        code: int,
-        msg: str,
-        headers: Any,  # noqa: ANN401 - email.message.Message at runtime
-        newurl: str,
-    ) -> urllib.request.Request | None:
-        """Follow only redirects whose destination is another Slack HTTPS host."""
-        if not _is_slack_url(newurl):
-            raise PhotoHandoffError("Slack redirected the upload outside its file service")
-        return super().redirect_request(req, fp, code, msg, headers, newurl)
 
 
 class ResumesRun(Protocol):
@@ -136,77 +99,6 @@ class ResumesRun(Protocol):
     ) -> RunResult:
         """Continue one existing run."""
         ...
-
-
-def download_private_image(
-    url: str,
-    bot_token: str,
-    max_bytes: int = MAX_UPLOAD_BYTES,
-) -> bytes:
-    """Download a Slack file without ever sending the bot token elsewhere.
-
-    Args:
-        url: Slack's ``url_private_download`` value.
-        bot_token: Existing bot credential from validated settings.
-        max_bytes: Hard in-memory ceiling for the 1 GB droplet.
-
-    Returns:
-        The private file bytes.
-
-    Raises:
-        PhotoHandoffError: for a non-Slack URL, empty file, oversized file, or
-            transport failure.
-    """
-    if not _is_slack_url(url):
-        msg = "the upload link did not come from Slack"
-        raise PhotoHandoffError(msg)
-    request = urllib.request.Request(url, headers={"Authorization": f"Bearer {bot_token}"})
-    opener = urllib.request.build_opener(_SlackOnlyRedirectHandler())
-    try:
-        with opener.open(request, timeout=60) as response:
-            declared = response.headers.get("Content-Length", "")
-            if declared.isdigit() and int(declared) > max_bytes:
-                msg = "the uploaded image is larger than the safe processing limit"
-                raise PhotoHandoffError(msg)
-            out = io.BytesIO()
-            while True:
-                chunk = response.read(min(1024 * 1024, max_bytes + 1 - out.tell()))
-                if not chunk:
-                    break
-                out.write(chunk)
-                if out.tell() > max_bytes:
-                    msg = "the uploaded image is larger than the safe processing limit"
-                    raise PhotoHandoffError(msg)
-    except PhotoHandoffError:
-        raise
-    except Exception as exc:
-        msg = "Slack could not provide the uploaded image"
-        raise PhotoHandoffError(msg) from exc
-    downloaded = out.getvalue()
-    if not downloaded:
-        msg = "the uploaded image was empty"
-        raise PhotoHandoffError(msg)
-
-    # Slack can serve a file before it has finished processing it, and what
-    # comes back then is not an image. Caught live on 2026-08-11 during a real
-    # upload: three files in the same run downloaded as valid JPEG and the
-    # fourth returned bytes Pillow could not identify.
-    #
-    # Without this the bad bytes travel to `fit_locally`, which raises deep in
-    # the render path, hits the runner's outer exception boundary and reaches
-    # Carmen as "Something went wrong while I was building this one" — with the
-    # real cause nowhere in the message. Failing here says what actually
-    # happened and what she can do about it.
-    try:
-        with Image.open(io.BytesIO(downloaded)) as probe:
-            if probe.width * probe.height > MAX_SOURCE_PIXELS:
-                msg = "the uploaded image dimensions exceed the safe processing limit"
-                raise PhotoHandoffError(msg)
-            probe.verify()
-    except Exception as exc:
-        msg = "that upload did not arrive as a readable image"
-        raise PhotoHandoffError(msg) from exc
-    return downloaded
 
 
 def _resume_state(connection: sqlite3.Connection, run: store.RunRow) -> str:
@@ -443,8 +335,14 @@ class PhotoHandoff:
     #: without this, the caption was silently discarded and the flyer built with
     #: placeholders for values the person had just supplied. Injected so this
     #: module stays free of the conversational model.
-    record_caption: Callable[[sqlite3.Connection, str, str], int] = (
-        lambda _connection, _address, _text: 0
+    #: Takes the submission id as well as the address, because an address is
+    #: which property this is rather than a fact about one: without the id
+    #: `answers.record_stated` has nothing to attach a corrected address to and
+    #: discards it. It did, on 2026-08-21 -- Carmen sent the whole address with
+    #: her photo, the log recorded "a stated address arrived with no submission
+    #: to attach it to", and Gable asked her for that same address again.
+    record_caption: Callable[[sqlite3.Connection, str, str, str], int] = (
+        lambda _connection, _address, _text, _response_row_id: 0
     )
 
     def handle(
@@ -696,7 +594,9 @@ class PhotoHandoff:
             caption = str(event.get("text") or "").strip()
             if caption and carries_a_value(caption):
                 try:
-                    recorded = self.record_caption(connection, stored.intake.address, caption)
+                    recorded = self.record_caption(
+                        connection, stored.intake.address, caption, run.response_row_id
+                    )
                 except Exception:
                     # A caption that cannot be read must never cost Carmen the
                     # photograph she just sent.
@@ -704,6 +604,14 @@ class PhotoHandoff:
                 else:
                     if recorded:
                         logger.info("recorded %d value(s) stated with the photo", recorded)
+                        # A caption may correct the address, which is stored over
+                        # the submission rather than beside it, so the build that
+                        # follows has to read the reloaded row. Reloading always
+                        # is cheaper than deciding whether an address was among
+                        # the values -- the same reason `supplied.py` does it.
+                        reloaded = store.load_submission(connection, run.response_row_id)
+                        if reloaded is not None:
+                            stored = reloaded
 
             try:
                 progress("is reading the photo...")
