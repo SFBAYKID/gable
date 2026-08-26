@@ -90,6 +90,13 @@ def inspect_source_template(
             lambda: provider(image_bytes, api_key, model),
         )
     except spend.BudgetExceededError:
+        # Silence here reads downstream as "the inspection was inconclusive",
+        # which sends whoever is debugging to look at the model, the thumbnail,
+        # and the Drive read before the ledger. Say which one it was.
+        logger.warning(
+            "the shared spend ceiling blocked source-template visual inspection: %s",
+            spend.summary(connection),
+        )
         return Inspection(False, False, checked=False)
     except Exception:
         logger.exception("the source-template visual inspection did not complete")

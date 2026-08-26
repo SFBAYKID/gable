@@ -275,6 +275,10 @@ def build_runner(
                 run_id=run_id,
             )
         except spend.BudgetExceededError:
+            logger.warning(
+                "the shared spend ceiling blocked the finished-flyer inspection: %s",
+                spend.summary(connection),
+            )
             return Inspection(looks_right=False, confident=False, checked=False)
 
     def place_photo(run_id: str, file_id: str, url: str, template_label: str) -> bool:
