@@ -91,6 +91,7 @@ from gable.db.template_store import (
     template_catalog_adopted,
     template_for_thread,
 )
+from gable.db.waiting_store import WaitingAsk, waiting_asks
 from gable.listings.address import tidy as tidy_address
 from gable.listings.intake import Intake, address_looks_usable
 
@@ -115,6 +116,7 @@ __all__ = [
     "RunLimitReachedError",
     "RunRow",
     "TemplateAudit",
+    "WaitingAsk",
     "abandoned_slack_events",
     "acknowledge_interrupted_run",
     "adopt_run_thread_for_notification",
@@ -161,6 +163,7 @@ __all__ = [
     "template_audit",
     "template_catalog_adopted",
     "template_for_thread",
+    "waiting_asks",
 ]
 
 

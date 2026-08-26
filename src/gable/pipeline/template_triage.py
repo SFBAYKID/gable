@@ -7,24 +7,27 @@ from collections import Counter
 from collections.abc import Callable
 from dataclasses import dataclass, replace
 from sqlite3 import Connection
-from uuid import UUID, uuid5
 
 from gable.db import store
 from gable.listings.intake import REQUEST_TYPE_TO_CATEGORY
-from gable.pipeline.questions import (
-    PostOnce,
-    ReconcilePost,
-    notification_guard,
-    post_persisted_notification,
+from gable.pipeline.questions import PostOnce, ReconcilePost
+from gable.pipeline.template_notify import (
+    deliver_template_notification,
+    drain_template_notifications,
 )
 from gable.pipeline.vision import Inspection
 from gable.slides import preflight
 from gable.slides.library import TemplateFile
 from gable.voice import safe
 
-logger = logging.getLogger("gable.template_triage")
+__all__ = [
+    "TemplateTriage",
+    "Verdict",
+    "deliver_template_notification",
+    "drain_template_notifications",
+]
 
-_TEMPLATE_NOTIFICATION_NAMESPACE = UUID("a5f075c1-55c9-46b8-893b-5326a29e4d87")
+logger = logging.getLogger("gable.template_triage")
 
 
 @dataclass(frozen=True, slots=True)
@@ -65,80 +68,6 @@ def _timing_free(message: str) -> str:
         text = text.replace(phrase, "the ")
     # The clean verdict is the one place the timing word changes the verb.
     return text.replace("I read the ", "I checked the ", 1)
-
-
-def _notification_key(file_id: str) -> str:
-    """Return the process-local serialization key for one source template."""
-    return f"template:{file_id}"
-
-
-def _notification_client_id(audit: store.TemplateAudit) -> str:
-    """Derive one stable Slack identity from the exact persisted revision."""
-    identity = "\0".join((audit.file_id, audit.modified_time, audit.checked_at, audit.summary))
-    return str(uuid5(_TEMPLATE_NOTIFICATION_NAMESPACE, identity))
-
-
-def deliver_template_notification(
-    connection: Connection,
-    audit: store.TemplateAudit,
-    say: Callable[[str, str | None], str],
-    *,
-    post_once: PostOnce | None = None,
-    reconcile: ReconcilePost | None = None,
-) -> bool:
-    """Deliver one exact pending template verdict and confirm it atomically."""
-    with notification_guard(_notification_key(audit.file_id)):
-        current = store.template_audit(connection, audit.file_id)
-        if (
-            current is None
-            or not current.notification_pending
-            or current.modified_time != audit.modified_time
-            or current.summary != audit.summary
-            or current.checked_at != audit.checked_at
-        ):
-            return False
-        posted_ts = post_persisted_notification(
-            current.summary,
-            current.slack_thread_ts or None,
-            _notification_client_id(current),
-            current.checked_at,
-            current.notification_attempted_at,
-            current.notification_attempt_count,
-            say,
-            claim=lambda expected_count, stale_before: store.claim_template_notification_delivery(
-                connection,
-                current,
-                expected_count,
-                stale_before,
-            ),
-            release=lambda token: store.release_template_notification_delivery(
-                connection,
-                current,
-                token,
-            ),
-            post_once=post_once,
-            reconcile=reconcile,
-        )
-        return store.confirm_template_notification(connection, current, posted_ts)
-
-
-def drain_template_notifications(
-    connection: Connection,
-    say: Callable[[str, str | None], str],
-    post_once: PostOnce | None = None,
-    reconcile: ReconcilePost | None = None,
-) -> int:
-    """Attempt each stored template verdict without repeating its inspection."""
-    return sum(
-        deliver_template_notification(
-            connection,
-            audit,
-            say,
-            post_once=post_once,
-            reconcile=reconcile,
-        )
-        for audit in store.pending_template_notifications(connection)
-    )
 
 
 @dataclass
@@ -393,8 +322,8 @@ class TemplateTriage:
         """Reload and remeasure the source file owned by one Slack thread."""
         existing = store.template_for_thread(self.connection, thread_ts)
         if existing is None:
-            return "I could not match this thread to a template, so I have not changed anything."
-        return self._recheck(existing, progress)
+            return self.recheck_catalog(progress)
+        return self._recheck(existing, progress, sweep_when_gone=True)
 
     def recheck_action(
         self,
@@ -405,7 +334,7 @@ class TemplateTriage:
         """Claim, inspect, persist, and deliver one template-thread recheck."""
         existing = store.template_for_thread(self.connection, thread_ts)
         if existing is None:
-            return "I could not match this thread to a template, so I have not changed anything."
+            return self.recheck_catalog(progress)
         if not store.claim_slack_event(
             self.connection,
             "template_recheck",
@@ -424,7 +353,7 @@ class TemplateTriage:
                     reconcile=self.reconcile,
                 )
             return ""
-        outcome = self._recheck(existing, progress, notification_pending=True)
+        outcome = self._recheck(existing, progress, notification_pending=True, sweep_when_gone=True)
         pending = store.template_audit(self.connection, existing.file_id)
         if pending is not None and pending.notification_pending:
             deliver_template_notification(
@@ -493,6 +422,7 @@ class TemplateTriage:
         *,
         notification_pending: bool = False,
         for_listing: bool = False,
+        sweep_when_gone: bool = False,
     ) -> str:
         """Reload, measure, and persist one already-resolved source audit.
 
@@ -502,6 +432,10 @@ class TemplateTriage:
             notification_pending: Whether the verdict owes a durable Slack post.
             for_listing: True when a listing thread asked, in which case the
                 new-design character allowances do not apply — see below.
+            sweep_when_gone: True when a person asked in a design's own thread.
+                If that design has left the folder the thread is spent, and the
+                question they actually asked was about the designs that ARE
+                there, so the whole folder is answered rather than nothing.
         """
         templates = self.list_templates()
         current = next(
@@ -528,6 +462,13 @@ class TemplateTriage:
                     existing.slack_thread_ts,
                     notification_pending=notification_pending,
                 )
+                # "Can you check again?" asked in the thread of a file that is
+                # now gone is still a real question about the real folder.
+                # Carmen asked exactly that on 2026-08-26 and heard only that
+                # one dead .pptx could not be found -- nothing about the six
+                # designs she had just finished importing.
+                if sweep_when_gone:
+                    return f"{message}\n\n{self.recheck_catalog(progress)}"
                 return message
             message = (
                 f"I could not find the {existing.name} design in Generic Templates, so I "

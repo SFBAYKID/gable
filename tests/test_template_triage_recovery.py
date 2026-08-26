@@ -233,3 +233,60 @@ def test_a_design_refused_only_on_looks_is_still_reported_as_buildable(tmp_path:
     assert audit is not None
     assert audit.blocker_kind == store.BLOCKER_VISUAL
     connection.close()
+
+
+def test_a_dead_thread_still_answers_the_question_that_was_asked(tmp_path: Path) -> None:
+    """Carmen asked "can you check again?" in the thread of a file she had deleted.
+
+    She was told only that the dead .pptx could not be found, and nothing about
+    the six designs she had just finished importing.
+    """
+    connection = connect(tmp_path / "gable.db")
+    apply_migrations(connection)
+    files: list[TemplateFile] = []
+    said: list[str] = []
+    triage = TemplateTriage(
+        connection,
+        lambda: list(files),
+        lambda _file_id: _presentation(),
+        _say_into(said),
+        look_at=lambda _file_id: Inspection(True, True),
+    )
+    store.adopt_template_catalog(connection, [("baseline", "Baseline", "zero")])
+    files.append(TemplateFile("pptx-1", "Open House.pptx", "one", PPTX))
+    assert triage.scan_new() == 1
+    thread = store.template_audit(connection, "pptx-1")
+    assert thread is not None
+
+    # She converts it and removes the .pptx, leaving real designs behind.
+    files.clear()
+    files.extend([TemplateFile("ok-1", "Open House", "one"), TemplateFile("ok-2", "Sold", "one")])
+
+    answer = triage.recheck(thread.slack_thread_ts)
+    assert "what I asked for" in answer
+    assert "ready to build from" in answer
+    assert "Open House" in answer and "Sold" in answer
+    assert not violations(answer)
+    connection.close()
+
+
+def test_a_thread_gable_does_not_own_gets_the_folder_rather_than_a_shrug(
+    tmp_path: Path,
+) -> None:
+    """Saying "I could not match this thread to a template" was never useful."""
+    connection = connect(tmp_path / "gable.db")
+    apply_migrations(connection)
+    files = [TemplateFile("ok-1", "Sold", "one")]
+    triage = TemplateTriage(
+        connection,
+        lambda: list(files),
+        lambda _file_id: _presentation(),
+        _say_into([]),
+        look_at=lambda _file_id: Inspection(True, True),
+    )
+    store.adopt_template_catalog(connection, [("baseline", "Baseline", "zero")])
+
+    answer = triage.recheck("9999.0000")
+    assert "could not match this thread" not in answer
+    assert "ready to build from" in answer
+    connection.close()

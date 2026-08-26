@@ -535,6 +535,10 @@ thread's question, and the finished flyer is inspected on its own render anyway.
 Two-agent roles parse, but without a per-role object contract they stop at
 `needs_template` rather than filling by page order.
 
+A build, rebuild, or status question in a thread with no listing is answered by
+`context.waiting_summary` — the paused listings and what each is owed.
+`check_templates` re-measures the folder, so building never spends a paid sweep.
+
 ### 4.7 Render (`pipeline/live.py`, `pipeline/placement.py`)
 
 Templates may use bracketed labels, bare labels, or known sample values. The

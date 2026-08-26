@@ -40,7 +40,7 @@ from gable.slackapp.answers import record_stated
 from gable.slackapp.app import build_app
 from gable.slackapp.batches import summarize as summarize_batch
 from gable.slackapp.brain import Decision, think
-from gable.slackapp.context import listing_context
+from gable.slackapp.context import listing_context, waiting_summary
 from gable.slackapp.editing import SlideEditor
 from gable.slackapp.outbox import SlackOutboxReconciler, notification_blocks
 from gable.slackapp.photos import PhotoHandoff
@@ -322,9 +322,7 @@ def build_components(settings: Settings) -> RuntimeComponents:
             if decision.tool == "build_with_blank_fields":
                 run = store.run_for_thread(action_connection, thread_ts)
                 if run is None:
-                    return (
-                        "I could not match this thread to a listing, so I have not built anything."
-                    )
+                    return waiting_summary(store.waiting_asks(action_connection))
                 if not _may_build_without_a_photo(action_connection, run):
                     # The release covers values nobody has, never the photograph.
                     # A flyer with no property photo is not a flyer.
@@ -375,29 +373,28 @@ def build_components(settings: Settings) -> RuntimeComponents:
                     may_rebuild=may_rebuild,
                     resume=resume_with_current_sources,
                 )
+            if decision.tool == "check_templates":
+                # A folder sweep is its own instruction now. It used to ride on
+                # rebuild_flyer, which meant "yes build it" in a channel thread
+                # spent six paid vision calls re-measuring designs and answered
+                # with a template report -- which is not what was asked.
+                action_drive = build_google_service("drive", "v3", action_credentials)
+                return template_triage_for(
+                    action_connection,
+                    action_drive,
+                    action_slides,
+                ).recheck_catalog(progress)
             if decision.tool == "rebuild_flyer":
                 run = store.run_for_thread(action_connection, thread_ts)
                 if run is None:
                     template = store.template_for_thread(action_connection, thread_ts)
                     checking_update = str(decision.arguments.get("mode") or "") == "check_updated"
                     if template is None:
-                        # "I just imported new templates. Can you check again?"
-                        # is asked at the top of the channel, about the folder,
-                        # not about one thread Gable happens to own. Carmen and
-                        # Chase both asked it on 2026-08-26 and were told the
-                        # thread matched nothing, twice, while six designs sat
-                        # unchecked. A whole-folder sweep is the honest answer.
-                        if not checking_update:
-                            return (
-                                "I could not match this thread to a listing or template, so I "
-                                "have not changed anything."
-                            )
-                        action_drive = build_google_service("drive", "v3", action_credentials)
-                        return template_triage_for(
-                            action_connection,
-                            action_drive,
-                            action_slides,
-                        ).recheck_catalog(progress)
+                        # A build asked outside any listing thread is a real
+                        # instruction with no listing attached. Name the ones
+                        # that are actually waiting and what each still needs;
+                        # that is the answer, and it costs nothing.
+                        return waiting_summary(store.waiting_asks(action_connection))
                     if not checking_update:
                         return (
                             "This thread is about a source template, not a listing. Update "
@@ -497,7 +494,11 @@ def build_components(settings: Settings) -> RuntimeComponents:
                 )
             run = store.run_for_thread(action_connection, thread_ts)
             if run is None:
-                return "I could not match this thread to a listing, so I have not changed anything."
+                # "Gable is this now built?" asked outside a listing thread is a
+                # real question with a real answer. Chase asked it on
+                # 2026-08-26 and was told only that nothing had been changed --
+                # true, and no help at all. Say what is actually waiting.
+                return waiting_summary(store.waiting_asks(action_connection))
             pending_before_edit = tuple(
                 item
                 for item in store.pending_run_questions(action_connection)

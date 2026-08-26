@@ -292,6 +292,19 @@ TOOLS: Final[list[dict[str, Any]]] = [
     {
         "type": "function",
         "function": {
+            "name": "check_templates",
+            "description": (
+                "Re-measure every design in the Generic Templates folder and report which "
+                "are ready to build from. Use when someone says they imported, renamed, "
+                "converted, or edited templates and asks you to check, and they are not "
+                "asking about one particular listing's flyer."
+            ),
+            "parameters": {"type": "object", "properties": {}},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "rebuild_flyer",
             "description": (
                 "Reload the current source template and rebuild with the saved listing data. "
