@@ -14,8 +14,16 @@ from __future__ import annotations
 
 import sqlite3
 from dataclasses import dataclass
+from typing import Final
 
 from gable.db.run_store import PAUSED
+
+#: How many waiting listings a person is told about by name. The live database
+#: held 325 paused runs on 2026-08-26, most of them historical, so the answer to
+#: "is this built?" cannot be a list of all of them -- `voice.safe` would trim it
+#: to whichever two happened to sort first, which is worse than a count. Three
+#: recent ones plus a total is an answer; a wall of stale rows is not.
+NAMED_LIMIT: Final[int] = 3
 
 
 @dataclass(frozen=True, slots=True)
@@ -23,53 +31,88 @@ class WaitingAsk:
     """One listing that is waiting on a person, and what it last asked for."""
 
     run_id: str
-    headline: str
+    listing: str
     thread_ts: str
     question: str
 
 
-def waiting_asks(connection: sqlite3.Connection) -> tuple[WaitingAsk, ...]:
-    """Return every paused listing with the question it is still owed.
-
-    "Build it" said outside a listing thread is a real instruction with no
-    listing attached. Answering it needs the listings that are actually
-    waiting, which is cheaper and more useful than re-measuring the design
-    folder -- Chase said exactly that on 2026-08-26 and got a template report.
+def waiting_ask_count(connection: sqlite3.Connection) -> int:
+    """Return how many listings are waiting on a person right now.
 
     Args:
         connection: Open database connection.
 
     Returns:
-        One entry per paused run that has asked something, oldest first. The
-        headline is the run's first, which is the one naming the property; the
-        question is its most recent.
+        The count of paused runs that have asked something.
+
+    Raises:
+        sqlite3.Error: If the query cannot run.
+    """
+    row = connection.execute(
+        f"""
+        SELECT COUNT(DISTINCT q.run_id) AS waiting
+          FROM run_questions q
+          JOIN runs r ON r.run_id = q.run_id
+         WHERE r.status IN ({",".join("?" * len(PAUSED))})
+           AND q.question_label != ''
+        """,
+        tuple(sorted(PAUSED)),
+    ).fetchone()
+    return int(row["waiting"]) if row else 0
+
+
+def waiting_asks(
+    connection: sqlite3.Connection,
+    limit: int = NAMED_LIMIT,
+) -> tuple[WaitingAsk, ...]:
+    """Return the most recently active paused listings and what each is owed.
+
+    The listing is named from its own submission rather than from the question's
+    headline, because only a run's FIRST question carries a headline and a run
+    that has asked twice would otherwise be nameless.
+
+    Args:
+        connection: Open database connection.
+        limit: How many to return, newest activity first.
+
+    Returns:
+        Up to `limit` entries, each naming the agent, the address, and the exact
+        question that listing is still waiting on.
 
     Raises:
         sqlite3.Error: If the query cannot run.
     """
     rows = connection.execute(
         f"""
-        SELECT q.run_id, q.headline, q.thread_ts, q.question_label, q.created_at
-          FROM run_questions q
-          JOIN runs r ON r.run_id = q.run_id
+        SELECT r.run_id,
+               s.agent_name,
+               s.address,
+               q.thread_ts,
+               q.question_label
+          FROM runs r
+          JOIN submissions s ON s.response_row_id = r.response_row_id
+          JOIN run_questions q ON q.run_id = r.run_id
          WHERE r.status IN ({",".join("?" * len(PAUSED))})
-         ORDER BY q.created_at
+           AND q.question_label != ''
+           AND q.created_at = (
+               SELECT MAX(q2.created_at)
+                 FROM run_questions q2
+                WHERE q2.run_id = r.run_id
+                  AND q2.question_label != ''
+           )
+         ORDER BY r.updated_at DESC
+         LIMIT ?
         """,
-        tuple(sorted(PAUSED)),
+        (*sorted(PAUSED), limit),
     ).fetchall()
-    headlines: dict[str, str] = {}
-    latest: dict[str, WaitingAsk] = {}
-    for row in rows:
-        run_id = str(row["run_id"])
-        headline = str(row["headline"] or "")
-        if headline and run_id not in headlines:
-            headlines[run_id] = headline
-        question = str(row["question_label"] or "")
-        if question:
-            latest[run_id] = WaitingAsk(
-                run_id=run_id,
-                headline=headlines.get(run_id, ""),
-                thread_ts=str(row["thread_ts"] or ""),
-                question=question,
-            )
-    return tuple(latest[run_id] for run_id in latest)
+    return tuple(
+        WaitingAsk(
+            run_id=str(row["run_id"]),
+            listing=" — ".join(
+                part for part in (str(row["agent_name"] or ""), str(row["address"] or "")) if part
+            ),
+            thread_ts=str(row["thread_ts"] or ""),
+            question=str(row["question_label"] or ""),
+        )
+        for row in rows
+    )

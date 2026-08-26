@@ -322,7 +322,7 @@ def build_components(settings: Settings) -> RuntimeComponents:
             if decision.tool == "build_with_blank_fields":
                 run = store.run_for_thread(action_connection, thread_ts)
                 if run is None:
-                    return waiting_summary(store.waiting_asks(action_connection))
+                    return waiting_summary(action_connection)
                 if not _may_build_without_a_photo(action_connection, run):
                     # The release covers values nobody has, never the photograph.
                     # A flyer with no property photo is not a flyer.
@@ -394,7 +394,7 @@ def build_components(settings: Settings) -> RuntimeComponents:
                         # instruction with no listing attached. Name the ones
                         # that are actually waiting and what each still needs;
                         # that is the answer, and it costs nothing.
-                        return waiting_summary(store.waiting_asks(action_connection))
+                        return waiting_summary(action_connection)
                     if not checking_update:
                         return (
                             "This thread is about a source template, not a listing. Update "
@@ -498,7 +498,7 @@ def build_components(settings: Settings) -> RuntimeComponents:
                 # real question with a real answer. Chase asked it on
                 # 2026-08-26 and was told only that nothing had been changed --
                 # true, and no help at all. Say what is actually waiting.
-                return waiting_summary(store.waiting_asks(action_connection))
+                return waiting_summary(action_connection)
             pending_before_edit = tuple(
                 item
                 for item in store.pending_run_questions(action_connection)

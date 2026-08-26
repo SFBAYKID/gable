@@ -66,9 +66,9 @@ def test_nothing_waiting_says_so_plainly(tmp_path: Path) -> None:
     connection = connect(tmp_path / "gable.db")
     apply_migrations(connection)
 
-    answer = waiting_summary(store.waiting_asks(connection))
+    answer = waiting_summary(connection)
 
-    assert "nothing else is waiting" in answer
+    assert "nothing is waiting on you" in answer
     assert "could not match" not in answer
     assert not violations(answer)
     connection.close()
@@ -87,12 +87,12 @@ def test_one_waiting_listing_is_named_with_what_it_needs(tmp_path: Path) -> None
         "Can you send me the image?",
     )
 
-    answer = waiting_summary(store.waiting_asks(connection))
+    answer = waiting_summary(connection)
 
     assert "Mike Kulnich" in answer
     assert "1522 E Baltimore St" in answer
     assert "Can you send me the image?" in answer
-    # The announcement's opening words are noise when the listing is being cited.
+    # The listing is named from its own submission, never from an announcement.
     assert "New Sold request from" not in answer
     assert not violations(answer)
     connection.close()
@@ -119,7 +119,7 @@ def test_every_waiting_listing_is_listed(tmp_path: Path) -> None:
         "Can you send me the image? I also need the price.",
     )
 
-    answer = waiting_summary(store.waiting_asks(connection))
+    answer = waiting_summary(connection)
 
     assert "Mike Kulnich" in answer
     assert "Brittany Tawney" in answer
@@ -143,5 +143,33 @@ def test_a_delivered_listing_is_not_still_waiting(tmp_path: Path) -> None:
     store.set_status(connection, run_id, "delivered", "flyer sent")
 
     assert store.waiting_asks(connection) == ()
-    assert "nothing else is waiting" in waiting_summary(store.waiting_asks(connection))
+    assert "nothing is waiting on you" in waiting_summary(connection)
+    connection.close()
+
+
+def test_a_backlog_is_counted_rather_than_recited(tmp_path: Path) -> None:
+    """The live database held 325 paused runs on 2026-08-26.
+
+    Reciting them all does not produce a long message, it produces a message
+    `voice.safe` silently trims at 600 characters — which then reads as though
+    only the first two listings were waiting.
+    """
+    connection = connect(tmp_path / "gable.db")
+    apply_migrations(connection)
+    for index in range(9):
+        _waiting_listing(
+            connection,
+            f"row-{index}",
+            f"Agent Number{index}",
+            f"{index} Long Meadow Boulevard, Baltimore, MD 21231",
+            f"New Sold request from Agent Number{index}",
+            "Can you send me the image?",
+        )
+
+    answer = waiting_summary(connection)
+
+    assert "6 other listings are waiting too." in answer
+    assert len(answer) <= 600
+    assert sum(f"Number{index}" in answer for index in range(9)) == 3
+    assert not violations(answer)
     connection.close()

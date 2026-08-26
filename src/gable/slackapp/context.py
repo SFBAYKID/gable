@@ -316,48 +316,49 @@ def decide_with_context(
     return thinker(message, speaker=speaker)
 
 
-def waiting_summary(asks: tuple[store.WaitingAsk, ...]) -> str:
-    """Answer "build it" when the thread carries no listing of its own.
+def waiting_summary(connection: Connection) -> str:
+    """Answer "build it" or "is this built?" when the thread carries no listing.
 
-    Gable builds a flyer in that listing's thread, because that thread is what
-    ties the answer to the property. Asked anywhere else, the useful reply is
-    which listings are waiting and what each still needs -- not a refusal, and
-    not a paid re-measurement of the design folder, which is what Chase got on
-    2026-08-26 when he replied "yes build it" in a channel thread.
+    Gable builds a flyer in that listing's own thread, because that thread is
+    what ties the answer to the property. Asked anywhere else, the useful reply
+    is which listings are waiting and what each still needs -- not a refusal,
+    and not a paid re-measurement of the design folder, which is what Chase got
+    on 2026-08-26 when he replied "yes build it" in a channel thread.
+
+    Only the most recent few are named. The live database held 325 paused runs
+    that day, nearly all historical, and `voice.safe` trims a reply at 600
+    characters -- so listing them all would silently become whichever two sorted
+    first, which reads as "only two are waiting" and is false.
 
     Args:
-        asks: Every paused listing with its outstanding question.
+        connection: Open database connection.
 
     Returns:
         Safe Slack text naming what is waiting, or saying nothing is.
 
     Raises:
-        Nothing.
+        sqlite3.Error: If the waiting listings cannot be read.
     """
-    if not asks:
+    total = store.waiting_ask_count(connection)
+    if not total:
         return safe(
-            "There is no listing in this thread to build, and nothing else is waiting "
-            "on you right now. A new request opens its own thread and I will ask there."
+            "There is no listing in this thread to build, and nothing is waiting on you "
+            "right now. A new request opens its own thread and I will ask there."
         )
-    if len(asks) == 1:
-        only = asks[0]
-        return safe(
-            f"I build each listing in its own thread. {_waiting_name(only)} is the one "
-            f"waiting on you, and it still needs this: {only.question}"
-        )
-    listed = "\n\n".join(f"{_waiting_name(ask)} — {ask.question}" for ask in asks)
-    return safe(
+    asks = store.waiting_asks(connection)
+    listed = "\n".join(f"{ask.listing} — {_short_ask(ask.question)}" for ask in asks)
+    remaining = total - len(asks)
+    rest = f"\n\n{remaining} other listings are waiting too." if remaining > 0 else ""
+    opening = (
         "I build each listing in its own thread, so tell me there rather than here. "
-        f"These are the ones waiting on you:\n\n{listed}"
+        "The most recent ones waiting on you:"
     )
+    return safe(f"{opening}\n\n{listed}{rest}")
 
 
-def _waiting_name(ask: store.WaitingAsk) -> str:
-    """Name one waiting listing the way its own announcement named it."""
-    headline = ask.headline.strip()
-    if not headline:
-        return "One listing"
-    # "New Sold request from Mike Kulnich — 1522 E Baltimore St" reads better
-    # here without the announcement's opening words.
-    _, separator, remainder = headline.partition(" request from ")
-    return remainder.strip() if separator and remainder.strip() else headline
+def _short_ask(question: str) -> str:
+    """Keep the first sentence of an ask, so three of them fit in one reply."""
+    cleaned = " ".join(question.split())
+    head, stop, _ = cleaned.partition(". ")
+    first = f"{head}." if stop else cleaned
+    return first if len(first) <= 90 else f"{first[:87].rstrip()}..."

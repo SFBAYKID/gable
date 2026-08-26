@@ -91,7 +91,7 @@ from gable.db.template_store import (
     template_catalog_adopted,
     template_for_thread,
 )
-from gable.db.waiting_store import WaitingAsk, waiting_asks
+from gable.db.waiting_store import WaitingAsk, waiting_ask_count, waiting_asks
 from gable.listings.address import tidy as tidy_address
 from gable.listings.intake import Intake, address_looks_usable
 
@@ -163,6 +163,7 @@ __all__ = [
     "template_audit",
     "template_catalog_adopted",
     "template_for_thread",
+    "waiting_ask_count",
     "waiting_asks",
 ]
 
