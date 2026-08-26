@@ -310,6 +310,24 @@ call on 2026-08-12:
     string "Caleb Olawuyi, Realtor" and returns his pages for "caleb olawuyi",
     which is why the two-word retry exists and why it must strip punctuation.
 
+13. **A headshot well on these designs is portrait; a landscape well beside it
+    is a property photograph.** Measured through the service account against all
+    six live designs on 2026-08-26. The five designs that carry a headshot put it
+    at width-over-height 0.58, 0.62, 0.65, 0.76 and 0.77. The secondary photo row
+    under the hero measures 1.12 to 1.74 on the same pages. `_HEADSHOT_ASPECT`
+    had been (0.60, 1.70), which both admitted those photo wells and excluded
+    Open House's real headshot at 0.58 — so Open House had exactly one candidate,
+    a property-photo well, and Gable would have placed an agent's face in it with
+    nothing said. The band is now (0.50, 1.05). Any change to it must be measured
+    against all six designs again, not reasoned about.
+
+14. **The open-house tag on New Listing with Open House overhangs the page on
+    purpose.** Measured on the pre-2026-08-26 file: the tag shape extends 0.12in
+    past the right edge and its cord 1.56in. The visual judge reports this as
+    "cut off at the right edge" every time it looks, and it is not a defect. This
+    is why `template_audits.blocker_kind` exists and why a `visual` refusal does
+    not stop a listing — see the reversing row in `DECISIONS.md`.
+
 Each of these cost a real failure to learn. They are in the decision log with
 their evidence.
 

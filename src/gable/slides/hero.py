@@ -470,9 +470,23 @@ def find_hero_frame(
     return best
 
 
-#: A headshot is roughly square. Wider than this and it is a banner; taller and
-#: it is a side panel.
-_HEADSHOT_ASPECT: Final[tuple[float, float]] = (0.60, 1.70)
+#: A headshot well is portrait, or square at its widest. Anything clearly
+#: landscape is a property photograph, not a face.
+#:
+#: The band used to run to 1.70, which is wider than tall, and that admitted the
+#: secondary photo row these designs put under the hero. Measured against all
+#: six live designs on 2026-08-26 it was wrong in both directions at once:
+#: New Listing offered three candidates -- its real portrait well at 0.62 plus
+#: both landscape photo wells -- so Gable refused the design as ambiguous and
+#: told Carmen to delete two frames that are part of the layout. Open House was
+#: worse and silent: its true headshot well is 0.58, just under the old lower
+#: bound, so the only candidate left was a landscape photo well at 1.62, and
+#: Gable would have placed an agent's face in a property photo slot. That is
+#: the exact failure `headshot_frames` exists to prevent.
+#:
+#: 0.50 to 1.05 selects exactly one well, and the right one, on every design
+#: that has a headshot: 0.58, 0.62, 0.65, 0.76 and 0.77.
+_HEADSHOT_ASPECT: Final[tuple[float, float]] = (0.50, 1.05)
 
 #: It is a portrait, not a hero: big enough to be a face, not the whole design.
 _HEADSHOT_MIN_WIDTH_FRACTION: Final[float] = 0.10

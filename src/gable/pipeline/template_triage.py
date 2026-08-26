@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from collections import Counter
 from collections.abc import Callable
 from dataclasses import dataclass, replace
@@ -21,7 +22,49 @@ from gable.slides import preflight
 from gable.slides.library import TemplateFile
 from gable.voice import safe
 
+logger = logging.getLogger("gable.template_triage")
+
 _TEMPLATE_NOTIFICATION_NAMESPACE = UUID("a5f075c1-55c9-46b8-893b-5326a29e4d87")
+
+
+@dataclass(frozen=True, slots=True)
+class Verdict:
+    """One template outcome: what to say, the status, and why it refuses."""
+
+    message: str
+    status: str
+    blocker_kind: str = ""
+
+
+def _listed(names: list[str]) -> str:
+    """Join names the way a person writes a list."""
+    if len(names) == 1:
+        return names[0]
+    return f"{', '.join(names[:-1])} and {names[-1]}"
+
+
+def _timing_free(message: str) -> str:
+    """Reduce a verdict to its substance so two revisions can be compared.
+
+    Only the words that say *when* Gable looked are removed. Two messages that
+    survive this identically are the same verdict about the same fault, and
+    saying it a second time tells Carmen nothing she does not already have in
+    the thread.
+
+    Args:
+        message: A verdict exactly as it would be posted.
+
+    Returns:
+        The same sentence with its new/updated timing wording normalised.
+
+    Raises:
+        Nothing.
+    """
+    text = " ".join(message.split())
+    for phrase in ("the updated ", "the new "):
+        text = text.replace(phrase, "the ")
+    # The clean verdict is the one place the timing word changes the verb.
+    return text.replace("I read the ", "I checked the ", 1)
 
 
 def _notification_key(file_id: str) -> str:
@@ -150,7 +193,7 @@ class TemplateTriage:
                     )
                 continue
             updated = existing is not None
-            message, status = self._review_item(
+            verdict = self._review_item(
                 item,
                 duplicate=name_counts[self._key(item.name)] > 1,
                 updated=updated,
@@ -158,6 +201,40 @@ class TemplateTriage:
                 # a NEW design still announces a clean result.
                 quiet_when_clean=updated,
             )
+            message, status = verdict.message, verdict.status
+            # Saving a file Gable has already refused, for the same reason,
+            # produces a new revision and the identical sentence. Carmen was
+            # told at 12:47 on 2026-08-26 that a .pptx is not a Google Slides
+            # design, answered "I am working on it now", and was told the same
+            # thing again at 12:51 because she had touched the file. Repeating
+            # a verdict she is acting on is Gable talking over her. Record the
+            # revision so clearance stays truthful, and stay quiet -- asking
+            # for a recheck explicitly always answers, on a different path.
+            if (
+                existing is not None
+                and message
+                and existing.summary
+                and status == existing.status
+                and not existing.notification_pending
+                and _timing_free(message) == _timing_free(existing.summary)
+            ):
+                logger.info(
+                    "%s still has the same fault after an edit; not repeating it",
+                    item.name,
+                )
+                store.record_template_audit(
+                    self.connection,
+                    item.file_id,
+                    item.name,
+                    item.modified_time,
+                    status,
+                    existing.summary,
+                    existing.slack_thread_ts,
+                    notification_pending=False,
+                    blocker_kind=verdict.blocker_kind,
+                )
+                checked += 1
+                continue
             thread_ts = existing.slack_thread_ts if existing is not None else ""
             store.record_template_audit(
                 self.connection,
@@ -168,6 +245,7 @@ class TemplateTriage:
                 message,
                 thread_ts,
                 notification_pending=bool(message),
+                blocker_kind=verdict.blocker_kind,
             )
             checked += 1
             pending = store.template_audit(self.connection, item.file_id)
@@ -188,21 +266,124 @@ class TemplateTriage:
         duplicate: bool,
         updated: bool,
         quiet_when_clean: bool = False,
-    ) -> tuple[str, str]:
+    ) -> Verdict:
         """Measure one new or changed Drive revision and choose its verdict."""
         if not item.is_slides:
-            return self._unsupported_message(item.name, updated=updated), "needs_template"
+            # The naming note is already inside the unsupported message, which
+            # is the one Carmen acts on by creating a differently named file.
+            return Verdict(
+                self._unsupported_message(item.name, updated=updated),
+                "needs_template",
+                store.BLOCKER_UNSUPPORTED,
+            )
         if duplicate:
-            return self._duplicate_message(item.name, updated=updated), "needs_template"
+            return Verdict(
+                self._duplicate_message(item.name, updated=updated),
+                "needs_template",
+                store.BLOCKER_DUPLICATE,
+            )
         report = self._inspect(item)
         visual = self.look_at(item.file_id) if not report.blockers else None
-        return self._message(
+        verdict = self._message(
             item.name,
             report,
             updated=updated,
             visual=visual,
             quiet_when_clean=quiet_when_clean,
         )
+        note = self._naming_note(item.name)
+        if note and verdict.message:
+            verdict = replace(verdict, message=safe(verdict.message + note))
+        return verdict
+
+    def recheck_catalog(
+        self,
+        progress: Callable[[str], None] = lambda _stage: None,
+    ) -> str:
+        """Re-measure every design in Generic Templates and answer once.
+
+        "I just imported new templates. Can you check again?" is the sentence a
+        person actually says after replacing several files, and on 2026-08-26 it
+        had nowhere to land: every recheck was keyed to a thread Gable already
+        owned, so a top-level ask was answered "I could not match this thread to
+        a listing or template". Carmen had six designs in flight and no way to
+        ask about them together.
+
+        A design refused only on how it LOOKS is reported as a note and still
+        counts as buildable, for the reason in `placement.template_clearance`:
+        the finished flyer is inspected on its own render either way.
+
+        Args:
+            progress: Truthful native-status stage reporter.
+
+        Returns:
+            One message naming what is ready and what still needs work.
+
+        Raises:
+            Nothing. A Drive or Slides failure surfaces as that design's own
+            refusal rather than ending the sweep.
+        """
+        templates = self.list_templates()
+        if not templates:
+            return safe(
+                "I could not find any designs in Generic Templates, so I have not "
+                "changed anything. Put them in that folder and ask me again."
+            )
+        name_counts = Counter(self._key(item.name) for item in templates)
+        ready: list[str] = []
+        blocked: list[str] = []
+        notes: list[str] = []
+        for item in sorted(templates, key=lambda entry: entry.name.casefold()):
+            progress(f"is checking {item.name}...")
+            existing = store.template_audit(self.connection, item.file_id)
+            try:
+                verdict = self._review_item(
+                    item,
+                    duplicate=name_counts[self._key(item.name)] > 1,
+                    updated=existing is not None,
+                )
+            except Exception:
+                logger.exception("re-measuring %s failed", item.name)
+                blocked.append(
+                    safe(f"I could not read the {item.name} design, so I have not certified it.")
+                )
+                continue
+            store.record_template_audit(
+                self.connection,
+                item.file_id,
+                item.name,
+                item.modified_time,
+                verdict.status,
+                verdict.message,
+                existing.slack_thread_ts if existing is not None else "",
+                notification_pending=False,
+                blocker_kind=verdict.blocker_kind,
+            )
+            if verdict.blocker_kind == store.BLOCKER_VISUAL:
+                ready.append(item.name)
+                notes.append(verdict.message)
+            elif verdict.status == "ready":
+                ready.append(item.name)
+            else:
+                blocked.append(verdict.message)
+        return self._catalog_answer(ready, blocked, notes)
+
+    @staticmethod
+    def _catalog_answer(ready: list[str], blocked: list[str], notes: list[str]) -> str:
+        """Compose one plain answer to a whole-folder recheck."""
+        parts: list[str] = []
+        if ready:
+            parts.append(f"These designs are ready to build from: {_listed(ready)}.")
+        if blocked:
+            parts.append("\n\n".join(blocked))
+        if notes:
+            parts.append(
+                "I also want to flag how these look, though I will still build on them "
+                "and inspect every finished flyer:\n\n" + "\n\n".join(notes)
+            )
+        if not parts:
+            parts.append("I could not certify any of the designs in Generic Templates.")
+        return safe("\n\n".join(parts))
 
     def recheck(
         self,
@@ -328,6 +509,26 @@ class TemplateTriage:
             None,
         )
         if current is None:
+            if existing.blocker_kind == store.BLOCKER_UNSUPPORTED or existing.status == "retired":
+                # Gable asked for this file to be replaced with a Slides design.
+                # Removing it is the fix, so demanding it back is Gable undoing
+                # its own instruction -- which is what Carmen was told at 13:08
+                # on 2026-08-26 after she correctly deleted a converted .pptx.
+                message = safe(
+                    f"The {existing.name} file is out of Generic Templates now, which is "
+                    "what I asked for. There is nothing left to check on it."
+                )
+                store.record_template_audit(
+                    self.connection,
+                    existing.file_id,
+                    existing.name,
+                    existing.modified_time,
+                    "retired",
+                    message,
+                    existing.slack_thread_ts,
+                    notification_pending=notification_pending,
+                )
+                return message
             message = (
                 f"I could not find the {existing.name} design in Generic Templates, so I "
                 "could not check the update. Put it back in that folder and ask me again."
@@ -344,6 +545,7 @@ class TemplateTriage:
                 message,
                 existing.slack_thread_ts,
                 notification_pending=notification_pending,
+                blocker_kind=store.BLOCKER_MISSING,
             )
             return message
         if not current.is_slides:
@@ -357,6 +559,7 @@ class TemplateTriage:
                 message,
                 existing.slack_thread_ts,
                 notification_pending=notification_pending,
+                blocker_kind=store.BLOCKER_UNSUPPORTED,
             )
             return message
         if sum(self._key(item.name) == self._key(current.name) for item in templates) > 1:
@@ -370,6 +573,7 @@ class TemplateTriage:
                 message,
                 existing.slack_thread_ts,
                 notification_pending=notification_pending,
+                blocker_kind=store.BLOCKER_DUPLICATE,
             )
             return message
         report = self._inspect(current)
@@ -400,24 +604,28 @@ class TemplateTriage:
         if not report.blockers and not for_listing:
             progress("is inspecting the updated template...")
             visual = self.look_at(current.file_id)
-        message, status = self._message(
+        verdict = self._message(
             current.name,
             report,
             updated=True,
             visual=visual,
             visual_required=not for_listing,
         )
+        note = self._naming_note(current.name)
+        if note and verdict.message:
+            verdict = replace(verdict, message=safe(verdict.message + note))
         store.record_template_audit(
             self.connection,
             current.file_id,
             current.name,
             current.modified_time,
-            status,
-            message,
+            verdict.status,
+            verdict.message,
             existing.slack_thread_ts,
             notification_pending=notification_pending,
+            blocker_kind=verdict.blocker_kind,
         )
-        return message
+        return verdict.message
 
     def _inspect(self, template: TemplateFile) -> preflight.Report:
         """Apply structural and capacity checks to the current Drive revision."""
@@ -439,7 +647,7 @@ class TemplateTriage:
         visual: Inspection | None = None,
         visual_required: bool = True,
         quiet_when_clean: bool = False,
-    ) -> tuple[str, str]:
+    ) -> Verdict:
         """Choose one precise Slack outcome from a measured report.
 
         With ``quiet_when_clean``, a design Gable re-read on its own and found
@@ -449,15 +657,20 @@ class TemplateTriage:
         Nobody asked Gable to look, so a clean answer is not news. Every
         problem, every warning, and every design Gable is *asked* to check
         still speaks.
+
+        Every refusal also records WHY it refuses. A structural fault makes the
+        design unfillable and must stop a listing; a judgement about how the
+        artwork looks is the design thread's question and must not, because the
+        finished flyer is inspected on its own render either way.
         """
         if report.blockers:
             message = report.blockers[0].say
             if updated:
                 message = message.replace("the new ", "the updated ", 1)
-            return safe(message), "needs_template"
+            return Verdict(safe(message), "needs_template", store.BLOCKER_STRUCTURAL)
         timing = "updated" if updated else "new"
         if not visual_required:
-            return (
+            return Verdict(
                 safe(
                     f"I read the {timing} {name} design from Generic Templates and found "
                     "no structural or text-capacity problem. I will inspect the finished "
@@ -466,53 +679,89 @@ class TemplateTriage:
                 "ready",
             )
         if visual is None or not visual.checked:
-            return (
+            return Verdict(
                 safe(
                     f"I measured the {timing} {name} design, but I could not complete "
                     "its visual inspection, so I have not certified it. Tell me to check "
                     "the template again."
                 ),
                 "needs_template",
+                store.BLOCKER_VISUAL,
             )
         if not visual.confident:
-            return (
+            return Verdict(
                 safe(
                     f"I measured the {timing} {name} design, but the visual inspection "
                     "was inconclusive, so I have not certified it. Tell me to check the "
                     "template again."
                 ),
                 "needs_template",
+                store.BLOCKER_VISUAL,
             )
         if not visual.looks_right:
             problem = visual.problems[0] if visual.problems else "the visible layout looks wrong"
             problem = problem.strip().rstrip(".")
             problem = f"{problem[:1].lower()}{problem[1:]}"
-            return (
+            return Verdict(
                 safe(
                     f"I inspected the {timing} {name} design, but {problem}. Fix that, "
                     "then tell me to check the template again."
                 ),
                 "needs_template",
+                store.BLOCKER_VISUAL,
             )
         # A measured tradeoff is worth saying and is not a reason to refuse the
         # design. Carmen hears that a slot is tight; the listings built on it
         # still get their own exact measurement before anything is copied.
         if report.warnings:
-            return safe(report.warnings[0].say.replace("the new ", f"the {timing} ", 1)), "ready"
+            return Verdict(
+                safe(report.warnings[0].say.replace("the new ", f"the {timing} ", 1)),
+                "ready",
+            )
         if quiet_when_clean:
-            return "", "ready"
+            return Verdict("", "ready")
         prefix = "I read the updated" if updated else "I checked the new"
         message = safe(
             f"{prefix} {name} design from Generic Templates. I did not find a "
             "structural, text-capacity, or visible layout problem. I will still "
             "inspect each finished flyer before I call it ready."
         )
-        return message, "ready"
+        return Verdict(message, "ready")
 
     @staticmethod
     def _key(name: str) -> str:
         """Normalise a Drive file name for exact human-visible matching."""
         return " ".join(name.split()).casefold()
+
+    @staticmethod
+    def _naming_note(name: str) -> str:
+        """Say when a file's name means no submission will ever select it.
+
+        `slides.selection.template_picker` matches a design by exact request
+        type: the folder holds one file per thing the form can ask for, named
+        what the form calls it. A file named anything else is invisible to
+        every listing, and saying so is the difference between Carmen finishing
+        the job and Carmen doing work that changes nothing. On 2026-08-26 she
+        was told to convert `Brittany Tawney Static.pptx`, which would have
+        produced a perfectly good design named `Brittany Tawney Static` that
+        Gable could never have picked.
+
+        Args:
+            name: The Drive file name, with or without an extension.
+
+        Returns:
+            One sentence to append, or empty when the name is a request type.
+
+        Raises:
+            Nothing.
+        """
+        stem = name.rsplit(".", 1)[0] if "." in name else name
+        if " ".join(stem.split()).casefold() in REQUEST_TYPE_TO_CATEGORY:
+            return ""
+        return (
+            f" Name it exactly what the form calls the request type as well, because "
+            f"nothing on the form asks for {stem}, so I would never pick this design."
+        )
 
     @staticmethod
     def _unsupported_message(name: str, *, updated: bool) -> str:
@@ -521,7 +770,7 @@ class TemplateTriage:
         return safe(
             f"I found the {timing} {name} file, but it is not a Google Slides design, "
             "so I cannot measure or build from it. Convert it to Google Slides in "
-            "Generic Templates, then tell me to check it again."
+            "Generic Templates, then tell me to check it again." + TemplateTriage._naming_note(name)
         )
 
     @staticmethod

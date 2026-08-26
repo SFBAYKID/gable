@@ -618,3 +618,40 @@ def test_repeated_standalone_fields_count_as_one_successful_request() -> None:
         )
         == -1
     )
+
+
+def test_a_listing_builds_through_an_appearance_only_refusal(tmp_path: Path) -> None:
+    """The open-house tag overhang is deliberate and must not stop a submission.
+
+    d613511 settled this for a rebuild and left the new-listing gate refusing,
+    so on 2026-08-26 Brittany Tawney's listing died on a verdict stored a week
+    earlier about a tag that hangs off the page on purpose.
+    """
+    connection = connect(tmp_path / "gable.db")
+    apply_migrations(connection)
+    store.adopt_template_catalog(connection, [("baseline", "Sold", "one")])
+    store.record_template_audit(
+        connection,
+        "looks-odd",
+        "New Listing with Open House",
+        "two",
+        "needs_template",
+        "I inspected the New Listing with Open House design, but the open-house tag is "
+        "cut off at the right edge. Fix that, then tell me to check the template again.",
+        blocker_kind=store.BLOCKER_VISUAL,
+    )
+    store.record_template_audit(
+        connection,
+        "really-broken",
+        "New Listing",
+        "two",
+        "needs_template",
+        "The email section is too narrow. Fix it and ask me to check it again.",
+        blocker_kind=store.BLOCKER_STRUCTURAL,
+    )
+
+    assert template_clearance(connection, "looks-odd", "New Listing with Open House") == ""
+    assert "email section is too narrow" in template_clearance(
+        connection, "really-broken", "New Listing"
+    )
+    connection.close()

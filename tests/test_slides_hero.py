@@ -162,3 +162,27 @@ def test_a_frame_buried_under_artwork_is_still_rejected() -> None:
     found = [f.object_id for f in headshot_frames(page, SLIDE_WIDTH, SLIDE_HEIGHT)]
 
     assert "p1_i92" not in found
+
+
+def test_a_landscape_photo_well_is_not_offered_as_a_headshot() -> None:
+    """Measured on the six live designs 2026-08-26.
+
+    New Listing put its portrait headshot well beside two landscape photo wells
+    and Gable called the design ambiguous, telling Carmen to delete frames that
+    are part of the layout. Open House was worse: its real headshot well is
+    0.58 wide-over-tall, under the old lower bound, so the only candidate left
+    was a landscape photo well and Gable would have placed a face in it.
+    """
+    inch = 914_400.0
+    page = {
+        "pageElements": [
+            _well("headshot", 0.37 * inch, 9.99 * inch, 2.54 * inch, 4.35 * inch),
+            _well("photo-left", 1.45 * inch, 9.29 * inch, 4.16 * inch, 2.39 * inch),
+            _well("photo-right", 5.91 * inch, 9.29 * inch, 3.86 * inch, 2.39 * inch),
+        ]
+    }
+    slide_w = 11.25 * inch
+    slide_h = 14.06 * inch
+    frames = headshot_frames(page, slide_w, slide_h)
+
+    assert [frame.object_id for frame in frames] == ["headshot"]

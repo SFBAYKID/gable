@@ -68,32 +68,22 @@ Carmen to the finished Slides file, which she edits in place.
 
 ### 2.1 Why Google Slides, and not Canva
 
-Canva was the original target and it is gone. The reasoning is worth keeping,
-because it is the reason a week of the wrong work was not repeated.
+Canva was the original target and it is gone. Three paths were considered and
+each failed on something structural: Connect API autofill needs a Canva
+**Enterprise** organization and the account is on Teams; **Spike A proved Bulk
+Create cannot carry the photo**, because an uploaded xlsx/CSV types every column
+as text and only the manual data table can hold an image column; and a private
+data-connector app is gated on marketplace review and a second language.
 
-Three Canva paths were considered, and each failed on something structural:
-
-1. **Connect API autofill** — genuinely the best experience: push, and a finished
-   design appears with zero clicks. It requires a **Canva Enterprise**
-   organization. The account is on Canva Teams ($30/month, 2 seats), and
-   Enterprise is quote-only and aimed at far larger organizations. Chase ruled it
-   out on cost.
-2. **Bulk Create from an uploaded file** — the fallback, and the original Phase 1
-   deliverable. **Spike A proved it cannot work.** An uploaded xlsx/CSV has every
-   column typed as text; only Canva's *manual* data table can carry an
-   image-typed column. The file can carry every text field but not the photo —
-   and the photo is the twenty minutes. See `spikes/SPIKE_A_RESULT.md`.
-3. **A private data-connector app** — image cells *are* documented to accept an
-   external HTTPS URL, but it is gated on an unverified marketplace-review
-   question and is a TypeScript codebase alongside the Python one.
+**The full reasoning, with the evidence, is CLAUDE.md §4 and
+`spikes/SPIKE_A_RESULT.md`** — read both before re-opening the question. It is
+kept there rather than here because it is the reason a week of the wrong work
+was not repeated.
 
 **Google Slides does what all three were for, on infrastructure already required.**
 Gable measures one safe photo-frame object, deletes it, and creates an image at
-the same transform from a public URL. That supplies what Spike A proved Canva
-lacked and reuses the service account that reads the Sheet.
-
-The cost is that Carmen edits in Slides rather than Canva. Against building the
-post by hand, that is the smaller change.
+the same transform from a public URL. The cost is that Carmen edits in Slides
+rather than Canva; against building the post by hand, that is the smaller change.
 
 ### 2.2 Why Socket Mode instead of HTTP events?
 
@@ -532,8 +522,15 @@ silently; later file IDs that pass them receive a placeholder-aware visual check
 for clipping, overlap, spacing, alignment, padding, and off-canvas artwork, then
 one owned Slack thread. A reply that the source was updated reloads the same
 Drive file under the native waiting state and names both measurement and visual
-inspection as they run. Its persisted verdict is a real listing gate after the
-catalogue is adopted; an unresolved new-file audit cannot be bypassed by selection.
+inspection as they run. `recheck_catalog` re-measures the whole folder and
+answers once, which is what "I just imported new templates, can you check
+again?" reaches when the thread belongs to no listing and no single design.
+Re-saving an already-refused file yields the same sentence, so the scan records
+the new revision and stays quiet rather than repeat a verdict somebody is acting
+on. Its persisted verdict is a real listing gate after the catalogue is adopted,
+except that `template_audits.blocker_kind` records WHY a design is refused and a
+`visual` refusal does not stop a listing: how the artwork looks is the design
+thread's question, and the finished flyer is inspected on its own render anyway.
 
 Two-agent roles parse, but without a per-role object contract they stop at
 `needs_template` rather than filling by page order.

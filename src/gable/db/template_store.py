@@ -12,11 +12,23 @@ import sqlite3
 import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from typing import Final
 
 
 def _now() -> str:
     """Return the UTC timestamp format used by template-audit writes."""
     return datetime.now(UTC).isoformat()
+
+
+#: Why a refused source template is refused. `VISUAL` is the only kind a
+#: listing is allowed to build through -- see `pipeline.placement.template_clearance`
+#: and migration 15. Everything else makes the file unusable rather than
+#: merely questionable, so it stops a listing as well as a design thread.
+BLOCKER_STRUCTURAL: Final[str] = "structural"
+BLOCKER_VISUAL: Final[str] = "visual"
+BLOCKER_UNSUPPORTED: Final[str] = "unsupported"
+BLOCKER_DUPLICATE: Final[str] = "duplicate"
+BLOCKER_MISSING: Final[str] = "missing"
 
 
 @dataclass(frozen=True, slots=True)
@@ -35,6 +47,7 @@ class TemplateAudit:
     delivery_claimed_at: str = ""
     notification_attempted_at: str = ""
     notification_attempt_count: int = 0
+    blocker_kind: str = ""
 
 
 def template_catalog_adopted(connection: sqlite3.Connection) -> bool:
@@ -73,7 +86,7 @@ def template_audit(
         SELECT file_id, name, modified_time, status, summary, slack_thread_ts,
                notification_pending, checked_at, delivery_claim_token,
                delivery_claimed_at, notification_attempted_at,
-               notification_attempt_count
+               notification_attempt_count, blocker_kind
           FROM template_audits
          WHERE file_id = ?
         """,
@@ -92,7 +105,7 @@ def template_for_thread(
         SELECT file_id, name, modified_time, status, summary, slack_thread_ts,
                notification_pending, checked_at, delivery_claim_token,
                delivery_claimed_at, notification_attempted_at,
-               notification_attempt_count
+               notification_attempt_count, blocker_kind
           FROM template_audits
          WHERE slack_thread_ts = ?
          ORDER BY checked_at DESC
@@ -110,7 +123,7 @@ def pending_template_notifications(connection: sqlite3.Connection) -> tuple[Temp
         SELECT file_id, name, modified_time, status, summary, slack_thread_ts,
                notification_pending, checked_at, delivery_claim_token,
                delivery_claimed_at, notification_attempted_at,
-               notification_attempt_count
+               notification_attempt_count, blocker_kind
           FROM template_audits
          WHERE notification_pending = 1
            AND status != 'baseline'
@@ -216,19 +229,42 @@ def record_template_audit(
     slack_thread_ts: str = "",
     *,
     notification_pending: bool = False,
+    blocker_kind: str = "",
 ) -> bool:
-    """Upsert one measured source-template outcome and its owned thread."""
+    """Upsert one measured source-template outcome and its owned thread.
+
+    Args:
+        connection: Open database connection.
+        file_id: Drive id of the source design.
+        name: Its current human-visible file name.
+        modified_time: The Drive revision this verdict measured.
+        status: `baseline`, `ready`, or `needs_template`.
+        summary: Exactly what Gable will say about it, or empty to stay quiet.
+        slack_thread_ts: The design's owned thread; empty keeps the stored one.
+        notification_pending: Whether this verdict still owes a Slack post.
+        blocker_kind: One of the `BLOCKER_*` names when `status` refuses the
+            design, empty otherwise. A listing builds through `visual` alone;
+            see `pipeline.placement.template_clearance`.
+
+    Returns:
+        True when this call wrote the row, False when a pending or claimed
+        delivery held it.
+
+    Raises:
+        sqlite3.Error: If the upsert cannot run.
+    """
     cursor = connection.execute(
         """
         INSERT INTO template_audits (
             file_id, name, modified_time, status, summary,
-            slack_thread_ts, checked_at, notification_pending
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            slack_thread_ts, checked_at, notification_pending, blocker_kind
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(file_id) DO UPDATE SET
             name = excluded.name,
             modified_time = excluded.modified_time,
             status = excluded.status,
             summary = excluded.summary,
+            blocker_kind = excluded.blocker_kind,
             slack_thread_ts = CASE
                 WHEN excluded.slack_thread_ts = '' THEN template_audits.slack_thread_ts
                 ELSE excluded.slack_thread_ts
@@ -251,6 +287,7 @@ def record_template_audit(
             slack_thread_ts,
             _now(),
             int(notification_pending),
+            blocker_kind,
         ),
     )
     return cursor.rowcount == 1
@@ -271,4 +308,5 @@ def _to_template_audit(row: sqlite3.Row) -> TemplateAudit:
         delivery_claimed_at=str(row["delivery_claimed_at"] or ""),
         notification_attempted_at=str(row["notification_attempted_at"] or ""),
         notification_attempt_count=int(row["notification_attempt_count"]),
+        blocker_kind=str(row["blocker_kind"] or ""),
     )

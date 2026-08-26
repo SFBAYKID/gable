@@ -1,6 +1,42 @@
 # Gable — status, and what's needed from Chase
 
-Last updated 2026-08-24 by the building agent.
+Last updated 2026-08-26 by the building agent.
+
+## 2026-08-26 — Brittany Tawney's Open House: forty minutes of work caused by a false positive
+
+Reported by Chase from the live channel while it was happening. One submission
+blocked, six templates rebuilt to satisfy a complaint that was never real, and
+five separate defects behind it. All five fixed and deployed the same day.
+
+**What Carmen saw.** At 11:54 her listing thread said the open-house tag on
+`New Listing with Open House` was cut off at the right edge. It is not cut off;
+it overhangs the page on purpose, which `d613511` established on 2026-08-14 and
+which the flyer already delivered from that source shows. Gable had not looked
+at 11:54 either — it replayed a verdict stored on 2026-08-19. She trashed the
+design and spent the next forty minutes importing replacements, and Gable
+answered with eight messages, one of which repeated itself four minutes later,
+one of which sent her to convert a file it could never have selected, and one of
+which told her to restore a file she had correctly deleted. Two direct asks to
+check everything again were refused for want of a matching thread.
+
+**The five defects.** Each has a row in `DECISIONS.md` and a regression test.
+
+1. A verdict about how a design LOOKS blocked a new listing. `blocker_kind`
+   (schema v15) now records why a design is refused, and only `visual` clears.
+2. `_HEADSHOT_ASPECT` ran to 1.70, admitting landscape wells. On `Open House`
+   this was not merely noisy: the true headshot well is 0.58, under the old
+   lower bound, so the one surviving candidate was a property-photo well and
+   Gable would have put an agent's face in it, silently.
+3. An unchanged refusal re-posted on every Drive revision bump.
+4. "Check them all again" had no whole-folder entry point.
+5. Deleting a file Gable had asked to have replaced was treated as a mistake.
+
+**Worth noting for the next agent.** Defect 1 is the one that cost the day, and
+it was not a new mistake — it was a decision applied to one of the two callers
+that read it. When a finding says "this check is wrong here", search for every
+consumer of the stored result, not just the one in the traceback. Defect 2 was
+found only because the advice Gable gave about defect 1's aftermath looked wrong
+enough to measure; nothing in the suite would have caught it.
 
 ## 2026-08-21 — Deborah Manarin's Sold: asked three times for an address it had
 

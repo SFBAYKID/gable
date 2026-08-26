@@ -27,7 +27,7 @@ from typing import Final
 
 #: Bumped whenever a migration is added. `apply_migrations` uses it to decide
 #: what still needs running.
-SCHEMA_VERSION: Final[int] = 14
+SCHEMA_VERSION: Final[int] = 15
 
 #: Each migration is (version, sql). They run in order and only once. Never edit
 #: one that has shipped — add another, the same rule as the decision log.
@@ -442,6 +442,31 @@ MIGRATIONS: Final[tuple[tuple[int, str], ...]] = (
         -- Defaults to 0, which reads as "not asked". Runs recorded before this
         -- migration therefore behave exactly as they did.
         ALTER TABLE runs ADD COLUMN awaiting_photo INTEGER NOT NULL DEFAULT 0;
+        """,
+    ),
+    (
+        15,
+        """
+        -- Why a source template is refused, not merely that it is. Two callers
+        -- read the same verdict and one of them must not act on all of it: a
+        -- listing is cleared to build by `pipeline.placement.template_clearance`,
+        -- which had no way to tell a structural fault from a judgement about
+        -- how the artwork looks.
+        --
+        -- That distinction was already settled once. Commit d613511 stopped a
+        -- listing REBUILD re-certifying a design's looks, because the open-house
+        -- tag on New Listing with Open House overhangs the page on purpose and
+        -- the flyer that had already delivered showed it. The new-listing gate
+        -- was not given the same exemption, so on 2026-08-26 a visual verdict
+        -- stored on 2026-08-19 blocked a real submission over that same
+        -- deliberate overhang -- measured at 0.12in for the tag and 1.56in for
+        -- its cord.
+        --
+        -- '' for a design that is not refused, and for every row written before
+        -- this migration: an unknown reason keeps blocking, which is the safe
+        -- direction.
+        ALTER TABLE template_audits
+            ADD COLUMN blocker_kind TEXT NOT NULL DEFAULT '';
         """,
     ),
 )

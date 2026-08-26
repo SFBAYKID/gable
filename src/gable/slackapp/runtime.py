@@ -379,12 +379,26 @@ def build_components(settings: Settings) -> RuntimeComponents:
                 run = store.run_for_thread(action_connection, thread_ts)
                 if run is None:
                     template = store.template_for_thread(action_connection, thread_ts)
+                    checking_update = str(decision.arguments.get("mode") or "") == "check_updated"
                     if template is None:
-                        return (
-                            "I could not match this thread to a listing or template, so I "
-                            "have not changed anything."
-                        )
-                    if str(decision.arguments.get("mode") or "") != "check_updated":
+                        # "I just imported new templates. Can you check again?"
+                        # is asked at the top of the channel, about the folder,
+                        # not about one thread Gable happens to own. Carmen and
+                        # Chase both asked it on 2026-08-26 and were told the
+                        # thread matched nothing, twice, while six designs sat
+                        # unchecked. A whole-folder sweep is the honest answer.
+                        if not checking_update:
+                            return (
+                                "I could not match this thread to a listing or template, so I "
+                                "have not changed anything."
+                            )
+                        action_drive = build_google_service("drive", "v3", action_credentials)
+                        return template_triage_for(
+                            action_connection,
+                            action_drive,
+                            action_slides,
+                        ).recheck_catalog(progress)
+                    if not checking_update:
                         return (
                             "This thread is about a source template, not a listing. Update "
                             "the design and tell me to check it again."

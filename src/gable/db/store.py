@@ -75,6 +75,11 @@ from gable.db.run_store import (
     start_run,
 )
 from gable.db.template_store import (
+    BLOCKER_DUPLICATE,
+    BLOCKER_MISSING,
+    BLOCKER_STRUCTURAL,
+    BLOCKER_UNSUPPORTED,
+    BLOCKER_VISUAL,
     TemplateAudit,
     adopt_template_catalog,
     claim_template_notification_delivery,
@@ -91,6 +96,11 @@ from gable.listings.intake import Intake, address_looks_usable
 
 __all__ = [
     "ACTIVE",
+    "BLOCKER_DUPLICATE",
+    "BLOCKER_MISSING",
+    "BLOCKER_STRUCTURAL",
+    "BLOCKER_UNSUPPORTED",
+    "BLOCKER_VISUAL",
     "BUILD_WITH_BLANKS",
     "INTERRUPTED_NOTIFICATION_PENDING",
     "INTERRUPTED_REASON",

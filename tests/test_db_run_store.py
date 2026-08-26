@@ -71,6 +71,11 @@ def _remove_v14_run_columns(connection: sqlite3.Connection) -> None:
     connection.execute("ALTER TABLE runs DROP COLUMN awaiting_photo")
 
 
+def _remove_v15_template_columns(connection: sqlite3.Connection) -> None:
+    """Restore template_audits to its pre-v15 shape, without the refusal reason."""
+    connection.execute("ALTER TABLE template_audits DROP COLUMN blocker_kind")
+
+
 def test_schema_six_migrates_through_current_durable_state(
     tmp_path: Path,
 ) -> None:
@@ -85,12 +90,13 @@ def test_schema_six_migrates_through_current_durable_state(
     _remove_v10_run_columns(connection)
     _remove_v13_submission_columns(connection)
     _remove_v14_run_columns(connection)
+    _remove_v15_template_columns(connection)
     connection.execute("DELETE FROM schema_version WHERE version >= 7")
     assert current_version(connection) == 6
 
-    assert apply_migrations(connection) == 8
+    assert apply_migrations(connection) == 9
 
-    assert current_version(connection) == SCHEMA_VERSION == 14
+    assert current_version(connection) == SCHEMA_VERSION == 15
     columns = connection.execute("PRAGMA table_info(operation_releases)").fetchall()
     assert [str(row["name"]) for row in columns] == [
         "id",
@@ -123,12 +129,13 @@ def test_deployed_schema_seven_gains_the_generalized_outbox(tmp_path: Path) -> N
     _remove_v10_run_columns(connection)
     _remove_v13_submission_columns(connection)
     _remove_v14_run_columns(connection)
+    _remove_v15_template_columns(connection)
     connection.execute("DELETE FROM schema_version WHERE version >= 8")
     assert current_version(connection) == 7
 
-    assert apply_migrations(connection) == 7
+    assert apply_migrations(connection) == 8
 
-    assert current_version(connection) == SCHEMA_VERSION == 14
+    assert current_version(connection) == SCHEMA_VERSION == 15
     columns = {
         str(row["name"])
         for row in connection.execute("PRAGMA table_info(run_questions)").fetchall()

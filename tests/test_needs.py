@@ -182,7 +182,7 @@ def test_a_state_written_out_is_not_reported_as_a_missing_state() -> None:
 
 
 def test_a_missing_zip_is_named_as_a_missing_zip() -> None:
-    """ "Not in the order the design prints" sends somebody hunting a typo."""
+    """Saying "not in the order the design prints" sends somebody hunting a typo."""
     said = needs.incomplete_address("2519 Ann Arbor Lane, Bowie, MD")
 
     assert "no ZIP code" in said

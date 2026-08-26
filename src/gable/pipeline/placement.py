@@ -101,8 +101,9 @@ def template_clearance(
             isolated callers that have no Drive metadata.
 
     Returns:
-        Empty for a baseline or certified design; otherwise a safe explanation
-        that pauses the listing before preflight or copy.
+        Empty for a baseline or certified design, and for one refused only on
+        its appearance; otherwise a safe explanation that pauses the listing
+        before preflight or copy.
 
     Raises:
         sqlite3.Error: If the stored verdict cannot be read.
@@ -125,6 +126,22 @@ def template_clearance(
             "template again."
         )
     if audit.status in {"baseline", "ready"}:
+        return ""
+    if audit.blocker_kind == store.BLOCKER_VISUAL:
+        # How a design LOOKS is its own thread's question, not a listing's.
+        # d613511 settled this for a rebuild: the open-house tag on New Listing
+        # with Open House overhangs the page on purpose -- measured at 0.12in
+        # for the tag and 1.56in for its cord -- and the flyer that had already
+        # delivered showed it. The new-listing gate kept refusing anyway, so on
+        # 2026-08-26 Brittany Tawney's submission died on a verdict stored a
+        # week earlier, and the design was trashed and rebuilt to satisfy it.
+        # The finished flyer is inspected on its own render either way, which
+        # is the check that can see what Gable actually did.
+        logger.info(
+            "building %s despite an uncertified appearance: %s",
+            label,
+            audit.summary,
+        )
         return ""
     return audit.summary or safe(
         f"The {label} design still needs attention, so I have not built anything. "
