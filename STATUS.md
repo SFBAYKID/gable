@@ -91,6 +91,45 @@ a built flyer exists for a tool to act on. The underlying weakness — an
 acknowledgment that implies action while a run stays parked — is unchanged and
 still has its `DECISIONS.md` row.
 
+## 2026-08-27 — the form was already carrying the review, and five ways of saying so
+
+Chase, reading Porsher's thread: **"if you see that title New Client Review Post
+can't you just build it without any input from Carmen?"** For that listing the
+answer was yes, and Gable asked anyway. Row 130's `post_details` held the entire
+quote and the client's name. Carmen retyped both into Slack for nothing.
+
+Five Client Review Posts have ever been submitted. `parse_review` read one:
+
+| row | agent | shape | before | now |
+|---|---|---|---|---|
+| 5 | Gina Moore | context / name alone / blank / quote | read | read |
+| 39 | Kim Hixson | quote / `Yvette` | asked | **read** |
+| 49 | Ian DePinto | `7/2/2026 • lucyglou` header | asked | asks |
+| 50 | Ian DePinto | same | asked | asks |
+| 130 | Porsher Howard | header / quote / ` Sharon` | asked | **read** |
+
+Both misses were one shape: a single-word name signing off at the end.
+`_TRAILING_NAME` reads it; see the `DECISIONS.md` row for why one word counts at
+the bottom and still does not at the top. Rows 49 and 50 still ask, correctly —
+their reviewer is a Google username.
+
+**Proven in the playground, all on `Testing_1`, production untouched.**
+
+- **Row 533** carried its review the way the real form does. Submission to
+  finished flyer, **no questions asked at all** — which is the answer to Chase's
+  question, demonstrated rather than argued.
+- **Rows 528–532** were answered five different ways, all meaning "here is the
+  quote, there is no property photo": a terse refusal, a casual "skip the photo,
+  use her headshot from the folder", quote-first with the name mid-sentence, an
+  indirect "this one is a client review so there is no property", and a lowercase
+  run-on ending "(that is Dana)". **Five for five recorded the value and
+  delivered.** None re-asked for an image. The two hardest — "That one is from
+  Ken" and "(that is Dana)" — both filed the right client name.
+
+Seven test flyers now sit in the Gable output folder from this session. They are
+named for their agent and address and were deliberately left rather than trashed,
+so the runs stay auditable.
+
 ## What I need from Chase
 
 Nothing on this one. Deployed (`eda7fe6`, `75e8d94`), the run was resumed, and
