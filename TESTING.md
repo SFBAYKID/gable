@@ -10,15 +10,39 @@ a test against `C0BP597644B`, the production channel. The form-response tab is
 read only. A live flyer test creates a Slides output in Gable's shared drive but
 does not publish, export, or share it outside Gable.
 
-Before a live Slack test, confirm the droplet is configured for the playground:
+Gable is now live in `C0BP597644B` for Carmen, so **do not edit
+`GABLE_SLACK_CHANNEL_ID` in `/opt/gable/.env` to run a test.** That is what this
+section used to say, and it is no longer safe: it takes Gable off the production
+channel for the length of the test, and a real submission arriving in that
+window would be announced to the playground instead of to Carmen.
+
+Override the channel for the one process instead. `Settings` is read from the
+environment, so a variable set on the command line wins over the unit's
+`EnvironmentFile` without touching the file or restarting the service:
+
+```bash
+ssh -i ~/.ssh/gable_droplet root@143.110.146.87 \
+  'cd /opt/gable && sudo -u gable env GABLE_SLACK_CHANNEL_ID=C0B02721MNK \
+     /opt/gable/.venv/bin/python -m tools.run_row "Testing_1" <row>'
+```
+
+Everything that run posts goes to the playground; the listener keeps serving
+production. Confirm the file was not changed afterwards:
 
 ```bash
 ssh -i ~/.ssh/gable_droplet root@143.110.146.87 \
   "sed -n 's/^GABLE_SLACK_CHANNEL_ID=//p' /opt/gable/.env"
 ```
 
-The only acceptable output for a test is `C0B02721MNK`. Stop if it is anything
-else. This command reads only the channel setting; it does not print tokens.
+That must still print `C0BP597644B`. It reads only the channel setting and
+prints no tokens.
+
+**A conversational test cannot be driven from Slack.** `routing.py` drops every
+event carrying a `bot_id`, and `GABLE_SLACK_ALLOWED_USER_IDS` lists three human
+ids, so a scripted post is ignored no matter which token sends it. Either have a
+listed human type the replies, or drive the two calls the listener makes —
+`brain.think`, then the handler its decision names — which exercises the same
+conversation without Slack's event plumbing.
 
 ## 1. Complete local gate
 

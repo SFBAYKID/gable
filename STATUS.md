@@ -51,6 +51,46 @@ sources for the same question — the build already guarded its hero work with
 and a "build" side, make them read one source. This is the second time in eight
 days that a repeat rather than an error was what Carmen saw.
 
+## 2026-08-27 — the testimonial path, proven in the playground
+
+Chase asked for the new behaviour to be tested in monarch-bot-playground the way
+Carmen would use it. Run end to end there on `Testing_1` row 527 — Tambria
+Eaton, Client Review Post, 412 Ridgemont Road. Nothing was patched mid-run and
+the production channel setting was never changed.
+
+1. **The ask.** Gable opened the thread and asked for the review quote and
+   **nothing else** — status `needs_info`, not `needs_photo`. This is the whole
+   regression: the same design asked Porsher's listing for a property photograph
+   five times that afternoon.
+2. **Carmen's reply.** Her exact sentence — "There is no property photo needed
+   for this request", then the quote signed with a client's name — returned
+   `supply_listing_value`, recorded the quote and the client name, resumed, and
+   delivered. **One reply, one flyer.**
+3. **The render.** Tambria's filed headshot in the portrait well, her real phone
+   and email, the client credited. Confirmed on the rendered image.
+4. **The dangerous path.** `place_hero_photo` was called against a throwaway
+   copy of the design with a property-photo URL: it refused, logged "could not
+   find a photo frame in Client Review Post", and left the slide with zero
+   images. A building cannot reach an agent's face well. Copy trashed.
+
+**Two things learned that are not about this design.**
+
+- `routing.py` drops every event with a `bot_id`, and the allowed-user list is
+  three humans, so **no scripted Slack post can reach Gable's brain.** A
+  conversational test is driven through `brain.think` plus the handler its
+  decision names, or typed by a listed human. `TESTING.md` says so now.
+- `TESTING.md` told the next agent to edit `GABLE_SLACK_CHANNEL_ID` on the
+  droplet before testing. That was written before Gable was live for Carmen and
+  is now unsafe — it takes her off #calvo for the length of the test. Replaced
+  with a per-process `env` override, which is what this test used.
+
+**One observation worth keeping.** "The image should be the headshot for
+Tambria. It's in the headshot folder." now returns `replace_photo`, where the
+same sentence returned `tool=none` on Porsher's listing. The difference is that
+a built flyer exists for a tool to act on. The underlying weakness — an
+acknowledgment that implies action while a run stays parked — is unchanged and
+still has its `DECISIONS.md` row.
+
 ## What I need from Chase
 
 Nothing on this one. Deployed (`eda7fe6`, `75e8d94`), the run was resumed, and
