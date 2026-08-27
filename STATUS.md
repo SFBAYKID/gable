@@ -60,9 +60,18 @@ Carmen has the flyer in her thread. The open questions closed themselves:
   reads "OLIVIA WILSON". Carmen signed her quote "-Sharon", Gable recorded it
   as `client_name`, and the flyer prints **Sharon**. Confirmed on the render.
 - **The quote's punctuation.** Gable delivered the flyer and said the
-  testimonial is missing a stop between "communication skills" and "She made".
+  testimonial was missing a stop between "communication skills" and "She made".
   That is Carmen's supplied text, so it flagged it rather than editing it,
-  which is the right call. She may want to fix it in the thread.
+  which is the right call. **Chase asked for it fixed and the flyer rebuilt**,
+  so the stored `review_quote` now carries the stop and the rebuilt flyer is in
+  the same thread. The quote on the flyer therefore differs from Carmen's
+  original message by exactly one full stop; nothing else was touched.
+
+  Done through Gable's own path rather than around it: `supply_listing_value`
+  recorded the corrected quote, `resume.may_rebuild` reopened the delivered run,
+  and the resume built and posted into that run's thread. The same thing would
+  have happened had Chase typed the corrected quote in the thread himself —
+  `review_quote` is in the tool's field enum. No code change was needed for it.
 
 **Two smaller things fixed on the way out.**
 
