@@ -8,6 +8,7 @@ both have survived onto a real agent's flyer.
 
 from __future__ import annotations
 
+from gable.listings.review import review_values
 from gable.slides import fields
 
 CLIENT_REVIEW_TEXT: list[str] = [
@@ -168,3 +169,100 @@ def test_a_listing_design_still_demands_a_whole_address() -> None:
     )
 
     assert [item.field_name for item in problems] == ["address"]
+
+
+# --- the shapes real submissions actually arrive in -------------------------
+#
+# Read from the live workbook 2026-08-27: five Client Review Posts have ever
+# been submitted, in five different layouts, and the parser read exactly one of
+# them. The other four each cost Carmen a round trip in Slack for a value the
+# form was already carrying. Row 130 cost her two, and was the listing that
+# spent the afternoon being asked for a property photo as well.
+
+
+def test_a_one_word_signature_at_the_end_is_the_client() -> None:
+    """Row 130, Porsher Howard's. The form carried the quote AND the name.
+
+    Gable asked Carmen for both. `_NAME_LINE` needs two capitalised words, so
+    " Sharon" on the last line was invisible and the whole submission fell to
+    "longest paragraph, no name" — which is not usable, so it became a question.
+    """
+    values = review_values(
+        "Client Review Post",
+        'Five star review\n\n"Porsher Howard was the best of all of the realtors I\'ve '
+        "dealt with over the years. She was friendly, courteous and efficient in her "
+        "communication skills. She made our home buying experience so much easier and "
+        'enjoyable. I feel like I have a new friend in this world thanks to Porsher."\n'
+        " Sharon",
+    )
+
+    assert values["client_name"] == "Sharon"
+    # The header is not part of the testimonial, and neither are the quotation
+    # marks: this design draws its own opening and closing glyphs.
+    assert values["review_quote"].startswith("Porsher Howard was the best")
+    assert "Five star review" not in values["review_quote"]
+    assert '"' not in values["review_quote"]
+
+
+def test_a_signature_with_no_blank_line_before_it_is_still_the_client() -> None:
+    """Row 39, Kim Hixson's. One paragraph, the name simply last."""
+    values = review_values(
+        "Client Review Post",
+        "Kim is amazing!! She is personal and down to earth, which is something I "
+        "really loved about working with her. She helped my family find our forever "
+        "home and worked with our special circumstances in mind. I would highly "
+        "recommend Kim and her amazing team.\nYvette",
+    )
+
+    assert values["client_name"] == "Yvette"
+    assert values["review_quote"].startswith("Kim is amazing")
+    assert "Yvette" not in values["review_quote"]
+
+
+def test_a_dashed_signature_is_read_the_way_carmen_types_it() -> None:
+    """Carmen signs quotes "-Sharon" in Slack; agents do the same on the form."""
+    body = (
+        "She answered every question the same day and never made us feel rushed. "
+        "We got the house we actually wanted."
+    )
+    # Hyphen, em dash and en dash, spelled as escapes so the dashes are
+    # unambiguous in source.
+    for signature in ("-Dana", "\u2014 Dana", "\u2013 Dana", "Dana"):
+        values = review_values("Client Review Post", f"{body}\n{signature}")
+        assert values["client_name"] == "Dana", signature
+        assert "Dana" not in values["review_quote"], signature
+
+
+def test_a_name_line_at_the_top_still_wins() -> None:
+    """Row 5, Gina Moore's — the one shape that always worked. Unchanged."""
+    values = review_values(
+        "Client Review Post",
+        "Google review for SRES listing, 29 Maple \nRob Morgan\n\n"
+        "In a simple word, Gina was outstanding! My sister needed to sell, but she "
+        "suffers from dementia. She went the extra mile to make it painless.",
+    )
+
+    assert values["client_name"] == "Rob Morgan"
+    assert values["review_quote"].startswith("In a simple word")
+
+
+def test_an_unsigned_review_is_still_a_question() -> None:
+    """The last sentence of a review must never be mistaken for a signature.
+
+    Rows 49 and 50 are Google exports headed "7/2/2026 • lucyglou". Their last
+    line is the review itself, and a username is not a name to print under a
+    stranger's words, so both still ask. That is the correct outcome.
+    """
+    values = review_values(
+        "Client Review Post",
+        "7/2/2026 • lucyglou\nBought a Townhouse home in 2026.\n\n"
+        "We recently bought a house with Ian and the entire time working with him "
+        "the deal was very pleasant. Highly recommend Ian as your agent!",
+    )
+
+    assert values == {}
+
+
+def test_a_trailing_name_without_a_real_quote_is_not_a_review() -> None:
+    """A signature under a fragment is not something to set in a quote panel."""
+    assert review_values("Client Review Post", "Loved it!\nSharon") == {}

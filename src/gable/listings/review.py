@@ -46,6 +46,28 @@ _ATTRIBUTION: Final[re.Pattern[str]] = re.compile(
     re.DOTALL,
 )
 
+#: A reviewer signing off at the end: "Sharon", "-Sharon", "— Rob Morgan".
+#:
+#: One to three capitalised words on the last line, no sentence punctuation,
+#: optionally introduced by a dash. A SINGLE word counts here and deliberately
+#: does not count for `_NAME_LINE` above: at the top of a submission one
+#: capitalised word is far more likely to be a heading ("Testimonial",
+#: "Review"), while at the end, after a long quote, it is a signature.
+#:
+#: Measured against the five real Client Review submissions on 2026-08-27. Two
+#: of them sign off this way and neither could be read: row 130 ends " Sharon"
+#: and row 39 ends "Yvette". Both were asked about in Slack, and row 130 was
+#: asked for a quote AND a name the form had already carried all along.
+_TRAILING_NAME: Final[re.Pattern[str]] = re.compile(
+    # \u2019 spelled as an escape, for the reason given on _NAME_LINE above.
+    "^[-\u2013\u2014]?\\s*"
+    "(?P<name>[A-Z][a-zA-Z'\u2019\\-]+(?:\\s+[A-Z][a-zA-Z'\u2019\\-]+){0,2})$"
+)
+
+#: Quotation marks a submission wraps its review in. The designs draw their own
+#: quote glyphs, so a pasted pair renders as a second set inside the first.
+_WRAPPING_QUOTES: Final[str] = "\"\u201c\u201d'\u2018\u2019"
+
 #: Below this a "review" is a fragment rather than something worth setting in a
 #: quote panel.
 _MIN_QUOTE_CHARS: Final[int] = 40
@@ -128,8 +150,45 @@ def parse_review(text: str) -> Review:
     # the longest paragraph as the quote and leave the name to be asked about.
     if name_index >= 0:
         body = " ".join(part for part in lines[name_index + 1 :] if part).strip()
-    else:
-        body = max((part for part in text.split("\n\n")), key=len, default="").strip()
-        body = " ".join(body.split())
+        return Review(client_name=name, quote=_unwrapped(body))
 
-    return Review(client_name=name, quote=body)
+    # The quote is the longest paragraph, never the whole submission. Row 130
+    # opens with a "Five star review" header on its own; joining every line
+    # above the signature printed that header inside the testimonial.
+    body = max(text.split("\n\n"), key=len, default="").strip()
+
+    # Nobody named themselves at the top, so look at the bottom of that
+    # paragraph: two of the five real submissions sign off there. Only trailing
+    # text that is purely a short name qualifies, and only when a substantial
+    # quote precedes it, so the last sentence of an unsigned review can never be
+    # mistaken for a signature.
+    body_lines = [line.strip() for line in body.splitlines() if line.strip()]
+    if body_lines:
+        signature = _TRAILING_NAME.match(body_lines[-1])
+        if signature:
+            above = _unwrapped(" ".join(body_lines[:-1]))
+            if len(above) >= _MIN_QUOTE_CHARS:
+                return Review(client_name=signature.group("name").strip(), quote=above)
+
+    return Review(client_name=name, quote=_unwrapped(body))
+
+
+def _unwrapped(quote: str) -> str:
+    """Strip one pair of quotation marks the submission wrapped a review in.
+
+    Args:
+        quote: The review text as it was typed.
+
+    Returns:
+        The same text without a matched surrounding pair. These designs draw
+        their own opening and closing quote glyphs, so a pasted pair renders as
+        a second set inside the first. Only a MATCHED pair is removed: a review
+        that merely ends in a quoted phrase keeps every mark it has.
+
+    Raises:
+        Nothing.
+    """
+    text = " ".join(quote.split()).strip()
+    if len(text) >= 2 and text[0] in _WRAPPING_QUOTES and text[-1] in _WRAPPING_QUOTES:
+        return text[1:-1].strip()
+    return text
