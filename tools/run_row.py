@@ -43,6 +43,7 @@ from gable.sheets import repository as repo
 from gable.sheets.client import ReadsRanges, SheetClient
 from gable.slackapp.client import build_web_client
 from gable.slackapp.outbox import SlackOutboxReconciler, notification_blocks
+from gable.slides.designs import has_hero
 from gable.voice import is_clean
 
 logger = logging.getLogger("gable.run_row")
@@ -289,7 +290,17 @@ def main(argv: list[str] | None = None) -> int:
                     existing.status,
                 )
                 return 2
-            if existing.status == "needs_photo" and not args.hero_photo_url:
+            # A run parked in `needs_photo` on a design that carries no property
+            # photograph is waiting for something that can never arrive. That is
+            # what Porsher Howard's Client Review Post did on 2026-08-27, before
+            # the design's manifest was corrected: this guard, the Slack release
+            # and the ask all agreed on a photo the design has nowhere to put.
+            # Resuming re-runs preflight, which now knows better.
+            if (
+                existing.status == "needs_photo"
+                and not args.hero_photo_url
+                and has_hero(existing.template_label)
+            ):
                 logger.error(
                     "row %d is waiting for a property image; upload the new image in its "
                     "existing Slack thread, or pass --hero-photo-url to answer it here",
