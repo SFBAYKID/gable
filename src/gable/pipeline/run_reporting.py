@@ -627,3 +627,25 @@ def mismatch(wrong: str, stray: list[str]) -> str:
         else f"I built the flyer, but the {stray[0]}."
     )
     return paragraphs(found, "I have not sent it as finished.")
+
+
+def reframe_offer(carries_a_photo: bool) -> str:
+    """The standing offer to redo a flyer from a different photograph.
+
+    Args:
+        carries_a_photo: Whether this design has a property photo well.
+
+    Returns:
+        The offer, or "" for a design with no property photo. Such a design
+        cannot be reframed by sending one, and its face comes from the Head
+        Shots folder rather than the thread -- so the offer sent Carmen looking
+        for a photo that would have gone nowhere, on the same listing where
+        Gable had just spent five messages asking for one.
+
+    Raises:
+        Nothing.
+    """
+    if not carries_a_photo:
+        return ""
+    return "Send another photo here if you want it framed differently and I will redo it."
+

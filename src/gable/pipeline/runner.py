@@ -687,7 +687,7 @@ class Runner:
             noticed = safe(
                 paragraphs(
                     checked.spoken,
-                    "Send another photo here if you want it framed differently and I will redo it.",
+                    run_reporting.reframe_offer(manifest_carries_a_photo),
                 )
             )
             message = run_reporting.delivery_message(

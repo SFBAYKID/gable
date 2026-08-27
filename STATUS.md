@@ -53,17 +53,26 @@ days that a repeat rather than an error was what Carmen saw.
 
 ## What I need from Chase
 
-1. **Deploy this.** Gates pass locally (`ruff`, `mypy --strict`, `pytest`).
-   Not pushed or deployed yet.
-2. **The parked run.** `run-37797a675051` is still in `needs_photo` on
-   `response_row_id` `2cfc6f385f960524`. After deploying it needs a resume to
-   pick up the corrected manifest. Speaking as Gable and resuming a run both
-   need your approval.
-3. **The review quote and the client name.** Carmen supplied the quote in the
-   thread and it was recorded (`supply_listing_value`). The design also resolves
-   a `client_name` field — the sample reads "OLIVIA WILSON" and Carmen's quote
-   is signed "-Sharon". Worth confirming Sharon is what should print there
-   before the flyer goes out.
+Nothing on this one. Deployed (`eda7fe6`, `75e8d94`), the run was resumed, and
+Carmen has the flyer in her thread. The open questions closed themselves:
+
+- **The client name.** The design resolves a `client_name` field whose sample
+  reads "OLIVIA WILSON". Carmen signed her quote "-Sharon", Gable recorded it
+  as `client_name`, and the flyer prints **Sharon**. Confirmed on the render.
+- **The quote's punctuation.** Gable delivered the flyer and said the
+  testimonial is missing a stop between "communication skills" and "She made".
+  That is Carmen's supplied text, so it flagged it rather than editing it,
+  which is the right call. She may want to fix it in the thread.
+
+**Two smaller things fixed on the way out.**
+
+- `tools/run_row.py --resume` refused this run because it sat in `needs_photo`
+  — the state the manifest fix exists to stop producing. A run parked on a
+  design with no photo well is waiting for something that can never arrive.
+- The delivery message ended "send another photo here if you want it framed
+  differently and I will redo it", on the listing where Gable had just asked
+  five times for a photograph the design cannot hold. `run_reporting.reframe_offer`
+  now offers it only where a photo well exists.
 
 ## 2026-08-26 — Brittany Tawney's Open House: forty minutes of work caused by a false positive
 

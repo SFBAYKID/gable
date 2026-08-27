@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
-from gable.pipeline import run_images
+from gable.pipeline import run_images, run_reporting
 
 
 def _never_called(*_args: object) -> bool:
@@ -128,3 +128,13 @@ def test_no_headshot_on_file_does_not_reach_the_placer() -> None:
     )
 
     assert unplaced == ""
+
+
+def test_a_testimonial_is_not_offered_a_reframe_it_cannot_have() -> None:
+    """Delivered flyers used to end by asking for a photo that goes nowhere.
+
+    On Porsher Howard's Client Review Post this arrived directly after five
+    messages asking for a property photograph the design cannot hold.
+    """
+    assert run_reporting.reframe_offer(False) == ""
+    assert "framed differently" in run_reporting.reframe_offer(True)
