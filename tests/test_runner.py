@@ -459,7 +459,7 @@ def test_a_design_without_a_headshot_slot_can_still_be_delivered(
         "UPDATE salespeople SET headshot_url = ? WHERE email = ?",
         ("http://example.invalid/lolo.jpg", "lolo@cornerhouserealty.com"),
     )
-    runner.place_headshot = lambda _file_id, _url, _values: None
+    runner.place_headshot = lambda _file_id, _url, _values, _template: None
 
     result = runner.run(submission)
 
@@ -477,7 +477,7 @@ def test_a_found_headshot_slot_that_fails_to_change_blocks_delivery(
         "UPDATE salespeople SET headshot_url = ? WHERE email = ?",
         ("http://example.invalid/lolo.jpg", "lolo@cornerhouserealty.com"),
     )
-    runner.place_headshot = lambda _file_id, _url, _values: False
+    runner.place_headshot = lambda _file_id, _url, _values, _template: False
 
     result = runner.run(submission)
 
@@ -748,3 +748,44 @@ def test_a_request_type_beginning_with_new_is_not_announced_twice(
 
     assert rec.said[0].startswith("New Listing request from")
     assert "New New" not in rec.said[0]
+
+
+# --- a design that carries no property photograph ---------------------------
+
+#: The literals the live Client Review Post design resolves, read through the
+#: service account 2026-08-27. A testimonial names the agent, the client who
+#: wrote it, and the quote. There is no address, no price, and no house.
+_CLIENT_REVIEW_TEXT: list[str] = [
+    "Sebastion Johnson",
+    "443-499-3839",
+    "sebastian@cornerhouserealty.com",
+    "OLIVIA WILSON",
+    "Review goes here...Working with Corner House Realty was such a smooth experience.",
+]
+
+
+def test_a_testimonial_never_asks_for_a_property_photo(db: sqlite3.Connection) -> None:
+    """Carmen answered "there is no property photo needed" and was asked again.
+
+    Porsher Howard's Client Review Post, 2026-08-27. The design's manifest
+    declared a hero it does not have, so the run paused in `needs_photo` and
+    nothing in Slack could release it -- a missing photo is deliberately not
+    something `build_with_blank_fields` waives. She said so five times.
+    """
+    submission = _submission(rid="rid-testimonial", request_type="Client Review")
+    _record(db, submission)
+    rec = Recorder(slide_text=_CLIENT_REVIEW_TEXT, template_label="Client Review Post")
+    runner = _runner(db, rec)
+    # The whole point: no photo has been supplied and none is coming.
+    runner.hero_photo_url = ""
+    runner.place_photo = lambda *_a: pytest.fail("a testimonial has no hero well")
+    db.execute(
+        "UPDATE salespeople SET headshot_url = ? WHERE email = ?",
+        ("http://example.invalid/porsher.jpg", "lolo@cornerhouserealty.com"),
+    )
+
+    result = runner.run(submission)
+
+    assert not any("photo" in said.lower() for said in rec.said), rec.said
+    row = db.execute("SELECT status FROM runs WHERE run_id = ?", (result.run_id,)).fetchone()
+    assert row[0] != "needs_photo"

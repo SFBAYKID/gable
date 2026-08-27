@@ -23,6 +23,7 @@ from typing import Any, Final
 
 from gable.photos.fit import assess
 from gable.slides import fields, fitting
+from gable.slides.designs import has_hero
 from gable.slides.elements import (
     descendants,
     text_content,
@@ -416,8 +417,13 @@ def analyze(
             )
         )
 
+    # A design that carries no property photograph is not a design missing its
+    # photo frame. Client Review Post has one image well and it is the agent's
+    # face; demanding a "safe main-photo frame" of it reported a defect in a
+    # design that is correct, and there is nothing Carmen could do about it.
+    carries_a_photo = has_hero(template_label)
     frame = find_hero_frame(pages[0], slide_width, slide_height, template_label)
-    if frame is None:
+    if frame is None and carries_a_photo:
         issues.append(
             Issue(
                 "missing_photo_frame",
@@ -429,14 +435,21 @@ def analyze(
         )
         return Report(tuple(issues))
 
-    hero_width_px = max(1, round(frame.width / slide_width * slide_px[0]))
-    hero_height_px = max(1, round(frame.height / slide_height * slide_px[1]))
+    hero_width_px = max(1, round(frame.width / slide_width * slide_px[0])) if frame else 0
+    hero_height_px = max(1, round(frame.height / slide_height * slide_px[1])) if frame else 0
 
     # A sample face is not decorative filler. If this source has a recognisable
     # headshot well, a run without the named agent's file must pause before a
     # copy exists; the final visual model cannot know that a plausible portrait
     # belongs to somebody else.
-    headshots = headshot_frames(pages[0], slide_width, slide_height, frame.object_id)
+    #
+    # With no hero there is nothing to exclude, and excluding one that was never
+    # there is what starved this search on Client Review Post: its single
+    # portrait well was taken as the hero, so the design read as having no face
+    # slot and the sample agent's photograph would have shipped.
+    headshots = headshot_frames(
+        pages[0], slide_width, slide_height, frame.object_id if frame else ""
+    )
     if len(headshots) > 1:
         issues.append(
             Issue(
@@ -630,7 +643,10 @@ def analyze(
                 issues.append(issue)
                 warned.add(issue.code)
 
-    if photo_size is not None:
+    # `hero_width_px` is 0 on a design with no property photograph, and
+    # `assess` would be dividing by a frame that does not exist. A photo
+    # supplied for such a design has nowhere to go and is not measured here.
+    if photo_size is not None and hero_width_px and hero_height_px:
         photo_width, photo_height = photo_size
         photo = assess(photo_width, photo_height, hero_width_px, hero_height_px)
         # Either contained path keeps the complete photograph over a same-photo

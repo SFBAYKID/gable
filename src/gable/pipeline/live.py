@@ -432,13 +432,14 @@ def build_runner(
         official_contact_lookup=lookup_official_profile,
         default_agent_credential=settings.default_agent_credential,
         place_photo=place_photo,
-        place_headshot=lambda fid, url, values: place_headshot(
+        place_headshot=lambda fid, url, values, label: place_headshot(
             slides,
             fid,
             url,
             values,
             refit=refit_headshot,
             slide_px=(settings.slide_width_px, settings.slide_height_px),
+            template_label=label,
         ),
         check_photo=check_photo,
         look_at=look_at,

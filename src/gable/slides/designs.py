@@ -47,8 +47,53 @@ HERO_OBJECT_IDS: Final[dict[str, str]] = {
     "open house": "p1_i105",
     "new listing": "p1_i92",
     "new listing with open house": "p1_i92",
-    "client review post": "p1_i90",
 }
+
+#: Designs that carry NO property photograph at all, so nothing must be asked
+#: for one and no frame may be claimed as a hero.
+#:
+#: Measured through the service account against all six live designs
+#: 2026-08-27. Every real property well on these designs is landscape and wide:
+#: New Listing 1.52 at 67% of the slide, New Listing with Open House 2.20 at
+#: 93%, Open House 1.68 at 74%, Sold 1.69 at 100%, Under Contract 1.60 at 100%.
+#: Client Review Post has exactly one image well, `p1_i90` at 5.55x9.49in --
+#: width-over-height 0.58, portrait, 49% wide. That is a headshot by the band
+#: `hero._HEADSHOT_ASPECT` records from CLAUDE.md 4.3 item 13, and it is the
+#: same 0.58 as Open House's real headshot.
+#:
+#: `p1_i90` was listed in HERO_OBJECT_IDS above until 2026-08-27, which claimed
+#: the agent's portrait well as the property-photo well. Two things followed.
+#: Gable asked for a property photograph that has nowhere to go -- Carmen and
+#: Chase said "there is no property photo needed for this request" five times on
+#: Porsher Howard's testimonial and the run could not be unblocked from Slack at
+#: all. And had a house photograph ever arrived, it would have been placed over
+#: the agent's face: this was the ONLY one of the six designs where
+#: `headshot_frames` returned nothing, because the hero claim consumed its one
+#: portrait well before the headshot search could see it.
+#:
+#: A testimonial post is a quote and the agent who earned it. It has no
+#: property. Anything added here must be measured the same way, against the
+#: live file, not reasoned about from the design's name.
+NO_HERO_DESIGNS: Final[frozenset[str]] = frozenset({"client review post"})
+
+
+def has_hero(template_label: str) -> bool:
+    """Whether this design carries a property photograph at all.
+
+    Args:
+        template_label: The Drive file name, in any case or spacing.
+
+    Returns:
+        False for a design in `NO_HERO_DESIGNS`, True for everything else --
+        an unrecorded design is assumed to carry a photo, which is the
+        conservative reading, because asking for a photo a design cannot hold
+        is recoverable and silently skipping one it needs is not.
+
+    Raises:
+        Nothing.
+    """
+    return " ".join(template_label.split()).casefold() not in NO_HERO_DESIGNS
+
 
 #: Picture-bearing layers that must be deleted ALONGSIDE the well, because the
 #: design's sample photograph is split across more than one shape and removing

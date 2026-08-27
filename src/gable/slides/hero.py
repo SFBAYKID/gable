@@ -40,7 +40,7 @@ from dataclasses import dataclass
 from typing import Any, Final
 
 from gable.slides import fields
-from gable.slides.designs import HERO_OBJECT_IDS
+from gable.slides.designs import HERO_OBJECT_IDS, has_hero
 from gable.slides.elements import text_content
 from gable.slides.framing import clear_of_neighbours
 
@@ -395,19 +395,33 @@ def find_hero_frame(
         page: A `slides[n]` entry from a presentations.get response.
         slide_width: Slide width in EMU.
         slide_height: Slide height in EMU.
-        template_label: The design's name. When it matches `HERO_OBJECT_IDS`
-            the recorded shape is re-measured and used; anything unrecorded,
-            missing, or implausible falls through to the geometric search.
+        template_label: The design's name. A design in `designs.NO_HERO_DESIGNS`
+            has no property photograph and returns None immediately. When the
+            name matches `HERO_OBJECT_IDS` the recorded shape is re-measured and
+            used; anything unrecorded, missing, or implausible falls through to
+            the geometric search.
 
     Returns:
-        The frame, or None when no candidate is convincing. None means ask,
-        never guess: putting the photo in the wrong frame hides the design
-        behind it or buries the house under the copy panel.
+        The frame, or None when no candidate is convincing OR when the design
+        carries no property photograph at all. None means ask, never guess:
+        putting the photo in the wrong frame hides the design behind it, buries
+        the house under the copy panel, or -- on a testimonial -- covers the
+        agent's own face with a photograph of a building. Callers that must
+        tell "no hero on this design" from "I could not find the hero" ask
+        `designs.has_hero` rather than reading None as a fault.
 
     Raises:
         Nothing.
     """
     if slide_width <= 0 or slide_height <= 0:
+        return None
+
+    # A design that carries no property photograph has no hero, and the
+    # geometric search below would still find one: Client Review Post's single
+    # portrait well is 49% wide and sits in the top half, which satisfies every
+    # structural rule here. It is the agent's face. See `designs.NO_HERO_DESIGNS`
+    # for the measurement, and for the flyer this would otherwise have built.
+    if template_label and not has_hero(template_label):
         return None
 
     recorded = HERO_OBJECT_IDS.get(" ".join(template_label.split()).casefold(), "")

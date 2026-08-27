@@ -338,6 +338,7 @@ def place_headshot(
     agent_values: dict[str, str] | None = None,
     refit: Callable[[str, int, int], str] = lambda existing, _w, _h: existing,
     slide_px: tuple[int, int] = (1080, 1350),
+    template_label: str = "",
 ) -> bool | None:
     """Put the agent's own face on the flyer.
 
@@ -354,6 +355,10 @@ def place_headshot(
             filled agent card beside an existing Slides image.
         refit: Crops the source once to the measured frame and republishes it.
         slide_px: Pixel dimensions corresponding to the Slides page.
+        template_label: The design's name, so a design carrying no property
+            photograph does not exclude its own face well as the hero. Empty
+            keeps the geometric search, which is correct for the five designs
+            whose hero is a wide landscape band.
 
     Returns:
         True when Google accepted the replacement, None when the design has no
@@ -380,13 +385,20 @@ def place_headshot(
         page = pages[0]
         slide_w = presentation.get("pageSize", {}).get("width", {}).get("magnitude", 0)
         slide_h = presentation.get("pageSize", {}).get("height", {}).get("magnitude", 0)
-        # No template label here, so this stays on the geometric search. The
-        # frame is used only to exclude the hero from headshot candidates, and
-        # on all six designs the hero is a 99-100% wide band while a headshot
-        # well must be 10-60% wide, so the exclusion is redundant for them.
-        # Client Review Post is the one design whose hero is narrow enough to
-        # matter, and its search already resolves without a hint.
-        hero = find_hero_frame(page, slide_w, slide_h)
+        # The frame is used only to exclude the hero from headshot candidates.
+        # On the five designs that carry a property photograph the hero is a
+        # wide landscape band -- 67% to 100% of the slide, aspect 1.52 to 2.20,
+        # measured 2026-08-27 -- and a headshot well is portrait, so the
+        # exclusion is redundant for them either way.
+        #
+        # It is not redundant for Client Review Post, and the comment that used
+        # to sit here had this exactly backwards: it noted that design's hero was
+        # "narrow enough to matter" and concluded the geometric search resolved
+        # it correctly. What the search resolved was the agent's own portrait
+        # well, 0.58 aspect, which then got excluded as the hero and left this
+        # function returning None on the one design whose entire subject is the
+        # face. Passing the label lets `find_hero_frame` say there is no hero.
+        hero = find_hero_frame(page, slide_w, slide_h, template_label)
         frames = headshot_frames(
             page,
             slide_w,

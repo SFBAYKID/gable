@@ -22,6 +22,7 @@ from gable.pipeline import (
     people,
     research_gate,
     resume_claim,
+    run_images,
     run_reporting,
     run_speech,
     run_values,
@@ -41,11 +42,6 @@ from gable.slides import manifest as template_manifest
 from gable.voice import paragraphs, safe
 
 logger = logging.getLogger("gable.runner")
-
-
-def _ignore_headshot(_file_id: str, _url: str, _values: dict[str, str]) -> None:
-    """Default test seam for designs without a live Slides client."""
-    return
 
 
 @dataclass
@@ -98,7 +94,9 @@ class Runner:
     place_photo: Callable[[str, str, str, str], bool] = lambda _run, _fid, _url, _template: False
     #: Puts the agent's own face where the sample face was. None means the
     #: design has no recognisable slot; False means a known slot was unsafe.
-    place_headshot: Callable[[str, str, dict[str, str]], bool | None] = _ignore_headshot
+    place_headshot: Callable[[str, str, dict[str, str], str], bool | None] = (
+        run_images.ignore_headshot
+    )
     #: Proves that the photo URL is usable for the target slot. The live
     #: builder supplies the network checker; the runner itself performs no
     #: hidden I/O.
@@ -359,6 +357,12 @@ class Runner:
             headshot_for=self.headshot_for,
         )
 
+        # The manifest is the authority on whether this design carries a property
+        # photograph; `designs.NO_HERO_DESIGNS` records the measurement behind it.
+        manifest_carries_a_photo = (
+            template_manifest.manifest_for(template_label).find("hero_photo") is not None
+        )
+
         self.progress("is measuring the design...")
         measured = self.preflight_template(
             template_id,
@@ -412,10 +416,20 @@ class Runner:
         # Held, outstanding, or refused -- see `Needs.note_photo`. A repeated
         # blocker says "I have the property photo" so it does not read as though
         # the upload that just arrived went nowhere.
-        outstanding.note_photo(
-            self.hero_photo_url,
-            rejected=store.photo_was_rejected(self.connection, run_id),
-        )
+        #
+        # Asked ONLY of a design that has somewhere to put one. This call was
+        # unconditional until 2026-08-27, while the build below already guarded
+        # its own hero work with `if hero_slot:` -- so the ask and the build
+        # disagreed, and on Client Review Post the ask won. Carmen answered "there
+        # is no property photo needed for this request", Gable asked again, and
+        # nothing in Slack could release it: a missing photo is deliberately not
+        # something `build_with_blank_fields` waives, and correctly so for a
+        # design that really does have a photo well.
+        if manifest_carries_a_photo:
+            outstanding.note_photo(
+                self.hero_photo_url,
+                rejected=store.photo_was_rejected(self.connection, run_id),
+            )
 
         # Everything Carmen could answer goes out in one message, once. She
         # replies once, and the next thing she sees is the link.
@@ -569,40 +583,25 @@ class Runner:
                 output_url=output_url,
             )
 
-        self.progress("is placing the photo...")
-        placed = self.place_photo(run_id, output_id, self.hero_photo_url, template_label)
-        # The sample face is the most visible thing Gable gets wrong: one agent's
-        # name beside another agent's photograph. Best effort — a design with no
-        # headshot frame is still a deliverable flyer.
-        headshot_url = values.get("headshot", "")
-        headshot_failed = False
-        if placed and headshot_url:
-            self.progress("is putting the agent's face on it...")
-            headshot_result = self.place_headshot(output_id, headshot_url, values)
-            if headshot_result is True:
-                logger.info("replaced the sample headshot for run %s", run_id)
-            elif headshot_result is False:
-                headshot_failed = True
-                logger.error("could not replace the sample headshot for run %s", run_id)
-            else:
-                logger.info("the design has no recognised headshot slot for run %s", run_id)
-        # An image the design calls for and did not get. The photo is the point
-        # of the flyer, and a stranger's face is worse than none, so either one
-        # keeps the draft for a retry and never calls it finished.
-        unplaced = ""
-        if not placed:
-            unplaced = "could not get the photo onto it"
-        elif headshot_failed:
-            unplaced = "could not replace the sample headshot with the agent's own photo"
+        # Both photographs, and what to say when one did not land. The stage
+        # lives in `run_images` so the difference between "this design has no
+        # property photo" and "I could not place the property photo" is one
+        # testable decision rather than three flags in the middle of a build.
+        unplaced = run_images.place_all(
+            run_id,
+            output_id,
+            template_label,
+            self.hero_photo_url,
+            values,
+            carries_a_photo=manifest_carries_a_photo,
+            place_photo=self.place_photo,
+            place_headshot=self.place_headshot,
+            progress=self.progress,
+        )
         if unplaced:
             return self._outcome(
                 run_id,
-                safe(
-                    paragraphs(
-                        f"I built the flyer, but I {unplaced}.",
-                        "I have not sent it as finished.",
-                    )
-                ),
+                safe(run_images.unfinished(unplaced)),
                 result,
                 status="needs_review",
                 detail=f"the flyer was left unfinished: it {unplaced}",

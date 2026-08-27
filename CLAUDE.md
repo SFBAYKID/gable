@@ -328,6 +328,25 @@ call on 2026-08-12:
     is why `template_audits.blocker_kind` exists and why a `visual` refusal does
     not stop a listing — see the reversing row in `DECISIONS.md`.
 
+15. **Not every design carries a property photograph, and a portrait well is a
+    face.** Measured through the service account against all six live designs on
+    2026-08-27. Every real property well is landscape and wide: New Listing 1.52
+    at 67% of the slide, New Listing with Open House 2.20 at 93%, Open House 1.68
+    at 74%, Sold 1.69 at 100%, Under Contract 1.60 at 100%. Client Review Post
+    has exactly one image well, 5.55x9.49in, width-over-height **0.58** — inside
+    item 13's headshot band, and the same 0.58 as Open House's real headshot. It
+    is a testimonial: a quote, the client who wrote it, and the agent who earned
+    it. There is no property. That well had been recorded as the design's hero,
+    which asked Carmen for a property photograph five times on Porsher Howard's
+    post and parked the run where nothing in Slack could release it — and would
+    have put a photograph of a building over the agent's own face had one ever
+    arrived. `slides/designs.NO_HERO_DESIGNS` holds the list; anything added to
+    it must be measured against the live file, not reasoned about from the
+    design's name. The general rule the case proves: **when a check has both an
+    "ask" side and a "build" side, they must read the same source.** Here the
+    build already guarded its hero work and the ask did not, so they disagreed
+    and the ask won.
+
 Each of these cost a real failure to learn. They are in the decision log with
 their evidence.
 

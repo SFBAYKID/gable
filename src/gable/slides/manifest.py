@@ -106,11 +106,22 @@ MANIFESTS: Final[dict[str, Manifest]] = {
     # A testimonial has no property, so no address and no price. Without its own
     # entry it fell to DEFAULT_LISTING, which requires an address, and row 5 was
     # asked to separate the street, city, state and ZIP of "Google Review, SRES
-    # Listing 29 Maple". What it must not ship without is the agent it belongs
-    # to and the photograph its layout is built around.
+    # Listing 29 Maple".
+    #
+    # It has no property PHOTOGRAPH either, which this entry got wrong until
+    # 2026-08-27: it listed `_HERO` and called it "the photograph its layout is
+    # built around". Measured against the live file, the design has exactly one
+    # image well -- 5.55x9.49in, width-over-height 0.58, portrait -- and that is
+    # the agent's headshot, the same shape as Open House's real headshot. The
+    # post is a quote and the person who earned it.
+    #
+    # Declaring a hero here is what asked Carmen for a property photo on
+    # Porsher Howard's testimonial and kept asking after she answered, because
+    # `runner` reads this manifest to decide whether to ask at all. See
+    # `designs.NO_HERO_DESIGNS`.
     "Client Review Post": Manifest(
         "Client Review Post",
-        (_AGENT, _PHONE, _EMAIL, _HERO, _HEADSHOT),
+        (_AGENT, _PHONE, _EMAIL, _HEADSHOT),
     ),
 }
 

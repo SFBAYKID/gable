@@ -15,7 +15,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from gable.slides.designs import HERO_OBJECT_IDS, extra_deletions
+from gable.slides.designs import HERO_OBJECT_IDS, extra_deletions, has_hero
 from gable.slides.hero import find_hero_frame
 
 SLIDE_WIDTH = 10287000
@@ -112,15 +112,44 @@ def test_a_sliver_inside_the_well_is_not_a_guide() -> None:
 
 
 def test_every_live_design_still_has_a_recorded_well() -> None:
-    """The six designs currently in Generic Templates, by their exact names."""
+    """The five designs that carry a property photograph, by their exact names.
+
+    Client Review Post is deliberately absent: it is a testimonial and has no
+    property photograph. Its one image well is the agent's portrait, and listing
+    it here claimed that well as the hero. See `NO_HERO_DESIGNS`.
+    """
     assert set(HERO_OBJECT_IDS) == {
         "sold",
         "under contract",
         "open house",
         "new listing",
         "new listing with open house",
-        "client review post",
     }
+
+
+def test_a_design_with_no_property_photograph_has_no_hero() -> None:
+    """Client Review Post's one well is a face, not a house.
+
+    Measured live 2026-08-27: the design's single image well is 5.55x9.49in,
+    width-over-height 0.58. Every real property well on the other five designs
+    is landscape, 1.52 to 2.20. The geometric search still finds this portrait
+    -- 49% of the slide wide, in the top half, well over the area floor -- so
+    refusing it has to be explicit or Gable puts a building over the agent.
+    """
+    portrait = _shape("p1_i90", 5212080, 1627632, 5075808, 8677656)
+    page: dict[str, Any] = {"pageElements": [LOGO, portrait]}
+
+    assert find_hero_frame(page, SLIDE_WIDTH, SLIDE_HEIGHT, "Client Review Post") is None
+    # Only for that design, and only when the name is known.
+    assert find_hero_frame(page, SLIDE_WIDTH, SLIDE_HEIGHT, "Sold") is not None
+
+
+def test_the_heroless_check_ignores_case_and_spacing() -> None:
+    """The Drive file name is what arrives, not a normalised key."""
+    assert not has_hero("  client   review   post ")
+    assert not has_hero("CLIENT REVIEW POST")
+    assert has_hero("Sold")
+    assert has_hero("A Design Nobody Has Measured")
 
 
 def test_an_unknown_design_falls_through_rather_than_guessing() -> None:
