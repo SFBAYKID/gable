@@ -23,12 +23,11 @@ Does not handle: posting or persistence.
 
 from __future__ import annotations
 
-import re
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Final
 
-from gable.listings.address import STATE_CODES
+from gable.listings.address import incomplete_address as incomplete_address
 from gable.listings.intake import Question
 
 #: Research names the same value differently from the form. Anything absent
@@ -310,55 +309,6 @@ class Needs:
         if self.blocked_status:
             return self.blocked_status
         return "needs_photo" if self.photo else "needs_info"
-
-
-#: A ZIP anywhere in the string. The shape check wants it at the end; naming
-#: which of the two is wrong needs to know whether it is there at all.
-_ZIP_ANYWHERE: Final[re.Pattern[str]] = re.compile(r"\b\d{5}(?:-\d{4})?\b")
-
-
-def incomplete_address(supplied: str) -> str:
-    """Ask for the rest of an address that was supplied but cannot be printed.
-
-    Not "I still need the address". Gable opens every listing thread by naming
-    the property, so on 2026-08-19 it announced "4216 Norfolk Avenue, Baltimore
-    21216" and then told Carmen it still needed the address — which reads as a
-    fault in Gable and sends her looking for something she had already sent.
-    The check itself is right: that address has no state, and the design prints
-    street, city, state and ZIP.
-
-    Args:
-        supplied: The address as the request gives it, already tidied.
-
-    Returns:
-        One sentence naming what is missing and showing what is in hand.
-
-    Raises:
-        Nothing.
-    """
-    address = " ".join(supplied.split())
-    tokens = {word.strip(",").upper() for word in address.split()}
-    # The value reaching here is already tidied, and `address.tidy` folds a
-    # state the agent wrote out into its code, so a missing code is a genuinely
-    # missing state rather than one this check could not read. That was not true
-    # on 2026-08-21: "Bowie Maryland 20716" was told it had no state, twice.
-    has_state = bool(tokens & STATE_CODES)
-    has_zip = bool(_ZIP_ANYWHERE.search(address))
-    if not has_state and not has_zip:
-        fault = "it has no state or ZIP code"
-    elif not has_state:
-        fault = "it has no state"
-    elif not has_zip:
-        # Named for what it is. "Not in the order the design prints" sent
-        # somebody looking for a formatting fault in an address that was simply
-        # missing its last five digits.
-        fault = "it has no ZIP code"
-    else:
-        fault = "it is not in the street, city, state and ZIP order the design prints"
-    return (
-        f"I have this listing at {address}, but {fault}, so I cannot print it on the "
-        "flyer. Send me the whole address and I will build it."
-    )
 
 
 #: The parser can prove who is listing and who is hosting, but the generic

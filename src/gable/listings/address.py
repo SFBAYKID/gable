@@ -421,3 +421,78 @@ def tidy(address: str) -> str:
     text = " ".join(parts)
 
     return re.sub(r"\s+,", ",", re.sub(r"(,\s*)+", ", ", text)).strip().strip(",").strip()
+
+
+#: State codes that are also ordinary English words. Only these need a position
+#: test; every other code is unambiguous wherever it appears.
+_WORD_LIKE_STATE_CODES: Final[frozenset[str]] = frozenset(
+    {"OR", "IN", "ME", "OK", "HI", "OH", "AS", "LA", "PA", "DE"}
+)
+
+#: A ZIP anywhere in the string. The shape check wants it at the end; naming
+#: which of the two is wrong needs to know whether it is there at all.
+ZIP_ANYWHERE: Final[re.Pattern[str]] = re.compile(r"\b\d{5}(?:-\d{4})?\b")
+
+
+def incomplete_address(supplied: str) -> str:
+    """Ask for the rest of an address that was supplied but cannot be printed.
+
+    Not "I still need the address", and not "what is the full address?". Gable
+    opens every listing thread by naming the property, so on 2026-08-19 it
+    announced "4216 Norfolk Avenue, Baltimore 21216" and then told Carmen it
+    still needed the address — which reads as a fault in Gable and sends her
+    looking for something she had already sent.
+
+    Args:
+        supplied: The address as the request gives it, already tidied.
+
+    Returns:
+        One sentence naming what is missing and showing what is in hand.
+
+    Raises:
+        Nothing.
+
+    Note:
+        This lives here rather than in `pipeline.needs` because two separate
+        checks reach it — the batched ask and `slides.manifest.validate` — and
+        for a while only one of them used this wording. Frank Lancelotta III's
+        listing on 2026-08-28 got the good sentence at 11:55 and the vague one
+        at 13:55: "The address reads '3500 Hawks Hill Rd, Lot #1 & OR Lot # 2',
+        and I could not separate the street, city, state and ZIP confidently.
+        What is the full address?" Chase, reading it: "Why are you asking for
+        the address, it's already in the thread." It was — Gable had printed it
+        twice itself. Asking for the whole thing hides which part is missing.
+    """
+    address = " ".join(supplied.split())
+    words = [word.strip(",").upper() for word in address.split()]
+    # The value reaching here is already tidied, and `tidy` folds a state the
+    # agent wrote out into its code, so a missing code is a genuinely missing
+    # state rather than one this check could not read. That was not true on
+    # 2026-08-21: "Bowie Maryland 20716" was told it had no state, twice.
+    found = set(words) & STATE_CODES
+    # A handful of state codes are also ordinary English words, and one of them
+    # joined two lot numbers: "3500 Hawks Hill Rd, Lot #1 & OR Lot # 2" was read
+    # as being in Oregon, so an address with no city, state or ZIP was reported
+    # as merely missing its ZIP. Those codes count only where a state can sit —
+    # at the end, as in "Portland, OR 97201". An unambiguous code still counts
+    # anywhere, because a MISPLACED state is present and the sentence about
+    # ordering is the honest one for it.
+    tail = set(words[-3:])
+    found -= {code for code in _WORD_LIKE_STATE_CODES if code not in tail}
+    has_state = bool(found)
+    has_zip = bool(ZIP_ANYWHERE.search(address))
+    if not has_state and not has_zip:
+        fault = "it has no state or ZIP code"
+    elif not has_state:
+        fault = "it has no state"
+    elif not has_zip:
+        # Named for what it is. "Not in the order the design prints" sent
+        # somebody looking for a formatting fault in an address that was simply
+        # missing its last five digits.
+        fault = "it has no ZIP code"
+    else:
+        fault = "it is not in the street, city, state and ZIP order the design prints"
+    return (
+        f"I have this listing at {address}, but {fault}, so I cannot print it on the "
+        "flyer. Send me the whole address and I will build it."
+    )

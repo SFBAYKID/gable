@@ -228,3 +228,24 @@ def test_a_usable_photo_is_held_and_a_missing_one_is_asked_for() -> None:
     missing = needs.Needs()
     missing.note_photo("", rejected=False)
     assert (missing.photo, missing.photo_in_hand) == (True, False)
+
+
+def test_a_conjunction_between_lot_numbers_is_not_a_state() -> None:
+    """Frank Lancelotta III's listing, 2026-08-28.
+
+    "3500 Hawks Hill Rd, Lot #1 & OR Lot # 2" has no city, no state and no ZIP.
+    The "OR" joining its two lots matched Oregon, so Gable reported the address
+    as merely missing its ZIP — understating what it actually needed back.
+    """
+    said = needs.incomplete_address("3500 Hawks Hill Rd, Lot #1 & OR Lot # 2")
+
+    assert "no state or ZIP code" in said
+    # It shows what it holds rather than asking for the address from scratch.
+    assert "3500 Hawks Hill Rd" in said
+
+
+def test_a_real_oregon_address_still_has_its_state() -> None:
+    """The position test must not cost a genuine OR, IN, ME, OK, HI or OH."""
+    said = needs.incomplete_address("123 Main St, Portland, OR")
+
+    assert "no state" not in said

@@ -22,6 +22,7 @@ import re
 from dataclasses import dataclass
 from typing import Final
 
+from gable.listings.address import incomplete_address
 from gable.listings.address import tidy as tidy_address
 
 #: Field kinds, which decide how a value is checked.
@@ -264,11 +265,15 @@ def validate(manifest: Manifest, values: dict[str, str]) -> list[Problem]:
             continue
 
         if slot.kind == ADDRESS and not ADDRESS_SHAPE.match(value):
+            # The same sentence the batched ask uses. This used to say "I could
+            # not separate the street, city, state and ZIP confidently. What is
+            # the full address?" — vague about which part was missing, and
+            # asking for the whole thing back when Gable had already printed the
+            # street twice in the same thread. See `address.incomplete_address`.
             problems.append(
                 Problem(
                     slot.name,
-                    f"The address reads {value!r}, and I could not separate the street, "
-                    "city, state and ZIP confidently. What is the full address?",
+                    incomplete_address(value),
                     releasable=_is_printable_partial_address(value),
                 )
             )
