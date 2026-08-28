@@ -25,20 +25,25 @@ never become an agent's direct line.
 
 from __future__ import annotations
 
-import html
 import json
-import re
 import urllib.parse
 import urllib.request
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
-from html.parser import HTMLParser
 from typing import Final
 
 from gable.agents.contacts import Contact
+from gable.agents.names import clean_name
+from gable.agents.profile_page import (
+    OFFICIAL_PAGES_API,
+    Fetch,
+    _fetch,
+    _official_url,
+    _ProfileParser,
+    _title,
+    _unique,
+)
 
-OFFICIAL_HOST: Final[str] = "cornerhouserealty.com"
-OFFICIAL_PAGES_API: Final[str] = f"https://{OFFICIAL_HOST}/wp-json/wp/v2/pages"
 WORKBOOK_SOURCE: Final[str] = "contact_workbook"
 WEBSITE_SOURCE: Final[str] = "official_website"
 #: A credential that comes from the configured brokerage-wide default rather
@@ -46,18 +51,14 @@ WEBSITE_SOURCE: Final[str] = "official_website"
 #: which of the two answered, and so an audit can find every flyer that leaned
 #: on the default.
 BROKERAGE_SOURCE: Final[str] = "brokerage_default"
-_TIMEOUT_SECONDS: Final[int] = 20
 #: How many same-named candidate pages are worth reading before giving up. Two
 #: is the real case — a profile and its open-houses twin — and the cap bounds a
 #: pathological search result rather than fetching the whole site.
 _MAX_CANDIDATE_PROFILES: Final[int] = 3
-_MAX_RESPONSE_BYTES: Final[int] = 2 * 1024 * 1024
 #: Punctuation that can sit at the edge of a written name without being part of
 #: it — the comma in "Caleb Olawuyi, Realtor" is the case that reached Carmen.
 _EDGE_PUNCTUATION: Final[str] = ",.;:!?()[]{}\"'"
-_TITLE_TAG: Final[re.Pattern[str]] = re.compile(r"<[^>]+>")
 
-Fetch = Callable[[str], tuple[bytes, str]]
 
 
 @dataclass(frozen=True, slots=True)
@@ -130,11 +131,6 @@ def _name_words(value: str) -> list[str]:
     "Smith-Jones" stay one word each and stay distinct from "OBrien".
     """
     return [word for word in (w.strip(_EDGE_PUNCTUATION) for w in _name_key(value).split()) if word]
-
-
-def _clean_name(value: str) -> str:
-    """Collapse whitespace without changing any submitted spelling."""
-    return " ".join(value.split())
 
 
 def _phone_is_usable(value: str) -> bool:
@@ -293,13 +289,13 @@ def names_agree(submitted: str, contact: Contact) -> bool:
     Raises:
         Nothing.
     """
-    filed = _clean_name(f"{contact.first_name} {contact.last_name}")
+    filed = clean_name(f"{contact.first_name} {contact.last_name}")
     if not filed or not submitted.strip():
         return False
     return _name_key(filed) == _name_key(submitted) or _is_branded_form_of(submitted, filed)
 
 
-def unidentified_pause(name: str) -> str:
+def unidentified_pause(name: str, roster_size: int = 0) -> str:
     """Say that nothing on the request establishes which agent it is for.
 
     The form's email field holds whoever filled the form in. On 2026-08-19 one
@@ -308,10 +304,37 @@ def unidentified_pause(name: str) -> str:
     no row for that name either, there is no evidence left, and picking a
     same-named profile off the website would be guessing whose phone number
     goes on a client's flyer.
+
+    Args:
+        name: The agent named on the request.
+        roster_size: How many agents the read that just happened returned,
+            spoken so that a repeat is visibly a fresh check.
+
+    Returns:
+        The sentence to post.
+
+    Raises:
+        Nothing.
+
+    Note:
+        Halim Joseph's request was refused four times in identical words on
+        2026-08-28. Every refusal was TRUE — he reached Agents Contact
+        Information at 13:48:48 and the last refusal went out at 13:47:16 — but
+        Carmen had answered "I fixed that. Please run again." and got the same
+        sentence back, so she could not tell a fresh read from a stored one. She
+        gave up ninety-two seconds before it would have worked. Saying what the
+        read returned is what makes the difference visible: "40 agents" tells
+        her the edit has not landed, which is the fact she actually needed.
     """
+    read = (
+        f"I read Agents Contact Information again just now — {roster_size} agents — "
+        f"and there is still no row for {name}. "
+        if roster_size
+        else f"There is no row for {name} in Agents Contact Information. "
+    )
     return (
         f"{name} — the email on this request belongs to whoever submitted the form rather "
-        f"than to {name}, and there is no row for {name} in Agents Contact Information, so "
+        f"than to {name}. {read}"
         "I have nothing that proves which agent this is for. Add them to Agents Contact "
         "Information, then tell me to run again."
     )
@@ -370,7 +393,7 @@ def validate_contact(
     Raises:
         Nothing. Lookup failures are normal ``needs_info`` outcomes.
     """
-    name = _clean_name(submitted_name)
+    name = clean_name(submitted_name)
     email = submitted_email.strip().lower()
     label = name or email or "This request"
     if not name or not email:
@@ -388,7 +411,7 @@ def validate_contact(
                     "the submitted email address conflicts with the contact-workbook row.",
                 )
             )
-        workbook_name = _clean_name(f"{workbook.first_name} {workbook.last_name}")
+        workbook_name = clean_name(f"{workbook.first_name} {workbook.last_name}")
         if workbook_name and _name_key(workbook_name) != _name_key(name):
             # One missing workbook name component is incomplete, not proof of a
             # different person.  A populated component that disagrees is a real
@@ -508,120 +531,6 @@ def validate_contact(
     )
 
 
-def _official_url(value: str) -> bool:
-    """Return whether a URL is HTTPS on the one approved brokerage domain."""
-    parsed = urllib.parse.urlparse(value)
-    host = (parsed.hostname or "").lower()
-    return parsed.scheme == "https" and host.removeprefix("www.") == OFFICIAL_HOST
-
-
-def _fetch(url: str) -> tuple[bytes, str]:
-    """Fetch one bounded official-site response with an explicit timeout."""
-    request = urllib.request.Request(
-        url,
-        headers={
-            "Accept": "application/json,text/html",
-            "User-Agent": "Gable/1.0 contact prerequisite check",
-        },
-    )
-    # urllib contract: https://docs.python.org/3/library/urllib.request.html#urllib.request.urlopen
-    with urllib.request.urlopen(request, timeout=_TIMEOUT_SECONDS) as response:
-        final_url = str(response.geturl())
-        if not _official_url(final_url):
-            raise ValueError("the official-site request redirected off the approved domain")
-        data = response.read(_MAX_RESPONSE_BYTES + 1)
-    if len(data) > _MAX_RESPONSE_BYTES:
-        raise ValueError("the official-site response was unexpectedly large")
-    return data, final_url
-
-
-def _decode_cloudflare_email(encoded: str) -> str:
-    """Decode one Cloudflare ``data-cfemail`` value, or return empty."""
-    try:
-        raw = bytes.fromhex(encoded)
-        if len(raw) < 2:
-            return ""
-        key = raw[0]
-        return bytes(value ^ key for value in raw[1:]).decode("utf-8").strip().lower()
-    except (UnicodeDecodeError, ValueError):
-        return ""
-
-
-class _ProfileParser(HTMLParser):
-    """Extract only the agent profile's contact dropdown, excluding the footer."""
-
-    def __init__(self) -> None:
-        """Create an empty, depth-aware profile parser."""
-        super().__init__(convert_charrefs=True)
-        self._div_depth = 0
-        self._contact_depth = 0
-        self.emails: list[str] = []
-        self.phones: list[str] = []
-        self.title_parts: list[str] = []
-        self._title_depth = 0
-        self._job_depth = 0
-
-    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
-        """Collect email and phone attributes inside the profile contact block."""
-        attributes = dict(attrs)
-        if tag == "div":
-            self._div_depth += 1
-            classes = set((attributes.get("class") or "").split())
-            if "contact-button__dropdown" in classes and not self._contact_depth:
-                self._contact_depth = self._div_depth
-            if "cbl__widget--job_title" in classes and not self._job_depth:
-                self._job_depth = self._div_depth
-            if self._job_depth and "cb-title" in classes and not self._title_depth:
-                self._title_depth = self._div_depth
-        if not self._contact_depth:
-            return
-        href = html.unescape(attributes.get("href") or "").strip()
-        if href.lower().startswith("mailto:"):
-            email = urllib.parse.unquote(href[7:]).split("?", 1)[0].strip().lower()
-            if email:
-                self.emails.append(email)
-        if href.lower().startswith("tel:"):
-            phone = urllib.parse.unquote(href[4:]).strip()
-            if phone:
-                self.phones.append(phone)
-        encoded = attributes.get("data-cfemail") or ""
-        decoded = _decode_cloudflare_email(encoded)
-        if decoded:
-            self.emails.append(decoded)
-
-    def handle_endtag(self, tag: str) -> None:
-        """Leave the contact scope at the matching closing div."""
-        if tag != "div":
-            return
-        if self._contact_depth == self._div_depth:
-            self._contact_depth = 0
-        if self._title_depth == self._div_depth:
-            self._title_depth = 0
-        if self._job_depth == self._div_depth:
-            self._job_depth = 0
-        self._div_depth = max(0, self._div_depth - 1)
-
-    def handle_data(self, data: str) -> None:
-        """Collect visible title text only inside the profile title element."""
-        if self._title_depth and data.strip():
-            self.title_parts.append(data.strip())
-
-
-def _unique(values: list[str]) -> list[str]:
-    """Return non-empty values once, preserving source order."""
-    return list(dict.fromkeys(value for value in values if value))
-
-
-def _title(value: object) -> str:
-    """Read a WordPress rendered title as plain text."""
-    if not isinstance(value, Mapping):
-        return ""
-    rendered = value.get("rendered", "")
-    if not isinstance(rendered, str):
-        return ""
-    return _clean_name(html.unescape(_TITLE_TAG.sub("", rendered)))
-
-
 def lookup_official_profile(
     agent_name: str,
     agent_email: str,
@@ -651,7 +560,7 @@ def lookup_official_profile(
     Raises:
         Nothing. Network and parsing failures become a safe lookup problem.
     """
-    name = _clean_name(agent_name)
+    name = clean_name(agent_name)
     email_address = agent_email.strip().lower()
     if not name or not email_address:
         return ProfileLookup(problem="the request does not identify one agent by name and email")
@@ -723,7 +632,7 @@ def lookup_official_profile(
             parser.feed(profile_html.decode("utf-8", errors="replace"))
             emails = _unique([value.lower() for value in parser.emails])
             phones = _unique(parser.phones)
-            titles = _unique([_clean_name(value) for value in parser.title_parts])
+            titles = _unique([clean_name(value) for value in parser.title_parts])
             if len(phones) != 1 or not _phone_is_usable(phones[0]):
                 continue
             # The email is the usual proof; the filed direct phone is the

@@ -6,14 +6,15 @@ import json
 import urllib.parse
 
 from gable.agents.contacts import Contact
+from gable.agents.profile_page import OFFICIAL_PAGES_API
 from gable.agents.website import (
     BROKERAGE_SOURCE,
-    OFFICIAL_PAGES_API,
     WEBSITE_SOURCE,
     WORKBOOK_SOURCE,
     OfficialProfile,
     ProfileLookup,
     lookup_official_profile,
+    unidentified_pause,
     validate_contact,
 )
 
@@ -698,3 +699,28 @@ def test_a_genuinely_different_filed_name_is_still_a_conflict() -> None:
 
     assert checked.ready is False
     assert "does not match the contact-workbook name" in checked.problem
+
+
+def test_a_repeated_roster_refusal_reports_the_read_it_just_did() -> None:
+    """Four identical refusals cost Carmen a listing on 2026-08-28.
+
+    Every one was true — Halim Joseph reached Agents Contact Information at
+    13:48:48 and the last refusal went out at 13:47:16 — but she had answered
+    "I fixed that. Please run again." and got the same sentence back, so she
+    could not tell a fresh read from a stored one. She gave up ninety-two
+    seconds early. The count is what makes a re-check visible.
+    """
+    said = unidentified_pause("Halim Joseph", 40)
+
+    assert "again just now" in said
+    assert "40 agents" in said
+    assert said.count("Halim Joseph") >= 2
+
+
+def test_the_refusal_claims_no_read_it_cannot_prove() -> None:
+    """Without a count there is nothing to report, so it must not imply one."""
+    said = unidentified_pause("Halim Joseph")
+
+    assert "again just now" not in said
+    assert "agents —" not in said
+    assert "no row for Halim Joseph" in said

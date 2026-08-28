@@ -136,7 +136,15 @@ class ContactGate:
         # anyone adds them. What cannot be proven is a request whose email
         # belongs to somebody else and whose name the roster does not carry.
         if not contact.ready and filed is None and self._official_result.found_but_unproven:
-            return website.ContactCheck(problem=website.unidentified_pause(self.intake.agent_name))
+            # Counted from the roster this run just mirrored, so the sentence
+            # reports the read that actually happened rather than asserting an
+            # absence in the abstract. See `website.unidentified_pause`.
+            return website.ContactCheck(
+                problem=website.unidentified_pause(
+                    self.intake.agent_name,
+                    len(repo.all_salespeople(self.connection)),
+                )
+            )
         if contact.ready:
             store.set_status(
                 self.connection,

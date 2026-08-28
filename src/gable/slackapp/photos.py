@@ -59,6 +59,18 @@ NO_FLYER_TO_CHANGE: Final[str] = (
 #: handler posts through the durable outbox and returns an empty string, so the
 #: declining sentence never reaches the caller to be recognised.
 DECLINED_ANSWER_THE_WORDS: Final[str] = "gable:answer-the-words-instead"
+
+#: Several images arrived AND the words carry a value. Both need a response:
+#: the value is answered by the caller, and this says out loud that the images
+#: were not kept. Returning the plain sentinel here discarded them in silence.
+TOO_MANY_ANSWER_THE_WORDS: Final[str] = "gable:too-many-images-answer-the-words"
+
+#: What to say when more than one image arrives. Gable places exactly one
+#: property photo, so a batch is a choice it is not allowed to make.
+TOO_MANY_IMAGES: Final[str] = (
+    "I can only use one property photo, and that message had more than one, so "
+    "I did not keep any of them. Send just the one you want as the large photo."
+)
 _PHOTO_LOCK_STRIPES: Final[int] = 32
 _PHOTO_LOCKS: Final[tuple[threading.Lock, ...]] = tuple(
     threading.Lock() for _ in range(_PHOTO_LOCK_STRIPES)
@@ -299,6 +311,13 @@ def process_file_share(
                 # an answer to whatever Gable last asked, and answering them is
                 # a better response than a line about the photo.
                 return False
+            if spoken == TOO_MANY_ANSWER_THE_WORDS:
+                # The words still get answered by the caller, but the images
+                # were dropped and Carmen has to hear it. Saying nothing here
+                # is what let "Here are 3 for the template." throw away three
+                # uploads and then ask which of the three to use.
+                say(text=safe(TOO_MANY_IMAGES), thread_ts=thread)
+                return False
             outcome = safe(spoken)
         except Exception:
             logger.exception("the photo workflow failed")
@@ -376,16 +395,18 @@ class PhotoHandoff:
         if len(files) != 1:
             # A message can carry several images AND the value Gable asked for —
             # "1011 Winged Foot Dr..." with a front and a back photo attached.
-            # This early return used to discard those words with the images, the
-            # same swallowing the sentinel fix cured one guard lower. When the
-            # words carry an answer, the answer is the response; the run will
-            # ask for its photo again if it still needs one.
+            # The words are still answered, but the images are NOT kept and that
+            # has to be said. It used to be silent, on the reasoning that "the
+            # run will ask for its photo again if it still needs one". It does,
+            # and on 2026-08-28 that reply read as a malfunction: Carmen sent
+            # three photos with "Here are 3 for the template.", the bare 3 made
+            # this branch fire, all three were dropped without a word, and Gable
+            # then asked which of the three to use as the large photo -- about
+            # files it no longer had. She answered "The road should be the large
+            # photo" and there was nothing for that answer to select.
             if carries_a_value(str(event.get("text") or "")):
-                return DECLINED_ANSWER_THE_WORDS
-            return (
-                "Please upload exactly one image in the listing thread so I do not "
-                "guess which is the hero."
-            )
+                return TOO_MANY_ANSWER_THE_WORDS
+            return TOO_MANY_IMAGES
         file_id = str(files[0].get("id") or "")
         if not file_id:
             return "Slack did not identify that upload, so I left the flyer unchanged."
