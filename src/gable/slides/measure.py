@@ -40,7 +40,7 @@ def _axis_aligned_positive(element: dict[str, Any]) -> bool:
             and abs(float(transform.get("shearX", 0.0))) < 1e-9
             and abs(float(transform.get("shearY", 0.0))) < 1e-9
         )
-    except (TypeError, ValueError):
+    except (TypeError, ValueError):  # silent: a non-numeric magnitude is not a measurable box
         return False
 
 

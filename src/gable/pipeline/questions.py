@@ -247,7 +247,7 @@ def post_persisted_notification(
             attempted = datetime.fromisoformat(attempted_at.replace("Z", "+00:00"))
             if attempted.tzinfo is None:
                 attempted = attempted.replace(tzinfo=UTC)
-        except (TypeError, ValueError):
+        except (TypeError, ValueError):  # silent: an unparseable Slack timestamp reads as none
             return ""
         if attempted > stale_before:
             return ""

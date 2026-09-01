@@ -253,7 +253,9 @@ def verify_public(url: str, timeout: int = 20) -> tuple[bool, str]:
             if not head.startswith((b"\xff\xd8\xff", b"\x89PNG", b"GIF8")):
                 return False, f"served {content_type!r} but the bytes are not an image"
             return True, content_type
-    except urllib.error.HTTPError as exc:
+    except (
+        urllib.error.HTTPError
+    ) as exc:  # silent: the verdict carries the reason to the caller, which logs it
         return False, f"HTTP {exc.code}"
-    except Exception as exc:
+    except Exception as exc:  # silent: the verdict carries the reason to the caller, which logs it
         return False, f"unreachable: {type(exc).__name__}"

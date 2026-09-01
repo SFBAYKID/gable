@@ -379,6 +379,7 @@ def parse(reply: str, *, has_reference_photo: bool = False) -> Inspection:
     try:
         data = json.loads(text)
     except json.JSONDecodeError:
+        logger.warning("the visual inspection returned unreadable JSON")
         return Inspection(looks_right=False, confident=False, checked=False)
     if not isinstance(data, dict):
         return Inspection(looks_right=False, confident=False, checked=False)
@@ -404,6 +405,7 @@ def parse(reply: str, *, has_reference_photo: bool = False) -> Inspection:
         remedy = InspectionRemedy(raw_remedy)
         problem_kinds = tuple(InspectionProblemKind(kind) for kind in raw_problem_kinds)
     except ValueError:
+        logger.warning("the visual inspection returned an unexpected shape")
         return Inspection(looks_right=False, confident=False, checked=False)
     problems = [problem.strip() for problem in raw_problems]
     if any(not problem for problem in problems):

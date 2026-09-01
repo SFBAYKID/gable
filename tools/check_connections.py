@@ -72,11 +72,11 @@ def http_json(
     try:
         with urllib.request.urlopen(request, timeout=TIMEOUT_SECONDS) as response:
             return response.status, json.loads(response.read() or b"{}")
-    except urllib.error.HTTPError as exc:
+    except urllib.error.HTTPError as exc:  # silent: the status and body are returned for the report
         body = exc.read()
         try:
             return exc.code, json.loads(body or b"{}")
-        except ValueError:
+        except ValueError:  # silent: the status and body are returned for the report
             return exc.code, {"raw": body[:200].decode("utf-8", "replace")}
 
 
@@ -205,7 +205,9 @@ def check_google(env: dict[str, str]) -> list[Result]:
 
     try:
         from google.oauth2 import service_account
-    except ImportError as exc:  # pragma: no cover - dependency is declared
+    except (
+        ImportError
+    ) as exc:  # pragma: no cover - dependency is declared  # silent: reported as a failed result
         return [Result("Google", FAIL, f"client libraries missing: {exc}")]
 
     info = json.loads(path.read_text(encoding="utf-8"))
@@ -234,7 +236,7 @@ def check_google(env: dict[str, str]) -> list[Result]:
                     "Google Sheets", OK, f"{meta.get('properties', {}).get('title')} — tabs: {tabs}"
                 )
             )
-        except Exception as exc:
+        except Exception as exc:  # silent: reported as a failed result
             results.append(Result("Google Sheets", FAIL, _short(exc)))
 
     drive_id = env.get("GABLE_DRIVE_ID")
@@ -258,7 +260,7 @@ def check_google(env: dict[str, str]) -> list[Result]:
             results.append(
                 Result("Google Drive", OK, f"shared drive '{info_.get('name')}' — contains {names}")
             )
-        except Exception as exc:
+        except Exception as exc:  # silent: reported as a failed result
             results.append(Result("Google Drive", FAIL, _short(exc)))
 
     if not drive_id:
@@ -293,7 +295,7 @@ def check_google(env: dict[str, str]) -> list[Result]:
                     fields="presentationId",
                 ).execute()
                 results.append(Result("Google Slides", OK, "presentations.get succeeded"))
-        except Exception as exc:
+        except Exception as exc:  # silent: reported as a failed result
             results.append(Result("Google Slides", FAIL, _short(exc)))
 
     return results

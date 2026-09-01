@@ -111,3 +111,53 @@ def test_every_source_module_has_a_docstring() -> None:
         if ast.get_docstring(ast.parse(path.read_text(encoding="utf-8"))) is None
     ]
     assert missing == [], f"modules without a docstring: {missing}"
+
+
+#: Calls that count as reporting a caught exception somewhere a person can see.
+_REPORTING_CALLS: frozenset[str] = frozenset(
+    {"exception", "error", "warning", "info", "debug", "critical", "log", "print"}
+)
+
+
+def _swallowed_handlers(path: Path) -> list[int]:
+    """Line numbers of except handlers that neither report, re-raise, nor explain."""
+    text = path.read_text(encoding="utf-8")
+    tree = ast.parse(text, filename=str(path))
+    found: list[int] = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.ExceptHandler):
+            continue
+        reports = any(
+            isinstance(inner, ast.Call)
+            and (
+                (isinstance(inner.func, ast.Attribute) and inner.func.attr in _REPORTING_CALLS)
+                or (isinstance(inner.func, ast.Name) and inner.func.id in _REPORTING_CALLS)
+            )
+            for inner in ast.walk(node)
+        )
+        raises = any(isinstance(inner, ast.Raise) for inner in ast.walk(node))
+        explained = "silent:" in (ast.get_source_segment(text, node) or "")
+        if not (reports or raises or explained):
+            found.append(node.lineno)
+    return found
+
+
+@pytest.mark.parametrize(
+    "path",
+    [p for p in _repo_files((".py",)) if p.is_relative_to(SRC_ROOT) or "tools" in p.parts],
+    ids=lambda p: str(p.relative_to(REPO_ROOT)),
+)
+def test_no_except_handler_swallows_a_failure_silently(path: Path) -> None:
+    """Every caught exception is logged, re-raised, or carries a `silent:` note saying why.
+
+    On 2026-09-01 the official-site lookup timed out once, its `except
+    Exception` returned a sentence and wrote nothing to the log, and the cause
+    was a guess until the site was tried by hand. A handler that hides a
+    failure on purpose says so on its own line, so the next reader knows it
+    was a decision rather than an oversight.
+    """
+    swallowed = _swallowed_handlers(path)
+    assert swallowed == [], (
+        f"{path.relative_to(REPO_ROOT)} swallows an exception at line(s) {swallowed}; "
+        "log it, re-raise it, or add '# silent: <why>' to the except line"
+    )

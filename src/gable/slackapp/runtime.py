@@ -672,7 +672,7 @@ def build_components(settings: Settings) -> RuntimeComponents:
                     context=context,
                 ),
             )
-        except spend.BudgetExceededError:
+        except spend.BudgetExceededError:  # silent: the ceiling is spoken to the thread
             return Decision(
                 reply=(
                     "Testing has reached its spending limit, so I did not call the "

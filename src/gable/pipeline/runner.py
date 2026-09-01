@@ -135,13 +135,15 @@ class Runner:
         """
         try:
             run = store.start_run(self.connection, submission.response_row_id)
-        except store.RunAlreadyActiveError:
+        except (
+            store.RunAlreadyActiveError
+        ):  # silent: a concurrent handler owns this run; its state is returned
             latest = store.latest_run(self.connection, submission.response_row_id)
             return RunResult(
                 run_id=latest.run_id if latest else "",
                 status=latest.status if latest else "failed",
             )
-        except store.RunLimitReachedError:
+        except store.RunLimitReachedError:  # silent: the limit is spoken to the thread below
             latest = store.latest_run(self.connection, submission.response_row_id)
             result = RunResult(
                 run_id=latest.run_id if latest else "",

@@ -499,7 +499,7 @@ class _Reader:
             return default
         try:
             value = int(raw)
-        except ValueError:
+        except ValueError:  # silent: the problem is collected and reported at startup
             self._problems.append(f"{name}: {raw!r} is not an integer")
             return default
         return self._bounded(name, value, default, minimum, maximum)
@@ -543,7 +543,7 @@ class _Reader:
             return default
         try:
             return enum_type(raw)
-        except ValueError:
+        except ValueError:  # silent: the problem is collected and reported at startup
             options = ", ".join(member.value for member in enum_type)
             self._problems.append(f"{name}: {raw!r} is not valid (expected one of: {options})")
             return default

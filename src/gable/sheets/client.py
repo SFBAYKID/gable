@@ -126,20 +126,20 @@ class SheetClient:
                 )
                 rows: list[list[str]] = response.get("values", [])
                 return rows
-            except HttpError as exc:
+            except HttpError as exc:  # silent: retried below; the last error is raised
                 last = exc
                 if exc.resp.status not in RETRYABLE or attempt == MAX_ATTEMPTS - 1:
                     break
                 # Jittered, so several retries do not synchronise into a spike.
                 delay = (2**attempt) + random.uniform(0, 1)
                 time.sleep(delay)
-            except RETRYABLE_TRANSPORT as exc:
+            except RETRYABLE_TRANSPORT as exc:  # silent: retried below; the last error is raised
                 last = exc
                 if attempt == MAX_ATTEMPTS - 1:
                     break
                 delay = (2**attempt) + random.uniform(0, 1)
                 time.sleep(delay)
-            except Exception as exc:
+            except Exception as exc:  # silent: the last error is raised after the loop
                 last = exc
                 break
         msg = f"could not read {a1_range}: {type(last).__name__}"

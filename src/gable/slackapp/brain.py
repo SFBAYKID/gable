@@ -487,6 +487,7 @@ def _response_result(body: dict[str, Any]) -> tuple[str, str, dict[str, Any]]:
             try:
                 parsed = json.loads(raw_arguments) if isinstance(raw_arguments, str) else {}
             except json.JSONDecodeError:
+                logger.warning("the conversation model returned arguments that are not JSON")
                 parsed = {}
             if isinstance(parsed, dict):
                 arguments = parsed
@@ -695,7 +696,10 @@ def acknowledge(tool: str, arguments: dict[str, Any]) -> str:
             replacement=arguments.get("replacement", "the new value"),
             direction=direction,
         )
-    except (KeyError, IndexError):
+    except (
+        KeyError,
+        IndexError,
+    ):  # silent: a tool with no acknowledgement wording gets the generic one
         return "On it."
 
 

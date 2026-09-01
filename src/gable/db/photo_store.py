@@ -119,7 +119,9 @@ def satisfy_pending_photo_question(
                     "pending photo question satisfied by an owned-thread upload",
                 ),
             )
-    except _PhotoClaimLostError:
+    except (
+        _PhotoClaimLostError
+    ):  # silent: the claim went to a concurrent handler; the run is re-read
         return _run_waiting_for_photo(connection, run_id, root)
     return True
 
@@ -204,7 +206,9 @@ def claim_run_for_photo(
                 expected_status=expected,
             ):
                 raise _PhotoClaimLostError
-    except _PhotoClaimLostError:
+    except (
+        _PhotoClaimLostError
+    ):  # silent: the claim went to a concurrent handler; the run is re-read
         return claim_paused_run(
             connection,
             run_id,

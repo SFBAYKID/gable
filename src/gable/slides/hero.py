@@ -212,7 +212,7 @@ def _axis_aligned_positive(element: dict[str, Any]) -> bool:
             and abs(float(transform.get("shearX", 0.0))) < 1e-9
             and abs(float(transform.get("shearY", 0.0))) < 1e-9
         )
-    except (TypeError, ValueError):
+    except (TypeError, ValueError):  # silent: a malformed transform is not an axis-aligned frame
         return False
 
 
@@ -753,7 +753,7 @@ def _is_overlaid(
     order = [e.get("objectId") for e in elements]
     try:
         frame_index = order.index(frame.object_id)
-    except ValueError:
+    except ValueError:  # silent: a frame absent from the page has nothing above it
         frame_index = 0
     above = elements[frame_index + 1 :]
 

@@ -246,7 +246,12 @@ def _phone_cross_check(
     """
     try:
         looked_up = official_lookup(name, email)
-    except Exception:
+    except Exception as error:
+        logger.warning(
+            "the official profile cross-check for %s raised %s; the workbook stands",
+            email,
+            type(error).__name__,
+        )
         # The workbook remains the designated authority; the website is a
         # cross-check. An unreachable or reshaped site must not halt every
         # listing, so a check that cannot run yields to the workbook.

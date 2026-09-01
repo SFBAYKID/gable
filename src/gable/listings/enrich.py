@@ -25,6 +25,7 @@ one call usually settles it.
 from __future__ import annotations
 
 import json
+import logging
 import re
 import urllib.error
 import urllib.parse
@@ -36,6 +37,8 @@ from typing import Any, Final
 
 from gable import spend
 from gable.listings.address import zip_codes
+
+logger = logging.getLogger("gable.enrich")
 
 #: Firecrawl search. https://docs.firecrawl.dev/api-reference/endpoint/search
 _SEARCH_URL: Final[str] = "https://api.firecrawl.dev/v2/search"
@@ -345,6 +348,7 @@ def look_up(
         terms = " ".join(term for name, term in _SEARCH_TERMS.items() if name in required)
         results = _search(f"{address} {terms}", api_key)
     except Exception:
+        logger.exception("the property search could not be reached")
         return Facts(caveats=["I could not reach the search service"])
 
     best = Facts()
@@ -441,6 +445,7 @@ def default_research(
                 lambda: look_up(address, api_key, required),
             )
         except spend.BudgetExceededError:
+            logger.warning("the spend ceiling stopped a property search")
             return Facts(caveats=["Testing has reached its spending limit"])
 
     return research

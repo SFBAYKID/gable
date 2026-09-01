@@ -20,12 +20,15 @@ wrong.
 from __future__ import annotations
 
 import io
+import logging
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
 from typing import Final
 
 from PIL import Image
+
+logger = logging.getLogger("gable.photos.verify")
 
 #: What Slides will fetch and render.
 ALLOWED_TYPES: Final[frozenset[str]] = frozenset(
@@ -89,10 +92,11 @@ def verify(url: str, slot: str = "any", timeout: int = _TIMEOUT_SECONDS) -> Verd
             status = getattr(response, "status", 200)
             content_type = (response.headers.get("Content-Type") or "").split(";")[0].strip()
             head = response.read(_HEADER_BYTES)
-    except urllib.error.HTTPError as exc:
+    except urllib.error.HTTPError as exc:  # silent: the verdict carries the reason to the caller
         del exc
         return Verdict(ok=False, say="that image link came back as unavailable")
-    except Exception:
+    except Exception as error:
+        logger.warning("the image link could not be fetched: %s", type(error).__name__)
         return Verdict(ok=False, say="I could not reach that image link")
 
     if status != 200:
@@ -108,7 +112,8 @@ def verify(url: str, slot: str = "any", timeout: int = _TIMEOUT_SECONDS) -> Verd
     try:
         with Image.open(io.BytesIO(head)) as opened:
             width, height = opened.size
-    except Exception:
+    except Exception as error:
+        logger.warning("the image could not be decoded: %s", type(error).__name__)
         return Verdict(
             ok=False,
             say="that file says it is an image but I could not read it",

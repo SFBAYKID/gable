@@ -23,10 +23,13 @@ and per-agent timezones (the operating timezone is Central, full stop).
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from datetime import UTC, datetime, time, tzinfo
 from typing import Final
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+
+logger = logging.getLogger("gable.schedule")
 
 # The operating timezone. Named rather than a fixed offset so the US daylight
 # saving transitions are handled by the tz database instead of by us.
@@ -59,6 +62,7 @@ def operating_timezone() -> tzinfo:
     try:
         return ZoneInfo(OPERATING_TIMEZONE_NAME)
     except ZoneInfoNotFoundError:
+        logger.warning("the operating timezone is not installed; using UTC")
         return UTC
 
 

@@ -221,7 +221,7 @@ def _oldest(created_at: str) -> str:
         parsed = datetime.fromisoformat(created_at.replace("Z", "+00:00"))
         if parsed.tzinfo is None:
             parsed = parsed.replace(tzinfo=UTC)
-    except (TypeError, ValueError):
+    except (TypeError, ValueError):  # silent: an unparseable Slack timestamp reads as none
         return ""
     # SQLite records the outbox immediately before the API call. A small skew
     # allowance covers Slack's server clock without searching earlier history.
@@ -310,5 +310,5 @@ def _inside(timestamp: str, oldest: str, latest: str) -> bool:
     """Reject malformed or out-of-window message timestamps independently of Slack."""
     try:
         return float(oldest) <= float(timestamp) <= float(latest)
-    except ValueError:
+    except ValueError:  # silent: an unparseable Slack timestamp is not a match
         return False

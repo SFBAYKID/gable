@@ -304,7 +304,10 @@ def presentation_changed_only_as_planned(
     try:
         before_items = {str(element["objectId"]): element for _page, element in _elements(before)}
         after_items = {str(element["objectId"]): element for _page, element in _elements(after)}
-    except (EditPlanError, KeyError):
+    except (
+        EditPlanError,
+        KeyError,
+    ):  # silent: an unbuildable plan is reported as not applicable by the caller
         return False
     if before_items.keys() != after_items.keys() or plan.target_object_id not in after_items:
         return False

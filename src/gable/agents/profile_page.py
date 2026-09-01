@@ -72,7 +72,10 @@ def _decode_cloudflare_email(encoded: str) -> str:
             return ""
         key = raw[0]
         return bytes(value ^ key for value in raw[1:]).decode("utf-8").strip().lower()
-    except (UnicodeDecodeError, ValueError):
+    except (
+        UnicodeDecodeError,
+        ValueError,
+    ):  # silent: a malformed encoding decodes to no email
         return ""
 
 
