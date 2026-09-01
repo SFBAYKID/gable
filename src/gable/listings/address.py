@@ -215,6 +215,30 @@ STREET_TYPES: Final[frozenset[str]] = frozenset(
 )
 
 _ORDINAL: Final[re.Pattern[str]] = re.compile(r"^\d+(st|nd|rd|th)$", re.IGNORECASE)
+
+#: "street, city, ST ZIP" — the one shape every design prints. One flyer
+#: carried a ZIP and another did not, so the format is pinned and a missing
+#: ZIP is a question rather than a render.
+WHOLE_ADDRESS: Final[re.Pattern[str]] = re.compile(r"^.+,\s*.+,\s*[A-Z]{2}\s+\d{5}(?:-\d{4})?$")
+
+#: Street types a comma may be placed after, for the repair in `tidy`. The
+#: short list above finds the street's end when the agent used no commas; this
+#: one, a superset, finds it when they used commas everywhere but there.
+_BOUNDARY_TYPES: Final[frozenset[str]] = STREET_TYPES | frozenset(
+    {"alley", "annex", "arcade", "bend", "expressway", "expy", "plaza", "terr", "xing", "crossing"}
+)
+
+# ASSUMPTION: an address already ending in a state and ZIP whose earlier text
+# holds a recognised street type followed by words has its city in those final
+# words. Every one of the 18 real rows this repairs reads that way; a street
+# whose NAME ends in a street-type word followed by more street name would be
+# cut early, and no submission has shown one.
+_MISSING_CITY_COMMA: Final[re.Pattern[str]] = re.compile(
+    r"^(?P<street>.+\b(?:"
+    + "|".join(sorted(_BOUNDARY_TYPES, key=len, reverse=True))
+    + r"))\s+(?P<city>[A-Z][A-Z .'-]+),\s*(?P<state>[A-Z]{2}\s+\d{5}(?:-\d{4})?)$",
+    re.IGNORECASE,
+)
 _ZIP: Final[re.Pattern[str]] = re.compile(r"^\d{5}(-\d{4})?$")
 _MC: Final[re.Pattern[str]] = re.compile(r"^(mc|mac)([a-z]{2,})$", re.IGNORECASE)
 
@@ -239,8 +263,11 @@ def _word(token: str) -> str:
 
     Returns:
         The token cased for display. Numbers, ordinals and postcodes are left
-        alone; directions and state codes are upper cased; `McCarthy` keeps its
-        inner capital, which `str.title` destroys.
+        alone; directions are upper cased; `McCarthy` keeps its inner capital,
+        which `str.title` destroys. A state code is NOT upper cased here: "Ct"
+        is a court on most streets and Connecticut on almost none, and casing
+        every such token as a state wrote "802 Dressage CT Bel Air" — a real
+        submission. The state is found by position in `tidy` and cased there.
 
     Raises:
         Nothing.
@@ -253,7 +280,7 @@ def _word(token: str) -> str:
         return token
 
     upper = core.upper()
-    if upper in DIRECTIONS or upper in STATE_CODES:
+    if upper in DIRECTIONS:
         return upper + trailing
     if _ZIP.match(core) or core.isdigit():
         return core + trailing
@@ -266,6 +293,32 @@ def _word(token: str) -> str:
     if "-" in core:
         return "-".join(part.capitalize() for part in core.split("-")) + trailing
     return core.capitalize() + trailing
+
+
+def _state_index(parts: list[str]) -> int | None:
+    """Where the state sits in a space-split address, if a code is there.
+
+    Args:
+        parts: The address split on single spaces, commas still attached.
+
+    Returns:
+        The index of the token that is a state code AND sits where a state
+        belongs — last, or immediately before the ZIP — or None. Position is
+        the whole test: "Ct" mid-street is a court, "OR" between two lot
+        numbers is a conjunction, "Maryland Ave" is a street, and none of them
+        are the state. Never index zero, which is the house number.
+
+    Raises:
+        Nothing.
+    """
+    for index, token in enumerate(parts):
+        if index == 0 or token.strip(",.").upper() not in STATE_CODES:
+            continue
+        is_last = index == len(parts) - 1
+        followed_by_zip = not is_last and bool(_ZIP.match(parts[index + 1].strip(",.")))
+        if is_last or followed_by_zip:
+            return index
+    return None
 
 
 def _fold_state_name(text: str) -> str:
@@ -285,9 +338,11 @@ def _fold_state_name(text: str) -> str:
         Nothing.
     """
     parts = text.split(" ")
-    # A code already present means any name elsewhere in the string is a place,
-    # not the state. "California, MD 20619" is a real Maryland town.
-    if any(part.strip(",.") in STATE_CODES for part in parts):
+    # A code already in the state's position means any name elsewhere in the
+    # string is a place, not the state. "California, MD 20619" is a real
+    # Maryland town. Position matters: "802 Dressage Ct Bel Air Maryland
+    # 21014" has a "Ct" that is a court, and its state is still spelled out.
+    if _state_index(parts) is not None:
         return text
     end = len(parts)
     if end and _ZIP.match(parts[-1].strip(",.")):
@@ -344,6 +399,9 @@ def tidy(address: str) -> str:
     # city, state and ZIP. Left in place it ends the string after the ZIP, which
     # fails the shape check and turns a complete address into a question.
     collapsed = _TRAILING_COUNTRY.sub("", collapsed).strip().strip(",").strip()
+    # "9411 Perry Hall Blvd, Baltimore MD 21236/" arrived with a slash on the
+    # end, which left the ZIP not ending the string and the whole check false.
+    collapsed = collapsed.rstrip(" ,./;:-")
 
     tokens = collapsed.split(" ")
     out: list[str] = []
@@ -406,27 +464,37 @@ def tidy(address: str) -> str:
     # and also northeast — so "123 ne 4th st" would otherwise be punctuated as
     # though Nebraska appeared in the middle of a street name.
     parts = text.split(" ")
-    for index, token in enumerate(parts):
-        if token.strip(",") not in STATE_CODES or index == 0:
-            continue
-        is_last = index == len(parts) - 1
-        followed_by_zip = not is_last and bool(_ZIP.match(parts[index + 1].strip(",")))
-        if not (is_last or followed_by_zip):
-            continue
-        previous = parts[index - 1]
+    state_at = _state_index(parts)
+    if state_at is not None:
+        previous = parts[state_at - 1]
         if not previous.endswith(","):
-            parts[index - 1] = previous + ","
-        parts[index] = token.strip(",")
-        break
+            parts[state_at - 1] = previous + ","
+        parts[state_at] = parts[state_at].strip(",.").upper()
     text = " ".join(parts)
+    text = re.sub(r"\s+,", ",", re.sub(r"(,\s*)+", ", ", text)).strip().strip(",").strip()
 
-    return re.sub(r"\s+,", ",", re.sub(r"(,\s*)+", ", ", text)).strip().strip(",").strip()
+    # The agent used commas, but not between the street and the city:
+    # "1032 Foxwood Ln Essex, MD 21221". Eighteen of the 140 addresses the form
+    # had received by 2026-09-01 were this shape, and each one fails the
+    # whole-address check and asks for an address that is already complete.
+    # Repaired only when the text already ends in a state and ZIP and a known
+    # street type marks where the street stops; "Havre de Grace" survives
+    # because no street type sits inside it. This lived in
+    # `slides.manifest.normalise_address` for a while, which the runner used
+    # and the thread announcement did not — two readers again.
+    if not WHOLE_ADDRESS.match(text):
+        repaired = _MISSING_CITY_COMMA.match(text)
+        if repaired is not None:
+            text = (
+                f"{repaired.group('street')}, {repaired.group('city')}, {repaired.group('state')}"
+            )
+    return text
 
 
 #: State codes that are also ordinary English words. Only these need a position
 #: test; every other code is unambiguous wherever it appears.
 _WORD_LIKE_STATE_CODES: Final[frozenset[str]] = frozenset(
-    {"OR", "IN", "ME", "OK", "HI", "OH", "AS", "LA", "PA", "DE"}
+    {"OR", "IN", "ME", "OK", "HI", "OH", "AS", "LA", "PA", "DE", "CT"}
 )
 
 #: A ZIP anywhere in the string. The shape check wants it at the end; naming
@@ -520,8 +588,15 @@ def incomplete_address(supplied: str) -> str:
         # somebody looking for a formatting fault in an address that was simply
         # missing its last five digits.
         fault = "it has no ZIP code"
-    else:
+    elif _state_index(address.split(" ")) is None:
+        # The state is present but not where a state sits: "Baltimore MD 4216
+        # Norfolk Avenue 21216". The ordering sentence is the honest one.
         fault = "it is not in the street, city, state and ZIP order the design prints"
+    else:
+        # "Not in the order the design prints" was said of "87 Twin Lakes
+        # Gettysburg, PA 17325", which is in that order and merely lacks the
+        # comma after a street with no street-type word. Name the real gap.
+        fault = "I could not tell where the street ends and the city begins"
     return (
         f"I have this listing at {address}, but {fault}, so I cannot print it on the "
         "flyer. Send me the whole address and I will build it."

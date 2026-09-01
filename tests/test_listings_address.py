@@ -134,7 +134,9 @@ def test_a_trailing_country_does_not_cost_a_round_trip() -> None:
         "225 N Wycombe Ave Upper Darby, PA 19082 USA",
         "225 N Wycombe Ave Upper Darby, PA 19082, United States of America",
     ):
-        assert tidy(written) == "225 N Wycombe Ave Upper Darby, PA 19082"
+        # The comma after the street is the repair added on 2026-09-01; the
+        # country going is what this test is about.
+        assert tidy(written) == "225 N Wycombe Ave, Upper Darby, PA 19082"
 
 
 def test_a_street_is_not_mistaken_for_a_country() -> None:
@@ -202,3 +204,48 @@ def test_a_second_property_with_a_five_digit_house_number_still_counts() -> None
     two = "10600 Partridge Ln, Cockeysville, MD 21030 10602 Partridge Ln, Cockeysville, MD 21030"
 
     assert len(zip_codes(two)) >= 2
+
+
+def test_a_court_is_not_connecticut() -> None:
+    """ "802 Dressage Ct Bel Air, MD 21014" was written as "Dressage CT" on 2026-09-01.
+
+    Every state code was upper cased wherever it appeared. The state is found by
+    position now, and only that token is cased as one.
+    """
+    assert tidy("802 Dressage Ct Bel Air, MD 21014") == "802 Dressage Ct, Bel Air, MD 21014"
+    assert tidy("802 dressage ct bel air maryland 21014") == "802 Dressage Ct, Bel Air, MD 21014"
+    assert tidy("123 Main St, Hartford, ct 06103") == "123 Main St, Hartford, CT 06103"
+
+
+def test_trailing_punctuation_does_not_hide_the_zip() -> None:
+    """ "9411 Perry Hall Blvd, Baltimore MD 21236/" is a real row."""
+    assert tidy("9411 Perry Hall Blvd, Baltimore MD 21236/") == (
+        "9411 Perry Hall Blvd, Baltimore, MD 21236"
+    )
+
+
+def test_a_missing_street_city_comma_is_repaired_when_the_agent_used_commas() -> None:
+    """Eighteen of the first 140 real addresses were this shape, and each was asked about."""
+    for written, expected in (
+        ("1032 Foxwood Ln Essex, MD 21221", "1032 Foxwood Ln, Essex, MD 21221"),
+        ("7631 OLD COLUMBIA ROAD LAUREL, MD 20723", "7631 Old Columbia Road, Laurel, MD 20723"),
+        ("300 Commerce St Havre de Grace, MD 21078", "300 Commerce St, Havre de Grace, MD 21078"),
+        (
+            "1201 East West Hwy Silver Spring, MD 20910",
+            "1201 East West Hwy, Silver Spring, MD 20910",
+        ),
+    ):
+        assert tidy(written) == expected, written
+    # No street-type word, so nothing marks the boundary; left as typed.
+    assert tidy("87 Twin Lakes Gettysburg PA 17325") == "87 Twin Lakes Gettysburg, PA 17325"
+
+
+def test_a_stated_correction_ends_where_it_started() -> None:
+    """Tidying is idempotent, so a tidied address re-read from the sheet is unchanged."""
+    for written in (
+        "802 Dressage Ct Bel Air, MD 21014",
+        "1032 Foxwood Ln Essex, MD 21221",
+        "2519 Ann Arbor Lane Bowie Maryland 20716",
+    ):
+        once = tidy(written)
+        assert tidy(once) == once, written

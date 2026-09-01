@@ -22,7 +22,7 @@ import re
 from dataclasses import dataclass
 from typing import Final
 
-from gable.listings.address import incomplete_address, zip_codes
+from gable.listings.address import WHOLE_ADDRESS, incomplete_address, zip_codes
 from gable.listings.address import tidy as tidy_address
 
 #: Field kinds, which decide how a value is checked.
@@ -146,21 +146,8 @@ def manifest_for(template_name: str) -> Manifest:
     return MANIFESTS.get(template_name, DEFAULT_LISTING)
 
 
-#: "street, city, ST ZIP". One flyer carried a ZIP and another did not, so the
-#: format is pinned and a missing ZIP fails validation rather than rendering.
-ADDRESS_SHAPE: Final[re.Pattern[str]] = re.compile(r"^.+,\s*.+,\s*[A-Z]{2}\s+\d{5}(?:-\d{4})?$")
-
-# ASSUMPTION: If an address already ends in a state and ZIP and the preceding
-# text contains a recognized street suffix followed by words, those final words
-# are the city. A larger sample of real form submissions would confirm whether
-# the suffix list needs expanding; this deliberately refuses ambiguous strings.
-_MISSING_CITY_COMMA: Final[re.Pattern[str]] = re.compile(
-    r"^(?P<street>.+\b(?:ALLEY|ANNEX|ARCADE|AVENUE|AVE|BEND|BOULEVARD|BLVD|"
-    r"CIRCLE|CIR|COURT|CT|DRIVE|DR|EXPRESSWAY|HIGHWAY|HWY|LANE|LN|PARKWAY|"
-    r"PKWY|PLACE|PL|PLAZA|ROAD|RD|SQUARE|SQ|STREET|ST|TERRACE|TER|TRAIL|"
-    r"TRL|WAY))\s+(?P<city>[A-Z][A-Z .'-]+),\s*(?P<state>[A-Z]{2}\s+\d{5}(?:-\d{4})?)$",
-    re.IGNORECASE,
-)
+#: The one address shape every design prints; see `listings.address`.
+ADDRESS_SHAPE: Final[re.Pattern[str]] = WHOLE_ADDRESS
 
 
 def normalise_address(address: str) -> str:
@@ -171,30 +158,19 @@ def normalise_address(address: str) -> str:
 
     Returns:
         `street, city, ST ZIP` when the parts can be identified, otherwise the
-        input with whitespace tidied. This never invents a ZIP — a missing one
-        is a validation failure, not something to guess.
+        input tidied. This never invents a ZIP — a missing one is a validation
+        failure, not something to guess.
 
     Raises:
         Nothing.
+
+    Note:
+        `listings.address.tidy` is the whole rule set now. This used to hold a
+        weaker second copy, then a second pass the runner applied and the
+        thread announcement did not, so the announcement and the ask disagreed
+        about the same address. Kept as a name so callers read as intended.
     """
-    # `listings.address.tidy` is the address rule set, and this used to hold a
-    # weaker second copy of it. The copies drifted, as copies do: this one only
-    # recognised an upper-case state, so a real submission ending "Baltimore Md
-    # 21230" never gained its comma and the flyer check asked the agent to
-    # retype an address they had already given correctly. The remaining steps
-    # below run only on what `tidy` deliberately leaves alone.
-    text = tidy_address(address)
-    if not ADDRESS_SHAPE.match(text):
-        text = re.sub(r"\s*,\s*", ", ", text)
-        # "Baltimore MD 21228" -> "Baltimore, MD 21228"
-        text = re.sub(r"(?<![,])\s+([A-Z]{2})\s+(\d{5})", r", \1 \2", text)
-        missing_comma = _MISSING_CITY_COMMA.match(text)
-        if missing_comma is not None:
-            text = (
-                f"{missing_comma.group('street')}, {missing_comma.group('city')}, "
-                f"{missing_comma.group('state')}"
-            )
-    return text.strip(" ,")
+    return tidy_address(address)
 
 
 @dataclass(frozen=True, slots=True)
