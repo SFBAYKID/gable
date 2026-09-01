@@ -207,7 +207,7 @@ def test_a_second_property_with_a_five_digit_house_number_still_counts() -> None
 
 
 def test_a_court_is_not_connecticut() -> None:
-    """ "802 Dressage Ct Bel Air, MD 21014" was written as "Dressage CT" on 2026-09-01.
+    """A real row, 802 Dressage Ct Bel Air, was written as "Dressage CT" on 2026-09-01.
 
     Every state code was upper cased wherever it appeared. The state is found by
     position now, and only that token is cased as one.
@@ -218,7 +218,7 @@ def test_a_court_is_not_connecticut() -> None:
 
 
 def test_trailing_punctuation_does_not_hide_the_zip() -> None:
-    """ "9411 Perry Hall Blvd, Baltimore MD 21236/" is a real row."""
+    """The real row "9411 Perry Hall Blvd, Baltimore MD 21236/" ends in a slash."""
     assert tidy("9411 Perry Hall Blvd, Baltimore MD 21236/") == (
         "9411 Perry Hall Blvd, Baltimore, MD 21236"
     )

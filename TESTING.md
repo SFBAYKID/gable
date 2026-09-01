@@ -44,6 +44,22 @@ listed human type the replies, or drive the two calls the listener makes —
 `brain.think`, then the handler its decision names — which exercises the same
 conversation without Slack's event plumbing.
 
+## 0. The real-address corpus
+
+`tests/fixtures/address_corpus.tsv` holds every address the form has ever
+received, with what Gable makes of each one. `tests/test_address_corpus.py`
+holds the code to it. After any change to `listings/address.py` or
+`slides/manifest.py`, and every week or so regardless, refresh it and read the
+diff before committing:
+
+```bash
+PYTHONPATH=src .venv/bin/python tools/refresh_address_corpus.py
+```
+
+It reads the response tab through the service account and never writes to it.
+A verdict that changed is a fix or a regression, and the diff is where you
+decide which. A new row is a new real input the suite now knows about.
+
 ## 1. Complete local gate
 
 From the repository root:
