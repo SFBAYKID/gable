@@ -309,6 +309,13 @@ values Carmen can supply in a reply:
   uncertified two-agent layout, a missing headshot. Those keep their own exact
   message and their own status.
 
+When a design is added or edited, Gable measures it and then builds one test
+flyer from it with sample values, a sample photograph and a sample face, and
+says in the design's thread what that build showed — a headshot off the page,
+a field that would not fill, text that would have to be shrunk unreadably —
+before any listing is built on it. The copy goes to the trash. A clean build
+says nothing.
+
 Gable never asks the same question twice in one thread. If a reply leaves the
 same problem in place, the second message says so once — it carries the
 question, says Gable will not ask again, and names Chase — and a third

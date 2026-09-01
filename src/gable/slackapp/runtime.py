@@ -32,7 +32,6 @@ from gable.pipeline.questions import (
 )
 from gable.pipeline.runner import Runner
 from gable.pipeline.template_triage import TemplateTriage, drain_template_notifications
-from gable.pipeline.template_vision import inspect_source_template
 from gable.runtime import RuntimeComponents, serve
 from gable.sheets import repository as repo
 from gable.sheets.client import SheetClient
@@ -51,7 +50,7 @@ from gable.slackapp.recovery import (
 from gable.slackapp.resume import may_rebuild, resume_with_current_sources
 from gable.slackapp.source_refresh import SourceRefreshError, refresh_submission_sources
 from gable.slackapp.supplied import record_and_resume
-from gable.slides.library import list_files as list_template_files
+from gable.slackapp.triage import build_template_triage
 from gable.voice import is_clean, safe
 
 logger = logging.getLogger("gable.slack.runtime")
@@ -178,27 +177,14 @@ def build_components(settings: Settings) -> RuntimeComponents:
         triage_slides: Any,  # noqa: ANN401
     ) -> TemplateTriage:
         """Bind source-template measurement to one thread's Google clients."""
-        return TemplateTriage(
-            connection=triage_connection,
-            list_templates=lambda: list_template_files(
-                triage_drive,
-                settings.drive_id,
-                settings.drive_templates_folder_id,
-            ),
-            read_presentation=lambda file_id: (
-                triage_slides.presentations().get(presentationId=file_id).execute()
-            ),
+        return build_template_triage(
+            settings,
+            triage_connection,
+            triage_drive,
+            triage_slides,
             say=slack_post,
             post_once=slack_post_once,
             reconcile=reconcile_slack,
-            look_at=lambda file_id: inspect_source_template(
-                triage_connection,
-                triage_slides,
-                file_id,
-                api_key=settings.openai_image_api_key,
-                model=settings.vision_model,
-            ),
-            slide_px=(settings.slide_width_px, settings.slide_height_px),
         )
 
     template_triage = template_triage_for(connection, drive, slides)

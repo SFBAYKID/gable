@@ -546,6 +546,19 @@ except that `template_audits.blocker_kind` records WHY a design is refused and a
 `visual` refusal does not stop a listing: how the artwork looks is the design
 thread's question, and the finished flyer is inspected on its own render anyway.
 
+**A design that measured clean is then built once.** `pipeline/canary.py` copies
+it with sample values, a sample photograph and a sample face, runs the same
+fill readback, text fitting and geometric audit a listing gets, reports what
+that showed in the design's own thread, and moves the copy to the trash. The
+scan measured Under Contract "clean" on 2026-09-01 after an edit that had
+pushed its headshot well past the page edge, because a scan measures fields
+and frames and never builds; the defect surfaced on Brittney Bushee's listing
+instead. A clean build says nothing. It runs on a new or edited design and on
+an explicit recheck, never on a listing's own rebuild, costs Drive writes and
+no model spend, and `tools/canary.py` runs it on demand. The Slides and Drive
+calls come from `live.slides_seams`, the same factory the listing runner
+uses, so the two builds cannot drift apart.
+
 Two-agent roles parse, but without a per-role object contract they stop at
 `needs_template` rather than filling by page order.
 

@@ -11,6 +11,7 @@ from __future__ import annotations
 import logging
 import urllib.request
 from collections.abc import Callable
+from dataclasses import dataclass
 from sqlite3 import Connection
 from typing import Any
 
@@ -45,6 +46,105 @@ from gable.slides.selection import template_picker
 from gable.voice import is_clean
 
 logger = logging.getLogger("gable.live")
+
+
+@dataclass(frozen=True, slots=True)
+class SlidesSeams:
+    """The Slides and Drive calls every build makes, bound to one client pair."""
+
+    read_slide_text: Callable[[str], list[str]]
+    read_presentation: Callable[[str], dict[str, Any]]
+    read_text_boxes: Callable[[str], list[Any]]
+    copy_template: Callable[[str, str], tuple[str, str]]
+    fill: Callable[[str, dict[str, str]], int]
+    apply: Callable[[str, list[dict[str, Any]]], None]
+
+
+def slides_seams(
+    settings: Settings,
+    drive: Any,  # noqa: ANN401 - googleapiclient resource
+    slides: Any,  # noqa: ANN401 - googleapiclient resource
+) -> SlidesSeams:
+    """Bind the read, copy, fill and apply calls to real clients.
+
+    One factory, used by the listing runner and by the test build, so a design
+    is built the same way whichever of the two is doing it.
+
+    Args:
+        settings: Parsed configuration, for the output folder.
+        drive: A Drive v3 resource.
+        slides: A Slides v1 resource.
+
+    Returns:
+        The bound calls.
+
+    Raises:
+        Nothing.
+    """
+
+    def read_slide_text(file_id: str) -> list[str]:
+        presentation = slides.presentations().get(presentationId=file_id).execute()
+        out: list[str] = []
+        for page in presentation.get("slides", []):
+            # PPTX imports often wrap the design in elementGroup; descendants
+            # follows its children so placeholders inside a group stay visible.
+            for element in descendants(page.get("pageElements", [])):
+                text = text_content(element)
+                if text:
+                    out.append(text)
+        return out
+
+    def read_presentation(file_id: str) -> dict[str, Any]:
+        return dict(slides.presentations().get(presentationId=file_id).execute())
+
+    def copy_template(template_id: str, name: str) -> tuple[str, str]:
+        copied = (
+            drive.files()
+            .copy(
+                fileId=template_id,
+                body={"name": name, "parents": [settings.drive_output_folder_id]},
+                supportsAllDrives=True,
+                fields="id,webViewLink",
+            )
+            .execute()
+        )
+        return str(copied["id"]), str(copied["webViewLink"])
+
+    def fill(file_id: str, pairs: dict[str, str]) -> int:
+        if not pairs:
+            return 0
+        presentation = slides.presentations().get(presentationId=file_id).execute()
+        # Two requests per field — literal to sentinel, then sentinel to value —
+        # so nothing Gable writes can be caught by a later replacement.
+        requests = safe_replacement_requests(presentation, pairs)
+        if len(requests) != len(pairs) * 2:
+            return -1
+        reply = (
+            slides.presentations()
+            .batchUpdate(presentationId=file_id, body={"requests": requests})
+            .execute()
+        )
+        return confirmed_replacement_count(reply, len(pairs))
+
+    def read_text_boxes(file_id: str) -> list[Any]:
+        presentation = slides.presentations().get(presentationId=file_id).execute()
+        return measure.text_boxes(presentation)
+
+    def apply(file_id: str, requests: list[dict[str, Any]]) -> None:
+        if not requests:
+            return
+        slides.presentations().batchUpdate(
+            presentationId=file_id, body={"requests": requests}
+        ).execute()
+
+    return SlidesSeams(
+        read_slide_text=read_slide_text,
+        read_presentation=read_presentation,
+        read_text_boxes=read_text_boxes,
+        copy_template=copy_template,
+        fill=fill,
+        apply=apply,
+    )
 
 
 def build_runner(
@@ -112,57 +212,12 @@ def build_runner(
         template_revisions.update({item.file_id: item.modified_time for item in files})
         return [{"id": item.file_id, "name": item.name} for item in files]
 
-    def read_slide_text(file_id: str) -> list[str]:
-        presentation = slides.presentations().get(presentationId=file_id).execute()
-        out: list[str] = []
-        for page in presentation.get("slides", []):
-            # PPTX imports often wrap the design in elementGroup; descendants
-            # follows its children so placeholders inside a group stay visible.
-            for element in descendants(page.get("pageElements", [])):
-                text = text_content(element)
-                if text:
-                    out.append(text)
-        return out
-
-    def copy_template(template_id: str, name: str) -> tuple[str, str]:
-        copied = (
-            drive.files()
-            .copy(
-                fileId=template_id,
-                body={"name": name, "parents": [settings.drive_output_folder_id]},
-                supportsAllDrives=True,
-                fields="id,webViewLink",
-            )
-            .execute()
-        )
-        return str(copied["id"]), str(copied["webViewLink"])
-
-    def fill(file_id: str, pairs: dict[str, str]) -> int:
-        if not pairs:
-            return 0
-        presentation = slides.presentations().get(presentationId=file_id).execute()
-        # Two requests per field — literal to sentinel, then sentinel to value —
-        # so nothing Gable writes can be caught by a later replacement.
-        requests = safe_replacement_requests(presentation, pairs)
-        if len(requests) != len(pairs) * 2:
-            return -1
-        reply = (
-            slides.presentations()
-            .batchUpdate(presentationId=file_id, body={"requests": requests})
-            .execute()
-        )
-        return confirmed_replacement_count(reply, len(pairs))
-
-    def read_text_boxes(file_id: str) -> list[Any]:
-        presentation = slides.presentations().get(presentationId=file_id).execute()
-        return measure.text_boxes(presentation)
-
-    def apply(file_id: str, requests: list[dict[str, Any]]) -> None:
-        if not requests:
-            return
-        slides.presentations().batchUpdate(
-            presentationId=file_id, body={"requests": requests}
-        ).execute()
+    seams = slides_seams(settings, drive, slides)
+    read_slide_text = seams.read_slide_text
+    copy_template = seams.copy_template
+    fill = seams.fill
+    read_text_boxes = seams.read_text_boxes
+    apply = seams.apply
 
     def thumbnail(file_id: str) -> bytes:
         import urllib.request
@@ -444,9 +499,7 @@ def build_runner(
         check_photo=check_photo,
         look_at=look_at,
         read_text_boxes=read_text_boxes,
-        read_presentation=lambda file_id: dict(
-            slides.presentations().get(presentationId=file_id).execute()
-        ),
+        read_presentation=seams.read_presentation,
         preflight_template=preflight_template,
         apply=apply,
         thumbnail=thumbnail,

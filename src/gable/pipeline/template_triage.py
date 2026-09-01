@@ -82,6 +82,10 @@ class TemplateTriage:
     reconcile: ReconcilePost | None = None
     look_at: Callable[[str], Inspection] = lambda _file_id: Inspection(False, False, checked=False)
     slide_px: tuple[int, int] = (1080, 1350)
+    #: Builds one test flyer from a design that measured clean and returns the
+    #: paragraph for its thread, or "" when the build was clean. None skips it.
+    #: See `pipeline.canary` for why a design is built before a listing is.
+    dry_build: Callable[[TemplateFile], str] | None = None
 
     def scan_new(self) -> int:
         """Adopt the first catalogue silently, then announce newly added files."""
@@ -130,6 +134,7 @@ class TemplateTriage:
                 # a NEW design still announces a clean result.
                 quiet_when_clean=updated,
             )
+            verdict = self._with_test_build(item, verdict)
             message, status = verdict.message, verdict.status
             # Saving a file Gable has already refused, for the same reason,
             # produces a new revision and the identical sentence. Carmen was
@@ -288,11 +293,14 @@ class TemplateTriage:
                 notification_pending=False,
                 blocker_kind=verdict.blocker_kind,
             )
+            built = self._with_test_build(item, verdict)
             if verdict.blocker_kind == store.BLOCKER_VISUAL:
                 ready.append(item.name)
                 notes.append(verdict.message)
             elif verdict.status == "ready":
                 ready.append(item.name)
+                if built.message != verdict.message:
+                    notes.append(built.message)
             else:
                 blocked.append(verdict.message)
         return self._catalog_answer(ready, blocked, notes)
@@ -555,6 +563,8 @@ class TemplateTriage:
         note = self._naming_note(current.name)
         if note and verdict.message:
             verdict = replace(verdict, message=safe(verdict.message + note))
+        if not for_listing:
+            verdict = self._with_test_build(current, verdict)
         store.record_template_audit(
             self.connection,
             current.file_id,
@@ -567,6 +577,34 @@ class TemplateTriage:
             blocker_kind=verdict.blocker_kind,
         )
         return verdict.message
+
+    def _with_test_build(self, item: TemplateFile, verdict: Verdict) -> Verdict:
+        """Append what a test build of a clean design showed, if anything.
+
+        Only a design that measured ready is built: a structural refusal is
+        already a stop, and building on top of it would say the same thing
+        twice. A design refused only on how it looks is still built, because
+        listings build on it.
+
+        Args:
+            item: The design.
+            verdict: The measured verdict.
+
+        Returns:
+            The verdict with the test build's paragraph appended, or unchanged.
+
+        Raises:
+            Nothing.
+        """
+        if self.dry_build is None or verdict.blocker_kind == store.BLOCKER_STRUCTURAL:
+            return verdict
+        if verdict.status != "ready" and verdict.blocker_kind != store.BLOCKER_VISUAL:
+            return verdict
+        extra = self.dry_build(item)
+        if not extra:
+            return verdict
+        message = safe(f"{verdict.message}\n\n{extra}") if verdict.message else safe(extra)
+        return replace(verdict, message=message)
 
     def _inspect(self, template: TemplateFile) -> preflight.Report:
         """Apply structural and capacity checks to the current Drive revision."""
