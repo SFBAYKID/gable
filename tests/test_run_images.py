@@ -65,8 +65,8 @@ def test_a_heroless_design_is_not_reported_as_missing_its_photo() -> None:
     assert unplaced == ""
 
 
-def test_a_design_that_wants_a_photo_and_does_not_get_one_is_unfinished() -> None:
-    """The photo is the point of a listing flyer, so this is never delivered."""
+def test_a_design_that_wants_a_photo_and_does_not_get_one_names_the_frame() -> None:
+    """The photo is the point of a listing flyer; the note says the frame is still the design's."""
     unplaced = run_images.place_all(
         "run-3",
         "out-1",
@@ -79,11 +79,13 @@ def test_a_design_that_wants_a_photo_and_does_not_get_one_is_unfinished() -> Non
     )
 
     assert unplaced == run_images.NO_PHOTO
-    assert "not sent it as finished" in run_images.unfinished(unplaced)
+    note = run_images.delivery_note(unplaced, "Lolo Simmons")
+    assert "could not get the property photo onto it" in note
+    assert "Drop the photo in yourself" in note
 
 
-def test_a_known_headshot_well_that_keeps_the_sample_face_is_unfinished() -> None:
-    """One agent's name beside another agent's photograph is the worst case."""
+def test_a_known_headshot_well_that_keeps_the_sample_face_is_named() -> None:
+    """One agent's name beside another agent's photograph is said plainly under the link."""
     unplaced = run_images.place_all(
         "run-4",
         "out-1",
@@ -96,6 +98,9 @@ def test_a_known_headshot_well_that_keeps_the_sample_face_is_unfinished() -> Non
     )
 
     assert unplaced == run_images.NO_HEADSHOT
+    note = run_images.delivery_note(unplaced, "Lolo Simmons")
+    assert "Lolo Simmons's own photo" in note
+    assert "Head Shots" in note
 
 
 def test_a_design_with_no_headshot_well_is_still_deliverable() -> None:

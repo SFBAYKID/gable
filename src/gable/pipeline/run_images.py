@@ -19,8 +19,6 @@ import logging
 from collections.abc import Callable
 from typing import Final
 
-from gable.voice import paragraphs
-
 logger: Final[logging.Logger] = logging.getLogger(__name__)
 
 #: What to say when the property photograph did not land. Read as the middle of
@@ -120,21 +118,33 @@ def ignore_headshot(_file_id: str, _url: str, _values: dict[str, str], _template
     return
 
 
-def unfinished(unplaced: str) -> str:
-    """What Gable says about a flyer that is built but missing an image.
+def delivery_note(unplaced: str, agent_name: str) -> str:
+    """What Gable says under the link about an image that did not land.
+
+    Until 2026-09-01 either image failing parked the flyer in review with "I
+    have not sent it as finished". A built flyer with the design's picture
+    still in one frame is a flyer Carmen fixes in a minute; a described flyer
+    she cannot open is nothing. Chase's rule: Gable produces the flyer no
+    matter what.
 
     Args:
-        unplaced: `NO_PHOTO`, `NO_HEADSHOT`, or another such clause, read as
-            the middle of "I built the flyer, but I ...".
+        unplaced: `NO_PHOTO` or `NO_HEADSHOT`.
+        agent_name: The agent, for the headshot sentence.
 
     Returns:
-        Two paragraphs. The second is the one that matters: it says the draft
-        was not sent as finished, so nobody goes looking for a link.
+        One or two sentences naming what is still the design's and what to do.
 
     Raises:
         Nothing.
     """
-    return paragraphs(
-        f"I built the flyer, but I {unplaced}.",
-        "I have not sent it as finished.",
+    if unplaced == NO_PHOTO:
+        return (
+            "I could not get the property photo onto it, so the design's own picture is "
+            "still in the large frame. Drop the photo in yourself, or send another one here "
+            "and I will try again."
+        )
+    who = f"{agent_name}'s" if agent_name.strip() else "the agent's"
+    return (
+        f"I could not replace the sample headshot with {who} own photo, so the design's "
+        "sample face is still on it. Swap it for the one in Head Shots before this goes out."
     )

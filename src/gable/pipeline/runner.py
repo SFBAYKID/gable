@@ -17,7 +17,7 @@ from gable.db import store
 from gable.listings.enrich import Facts
 from gable.listings.intake import Intake, needs_two_agents, price_note
 from gable.pipeline import (
-    audit,
+    fill_check,
     needs,
     people,
     research_gate,
@@ -515,77 +515,24 @@ class Runner:
         output_id, output_url = self.copy_template(template_id, run_values.output_name(intake))
         changed = self.fill(output_id, pairs)
         logger.info("run %s filled %d field(s)", run_id, changed)
-        unfinished = run_reporting.fill_failure(pairs, changed)
-        if unfinished is not None:
-            return self._outcome(
-                run_id,
-                unfinished.spoken,
-                result,
-                status="needs_review",
-                detail=unfinished.detail,
-                output_file_id=output_id,
-                output_url=output_url,
-            )
-
-        # Read the flyer back and require every value to appear exactly as it
-        # was supplied. A delivered flyer once carried "$460,0000" — four zeros
-        # — against a submission that supplied "$685,000", and every check
-        # passed, because the vision pass reads layout and a plausible-looking
-        # wrong number is not a layout problem. Counting replacements is not
-        # enough either: `replaceAllText` reported success while corrupting the
-        # text it matched inside.
-        #
-        # A wrong price on a real address is the worst thing this system can
-        # produce, so this is deterministic rather than a judgement.
         readback = run_reporting.read_back(self.read_slide_text, output_id)
-        if readback is None:
-            spoken = safe(run_reporting.UNREADABLE_FLYER)
+        # What the readback says about the fill: the four stops that survive
+        # the stop policy, or notes for under the link. See `fill_check`.
+        verdict = fill_check.check_fill(
+            pairs, changed, readback, values, resolution, run_values.OFFICE_PHONE
+        )
+        if verdict.stop is not None:
             return self._outcome(
                 run_id,
-                spoken,
+                verdict.stop.spoken,
                 result,
                 status="needs_review",
-                detail="the filled flyer could not be read back for verification",
+                detail=verdict.stop.detail,
                 output_file_id=output_id,
                 output_url=output_url,
             )
-
-        sent = {value for value in pairs.values() if value.strip()}
-        wrong = audit.values_missing_from(readback, values, sent)
-        stray: list[str] = []
-        if not wrong:
-            # A phone number or email on the flyer that this run did not supply
-            # belongs to the template's sample agent. A delivered flyer carried
-            # "Stacey Abbott, 410.952.6193, sabbotthomes@gmail.com" from a
-            # two-agent design's second slot and passed every check, because the
-            # readback above can only verify that supplied values appear — it
-            # has nothing to compare against for a value never supplied.
-            #
-            # Someone else's phone number and personal email on a client-facing
-            # flyer is worse than any layout defect, so this is an absence check
-            # and it is deterministic.
-            stray = audit.foreign_content_in(readback, values, run_values.OFFICE_PHONE)
-        if wrong or stray:
-            detail = (
-                f"a filled value did not read back correctly: {wrong[0]}"
-                if wrong
-                else f"contact details that are not this listing's: {stray[0]}"
-            )[:400]
-            # Two different problems, two different sentences. Reading Gable's
-            # own words in Slack caught these being spliced together into "the
-            # phone number 410.456.6868 is not this listing's on it does not
-            # match what I was given" — one message built from a template that
-            # expects a bare field name and a value that is already a sentence.
-            spoken = safe(run_reporting.mismatch(wrong[0] if wrong else "", stray))
-            return self._outcome(
-                run_id,
-                spoken,
-                result,
-                status="needs_review",
-                detail=detail,
-                output_file_id=output_id,
-                output_url=output_url,
-            )
+        post_build_notes: list[str] = list(verdict.notes)
+        post_build_details: list[str] = list(verdict.details)
 
         # Both photographs, and what to say when one did not land. The stage
         # lives in `run_images` so the difference between "this design has no
@@ -603,15 +550,14 @@ class Runner:
             progress=self.progress,
         )
         if unplaced:
-            return self._outcome(
-                run_id,
-                safe(run_images.unfinished(unplaced)),
-                result,
-                status="needs_review",
-                detail=f"the flyer was left unfinished: it {unplaced}",
-                output_file_id=output_id,
-                output_url=output_url,
+            # Said under the link. Both images failing used to park the flyer
+            # in review; Carmen drops a photo into a frame in less time than it
+            # takes to read that she cannot have it.
+            logger.error("run %s: the flyer %s", run_id, unplaced)
+            post_build_notes.append(
+                safe(run_images.delivery_note(unplaced, values.get("agent_name", "")))
             )
+            post_build_details.append(f"it {unplaced}")
 
         # 7a. Fit the text to its boxes. Slides cannot autofit over the API —
         # verified: "Autofit types other than NONE are not supported" — so a
@@ -680,8 +626,10 @@ class Runner:
         # to send the flyer and say plainly what was noticed. Chase's call,
         # 2026-08-17, after seeing both threads. A rectangle 7b measured is
         # noticed the same way, since 2026-09-01.
-        noticed_parts: list[str] = [layout_noticed]
-        noticed_details: list[str] = [moved.detail] if moved is not None else []
+        noticed_parts: list[str] = [*post_build_notes, layout_noticed]
+        noticed_details: list[str] = [*post_build_details]
+        if moved is not None:
+            noticed_details.append(moved.detail)
         if not checked.ok:
             result.output_url = output_url
             # When another photograph is the whole remedy, the flyer still goes

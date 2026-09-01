@@ -607,13 +607,31 @@ every API level — valid file, valid image, HTTP 200 throughout — and still b
 obviously wrong to any human who looks at it. The API cannot tell you the
 roofline is cut off. A model looking at the picture can.
 
-A render that fails inspection is not delivered as fine, nor is one whose
-inspection was unavailable, malformed, refused, or low-confidence. Its strict
-result names a typed remedy. Only a contradiction independently legible in the
-original upload can request a replacement; any typed mixed finding and every
-other result stays `needs_review`. The replacement question is written to the
-same durable outbox as the initial image question, and only Slack confirmation
-moves the run to `needs_photo`.
+A render that fails inspection, or whose inspection was unavailable,
+malformed, refused, or low-confidence, is still **delivered**, with every
+finding stated under the link — Chase's rule of 2026-08-17. Its strict result
+names a typed remedy. A contradiction independently legible in the original
+upload marks the run as wanting a replacement photograph, so the next upload in
+the thread is accepted without magic words.
+
+**The stop policy.** A flyer that exists is sent. Since 2026-09-01 the runner
+holds a copied flyer in `needs_review` for exactly three reasons, each about a
+fact rather than a look:
+
+| Stop | Why it is still a stop |
+|---|---|
+| Nothing of the listing is on it — the design has no field Gable recognises | It is the design, not a flyer |
+| A value went on and reads back changed — "$460,0000" for "$685,000" | A wrong fact about a real house, worse than no flyer |
+| Contact details that are not this listing's are still on it | Somebody else's phone number on a client-facing flyer |
+| Slides would not return the text at all | Nothing can be verified |
+
+Everything else that used to stop is a note under the link: a field whose
+design text is still showing because the fill did not land, a property photo
+or headshot that could not be placed, a rectangle the geometric audit measured
+further off the page than the design drew it, and every opinion of the visual
+pass. Each note says what is still the design's and what to do about it, and
+the run event records it. Carmen reviews every post before a client sees it;
+a described flyer she cannot open leaves her nothing to review.
 
 A run left in `needs_review` still accepts a replacement photo uploaded to its
 thread, without any question having been asked. Review means built and withheld,

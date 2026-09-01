@@ -196,8 +196,12 @@ def test_a_second_resume_does_not_build_a_duplicate_flyer(db: sqlite3.Connection
     assert "another copy" in second_rec.said[-1]
 
 
-def test_a_photo_that_will_not_go_on_stops_delivery(db: sqlite3.Connection) -> None:
-    """Given a photo and unable to place it, stopping beats shipping without."""
+def test_a_photo_that_will_not_go_on_is_delivered_and_named(db: sqlite3.Connection) -> None:
+    """Given a photo and unable to place it, the flyer still goes, with the frame named.
+
+    Until 2026-09-01 this parked the run in review with a description of a
+    flyer Carmen could not open. She drops a photo into a frame in a minute.
+    """
     submission = _submission(rid="rid-photofail")
     _record(db, submission)
 
@@ -214,8 +218,10 @@ def test_a_photo_that_will_not_go_on_stops_delivery(db: sqlite3.Connection) -> N
 
     rec = NoPlace()
     result = _runner(db, rec).run(submission)
-    assert result.status == "needs_review"
-    assert "could not get the photo onto it" in rec.said[-1]
+    assert result.status == "delivered"
+    assert "could not get the property photo onto it" in rec.said[-1]
+    assert "Open the flyer" in rec.said[-1]
+    assert "ready" not in rec.said[-1], "it is built, not finished"
 
 
 def test_the_photo_is_placed_on_a_delivered_flyer(db: sqlite3.Connection) -> None:
@@ -227,7 +233,16 @@ def test_the_photo_is_placed_on_a_delivered_flyer(db: sqlite3.Connection) -> Non
     assert rec.photo_placed is True
 
 
-def test_an_unsafe_text_match_stops_before_photo_placement(db: sqlite3.Connection) -> None:
+def test_an_unsafe_text_match_delivers_with_every_unfilled_field_named(
+    db: sqlite3.Connection,
+) -> None:
+    """A fill refused as unsafe changes nothing, so every slot still shows the design's text.
+
+    The flyer goes out saying exactly which slots those are, and the photo
+    still lands; the design's text in a slot is a minute of typing, a
+    described flyer is nothing.
+    """
+
     class UnsafeRecorder(Recorder):
         def fill(self, file_id: str, pairs: dict[str, str]) -> int:  # noqa: ARG002
             self.filled = pairs
@@ -238,9 +253,34 @@ def test_an_unsafe_text_match_stops_before_photo_placement(db: sqlite3.Connectio
     _record(db, submission)
     result = _runner(db, rec).run(submission)
 
+    assert result.status == "delivered"
+    assert rec.photo_placed is True
+    assert "did not go onto the flyer" in result.said[-1]
+    assert "address" in result.said[-1] and "price" in result.said[-1]
+
+
+def test_a_value_that_reads_back_changed_is_never_delivered(db: sqlite3.Connection) -> None:
+    """A price reading $460,0000 against a supplied $685,000 is a wrong fact about a real house."""
+
+    class Corrupting(Recorder):
+        def fill(self, file_id: str, pairs: dict[str, str]) -> int:  # noqa: ARG002
+            self.filled = pairs
+            self.output_text = [
+                (pairs.get(text, text) + "0" if text == "[PRICE]" else pairs.get(text, text))
+                for text in self.slide_text
+            ]
+            return len(pairs)
+
+    rec = Corrupting()
+    submission = _submission(rid="rid-corrupted")
+    _record(db, submission)
+    result = _runner(db, rec).run(submission)
+
     assert result.status == "needs_review"
-    assert rec.photo_placed is False
-    assert "did not match exactly once" in result.said[-1]
+    # Which of the two value checks names it first does not matter; that no
+    # link went out does.
+    assert "not sent it as finished" in result.said[-1]
+    assert "Open the flyer" not in " ".join(rec.said)
 
 
 def test_pixelated_mike_render_is_held_without_exposing_the_bad_flyer(

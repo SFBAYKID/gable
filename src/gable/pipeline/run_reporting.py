@@ -625,6 +625,70 @@ UNREADABLE_FLYER: Final[str] = paragraphs(
 )
 
 
+def readback_split(
+    readback: str,
+    values: Mapping[str, str],
+    resolution: template_fields.Resolution,
+    missing: list[str],
+) -> tuple[list[str], list[str]]:
+    """Tell a value that never went on from one that went on changed.
+
+    Both read back as "missing". They are different flyers: a slot still
+    showing the design's own text is a flyer Carmen types one value into,
+    while a price that reads "$460,0000" is a wrong fact about a real house.
+    The first is delivered with a note; the second is never delivered.
+
+    Args:
+        readback: All text read back from the rendered slide.
+        values: What the run intended to put on the flyer.
+        resolution: Which literal each field replaced.
+        missing: Field names `audit.values_missing_from` reported, in
+            Carmen's words.
+
+    Returns:
+        Two lists in Carmen's words: fields whose design literal is still on
+        the flyer, and fields whose value and literal are both gone.
+
+    Raises:
+        Nothing.
+    """
+    unfilled: list[str] = []
+    corrupted: list[str] = []
+    for name in values:
+        readable = name.replace("_", " ")
+        if readable not in missing:
+            continue
+        literal = resolution.fields.get(name, "")
+        if literal and literal in readback:
+            unfilled.append(readable)
+        else:
+            corrupted.append(readable)
+    return unfilled, corrupted
+
+
+def unfilled_note(names: list[str]) -> str:
+    """Name the values that did not make it onto a delivered flyer.
+
+    Args:
+        names: Fields in Carmen's words whose design text is still showing.
+
+    Returns:
+        One sentence, or "" when everything landed.
+
+    Raises:
+        Nothing.
+    """
+    kept = [name for name in names if name.strip()]
+    if not kept:
+        return ""
+    listed = kept[0] if len(kept) == 1 else ", ".join(kept[:-1]) + " and " + kept[-1]
+    spot = "that spot" if len(kept) == 1 else "those spots"
+    return (
+        f"The {listed} did not go onto the flyer, so the design's own text is still in {spot}. "
+        "Type over it before this goes out, or send it here and I will run it again."
+    )
+
+
 def mismatch(wrong: str, stray: list[str]) -> str:
     """Say that a filled value is not the one that was supplied.
 

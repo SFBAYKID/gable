@@ -333,8 +333,10 @@ def test_a_flyer_that_still_shows_a_placeholder_is_not_delivered(
 
     rec = StubbornFill()
     result = _runner(db, rec).run(submission)
-    assert result.status == "needs_review"
-    assert any("did not match exactly once" in said for said in rec.said)
+    # Delivered, and every slot still showing the design's text is named
+    # under the link -- a value that never went on is not a wrong value.
+    assert result.status == "delivered"
+    assert any("did not go onto the flyer" in said for said in rec.said)
 
 
 # --- every exit records a status --------------------------------------------
@@ -481,8 +483,9 @@ def test_a_found_headshot_slot_that_fails_to_change_blocks_delivery(
 
     result = runner.run(submission)
 
-    assert result.status == "needs_review"
-    assert any("sample headshot" in message for message in result.said)
+    assert result.status == "delivered"
+    assert any("sample face is still on it" in message for message in result.said)
+    assert any("Head Shots" in message for message in result.said)
 
 
 def test_a_correctable_preflight_warning_builds_and_reports_one_outcome(
