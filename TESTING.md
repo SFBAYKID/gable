@@ -60,6 +60,22 @@ It reads the response tab through the service account and never writes to it.
 A verdict that changed is a fix or a regression, and the diff is where you
 decide which. A new row is a new real input the suite now knows about.
 
+## 0b. Audit the threads
+
+After a live test, and weekly against production, read the channel the way a
+person did:
+
+```bash
+ssh -i ~/.ssh/gable_droplet root@143.110.146.87 \
+  'cd /opt/gable && sudo -u gable env GABLE_SLACK_CHANNEL_ID=C0B02721MNK \
+     /opt/gable/.venv/bin/python -m tools.audit_threads --days 1'
+```
+
+Drop the channel override to audit #calvo. It flags any thread with more than
+three Gable messages after the announcement, a repeated sentence, an
+escalation, or no flyer link at the end, and exits 1 when anything is flagged.
+It reads only.
+
 ## 1. Complete local gate
 
 From the repository root:
