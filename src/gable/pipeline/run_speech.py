@@ -134,6 +134,23 @@ def deliver_question(
     # The ask is a report, not a reply -- see `voice.MAX_ASK_CHARS`. Trimmed at
     # the reply ceiling it dropped the photo request itself.
     asked = safe(question or "I need one more thing before I can build this.", MAX_ASK_CHARS)
+    guarded = repeat_guard(store.confirmed_questions_for_run(connection, run_id), asked)
+    if guarded is None:
+        # Asked, escalated, and about to be asked a third time: say nothing,
+        # stay paused, and leave the thread readable.
+        logger.error("run %s would ask the same question a third time; staying quiet", run_id)
+        store.set_status(
+            connection,
+            run_id,
+            status,
+            "the same question was already asked and escalated; not repeating it",
+            failure_reason=asked,
+        )
+        result.status = status
+        return result
+    if guarded != asked:
+        logger.error("run %s was about to ask the same question again; escalating", run_id)
+    asked = guarded
     opening = headline or people.opening_for(connection, intake, thread_ts)
     delivery = run_questions.prepare_and_deliver(
         connection,
@@ -151,6 +168,49 @@ def deliver_question(
     if delivery.questions:
         result.questions = [asked, *[q.ask for q in questions[1:]]]
     return result
+
+
+#: How a repeated question is escalated. The question travels with it so the
+#: thread still says what is wrong, and the last sentence is what changes: a
+#: person reading it knows Gable will not keep asking.
+STUCK_OPENING: str = "I have your reply, and I am still stuck on the same thing."
+STUCK_CLOSING: str = "I will not ask again in this thread. Chase, this one needs you."
+
+
+def _folded(text: str) -> str:
+    """One sentence compared as words, not bytes."""
+    return " ".join(text.split()).casefold()
+
+
+def repeat_guard(already_asked: tuple[str, ...], asked: str) -> str | None:
+    """Stop a run saying the same sentence to the same thread twice.
+
+    On 2026-09-01 Lina Mariner's thread got "The address reads ..., which looks
+    like more than one property. Which one is this post for?" three times,
+    each time after Carmen had answered it. The repeat is the failure Carmen
+    sees as "not listening", whatever the cause underneath, and every false
+    positive from now on costs one round instead of four.
+
+    Args:
+        already_asked: Every question this run has already put in front of a
+            person, oldest first.
+        asked: The question about to go out.
+
+    Returns:
+        `asked` unchanged when it is new; the escalation carrying it when it
+        has been asked before; None when the escalation has also already been
+        sent, in which case the caller says nothing and stays paused.
+
+    Raises:
+        Nothing.
+    """
+    seen = [_folded(item) for item in already_asked]
+    if _folded(asked) not in seen:
+        return asked
+    escalation = safe(f"{STUCK_OPENING} {asked} {STUCK_CLOSING}", MAX_ASK_CHARS)
+    if _folded(escalation) in seen:
+        return None
+    return escalation
 
 
 def record_the_ask(connection: Connection, run_id: str, outstanding: needs.Needs) -> str:

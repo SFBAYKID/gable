@@ -15,6 +15,11 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Final
 
+from gable.db.action_store import (
+    prepare_headshot_replacement_action,
+    prepare_photo_replacement_action,
+    prepare_run_action_notification,
+)
 from gable.db.event_store import (
     AbandonedSlackEvent,
     abandoned_slack_events,
@@ -35,13 +40,11 @@ from gable.db.question_store import (
     bind_run_question_thread,
     claim_run_notification_delivery,
     confirm_run_question,
+    confirmed_questions_for_run,
     has_pending_run_notification,
     has_run_action_notification,
     pending_run_question,
     pending_run_questions,
-    prepare_headshot_replacement_action,
-    prepare_photo_replacement_action,
-    prepare_run_action_notification,
     prepare_run_outcome,
     prepare_run_question,
     release_run_notification_delivery,
@@ -132,6 +135,7 @@ __all__ = [
     "complete_slack_event",
     "confirm_run_question",
     "confirm_template_notification",
+    "confirmed_questions_for_run",
     "has_open_slack_event",
     "has_pending_photo_question",
     "has_pending_run_notification",

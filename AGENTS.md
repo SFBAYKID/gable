@@ -309,6 +309,13 @@ values Carmen can supply in a reply:
   uncertified two-agent layout, a missing headshot. Those keep their own exact
   message and their own status.
 
+Gable never asks the same question twice in one thread. If a reply leaves the
+same problem in place, the second message says so once — it carries the
+question, says Gable will not ask again, and names Chase — and a third
+identical ask is not posted at all; the run stays paused with the question
+recorded. Lina Mariner's thread heard one address question three times on
+2026-09-01, and that repeat is what reads as "not listening".
+
 When one of those stops does happen: name the listing, name the field, say why
 it matters — as a sentence.
 

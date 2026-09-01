@@ -189,186 +189,6 @@ def prepare_run_outcome(
     )
 
 
-def prepare_run_action_notification(
-    connection: sqlite3.Connection,
-    run_id: str,
-    action_id: str,
-    message: str,
-    thread_ts: str,
-) -> PendingRunQuestion:
-    """Persist one verified conversational mutation result exactly once."""
-    clean_action_id = action_id.strip()
-    if not clean_action_id:
-        raise ValueError("a conversational action notification needs its Slack event id")
-    existing = connection.execute(
-        f"SELECT {_QUESTION_COLUMNS} FROM run_questions "
-        "WHERE run_id = ? AND notification_kind = 'action' AND question_label = ? "
-        "ORDER BY created_at DESC LIMIT 1",
-        (run_id, clean_action_id),
-    ).fetchone()
-    if existing is not None:
-        return _from_row(existing)
-    run = connection.execute(
-        "SELECT status, slack_thread_ts FROM runs WHERE run_id = ?",
-        (run_id,),
-    ).fetchone()
-    if run is None:
-        raise ValueError("the edited run no longer exists")
-    root = thread_ts.strip()
-    if not root or str(run["slack_thread_ts"] or "") != root:
-        raise ValueError("the edited run is not owned by this Slack thread")
-    status = str(run["status"])
-    # Compared against the constant, never against a literal typed here.
-    target_status = "needs_photo" if message.strip() == PHOTO_REPLACEMENT_MESSAGE else status
-    return _prepare_run_notification(
-        connection,
-        run_id,
-        "action",
-        status,
-        target_status,
-        message,
-        question_label=clean_action_id,
-        thread_ts=root,
-        confirmation_detail="Slack confirmed the conversational change outcome",
-        transition_detail="verified conversational change persisted before Slack delivery",
-    )
-
-
-def prepare_photo_replacement_action(
-    connection: sqlite3.Connection,
-    run_id: str,
-    action_id: str,
-    thread_ts: str,
-) -> PendingRunQuestion | None:
-    """Atomically claim and persist one hero-replacement Slack action.
-
-    This is the only mutating conversational action currently enabled. The
-    event claim, needs_photo transition, run event, and durable instruction are
-    one SQLite transaction, so duplicate deliveries on separate processes can
-    neither repeat the transition nor race an answering upload.
-    """
-    clean_action_id = action_id.strip()
-    root = thread_ts.strip()
-    if not clean_action_id or not root:
-        return None
-    with _transition(connection):
-        run = connection.execute(
-            "SELECT status, slack_thread_ts FROM runs WHERE run_id = ?",
-            (run_id,),
-        ).fetchone()
-        if (
-            run is None
-            or str(run["status"]) not in {"delivered", "needs_review"}
-            or str(run["slack_thread_ts"] or "") != root
-        ):
-            return None
-        claimed = connection.execute(
-            """
-            INSERT OR IGNORE INTO slack_event_claims (
-                route, event_id, subject_id, thread_ts, fingerprint, claimed_at
-            ) VALUES ('run_action', ?, ?, ?, 'replace_photo:hero', ?)
-            """,
-            (clean_action_id, run_id, root, _now()),
-        )
-        if claimed.rowcount != 1:
-            return None
-        now = _now()
-        changed = connection.execute(
-            "UPDATE runs SET status = 'needs_photo', updated_at = ?, failure_reason = ? "
-            "WHERE run_id = ? AND status IN ('delivered', 'needs_review')",
-            (now, PHOTO_REPLACEMENT_MESSAGE, run_id),
-        )
-        if changed.rowcount != 1:
-            raise sqlite3.IntegrityError("the photo-replacement action lost its run claim")
-        connection.execute(
-            "INSERT INTO run_events (run_id, at, status, detail) VALUES (?,?,?,?)",
-            (run_id, now, "needs_photo", "waiting for a replacement property photo"),
-        )
-        pending = _prepare_run_notification(
-            connection,
-            run_id,
-            "action",
-            "needs_photo",
-            "needs_photo",
-            PHOTO_REPLACEMENT_MESSAGE,
-            question_label=clean_action_id,
-            thread_ts=root,
-            confirmation_detail="Slack confirmed the conversational change outcome",
-            transition_detail="photo replacement instruction persisted before Slack delivery",
-        )
-        connection.execute(
-            "UPDATE slack_event_claims SET completed_at = ?, detail = ? "
-            "WHERE route = 'run_action' AND event_id = ? AND subject_id = ?",
-            (now, "photo replacement instruction persisted", clean_action_id, run_id),
-        )
-    return pending
-
-
-def prepare_headshot_replacement_action(
-    connection: sqlite3.Connection,
-    run_id: str,
-    action_id: str,
-    thread_ts: str,
-    message: str,
-) -> PendingRunQuestion | None:
-    """Atomically claim and persist one authoritative-folder headshot request."""
-    clean_action_id = action_id.strip()
-    root = thread_ts.strip()
-    clean_message = message.strip()
-    if not clean_action_id or not root or not clean_message:
-        return None
-    with _transition(connection):
-        run = connection.execute(
-            "SELECT status, slack_thread_ts FROM runs WHERE run_id = ?",
-            (run_id,),
-        ).fetchone()
-        if (
-            run is None
-            or str(run["status"]) not in {"delivered", "needs_review"}
-            or str(run["slack_thread_ts"] or "") != root
-        ):
-            return None
-        claimed = connection.execute(
-            """
-            INSERT OR IGNORE INTO slack_event_claims (
-                route, event_id, subject_id, thread_ts, fingerprint, claimed_at
-            ) VALUES ('run_action', ?, ?, ?, 'replace_photo:headshot', ?)
-            """,
-            (clean_action_id, run_id, root, _now()),
-        )
-        if claimed.rowcount != 1:
-            return None
-        now = _now()
-        changed = connection.execute(
-            "UPDATE runs SET status = 'needs_info', updated_at = ?, failure_reason = ? "
-            "WHERE run_id = ? AND status IN ('delivered', 'needs_review')",
-            (now, clean_message[:400], run_id),
-        )
-        if changed.rowcount != 1:
-            raise sqlite3.IntegrityError("the headshot action lost its run claim")
-        connection.execute(
-            "INSERT INTO run_events (run_id, at, status, detail) VALUES (?,?,?,?)",
-            (run_id, now, "needs_info", "waiting for an updated filed agent headshot"),
-        )
-        pending = _prepare_run_notification(
-            connection,
-            run_id,
-            "action",
-            "needs_info",
-            "needs_info",
-            clean_message,
-            question_label=clean_action_id,
-            thread_ts=root,
-            confirmation_detail="Slack confirmed the conversational change outcome",
-        )
-        connection.execute(
-            "UPDATE slack_event_claims SET completed_at = ?, detail = ? "
-            "WHERE route = 'run_action' AND event_id = ? AND subject_id = ?",
-            (now, "headshot replacement instruction persisted", clean_action_id, run_id),
-        )
-    return pending
-
-
 def _prepare_run_notification(
     connection: sqlite3.Connection,
     run_id: str,
@@ -765,6 +585,29 @@ def pending_run_question(
         (question_id,),
     ).fetchone()
     return _from_row(row) if row is not None else None
+
+
+def confirmed_questions_for_run(connection: sqlite3.Connection, run_id: str) -> tuple[str, ...]:
+    """Every question this run has already put in front of a person, oldest first.
+
+    Args:
+        connection: An open connection.
+        run_id: The run.
+
+    Returns:
+        The exact confirmed question messages. Used to notice that a run is
+        about to say the same sentence again — see `run_speech.repeat_guard`.
+
+    Raises:
+        sqlite3.Error: on a query failure.
+    """
+    rows = connection.execute(
+        "SELECT message FROM run_questions WHERE run_id = ? "
+        "AND notification_kind = 'question' AND confirmed_at != '' "
+        "ORDER BY created_at, rowid",
+        (run_id,),
+    ).fetchall()
+    return tuple(str(row["message"]) for row in rows)
 
 
 def has_pending_run_notification(connection: sqlite3.Connection, run_id: str) -> bool:
