@@ -451,12 +451,19 @@ Natural-language replies in a Gable-owned thread refresh the current Sheet,
 roster, and source template before continuing the same paused run; there is no
 operator command queue or Slack service-control surface.
 
-**Before live polling is enabled**, preview it against the deployed database.
-The current audit found three exact pre-release rows not recorded as handled;
-Chase must confirm them, `tools/adopt_rows.py` must adopt only their asserted row
-and content hashes, and `tools/preview_poll.py --expect-none` must then prove no
-historical work would open. `adopt_backfill.py` remains only for bootstrapping a
-genuinely fresh database from an entirely historical source snapshot.
+**Live polling is on** and has been since mid-August: the droplet watches
+`Form Responses 1` every two minutes in business hours and posts to #calvo.
+`tools/adopt_rows.py` and `tools/preview_poll.py --expect-none` are how a
+pre-release row is adopted without opening historical work; `adopt_backfill.py`
+remains only for bootstrapping a genuinely fresh database. (This paragraph said
+"before live polling is enabled" until 2026-09-01, two weeks after it was.)
+
+**Phase 1's exit is a week of clean real listings, watched, not a feature.**
+Chase's call on 2026-09-01: change nothing and watch for a week from that
+date. "Clean" is measured by `tools/audit_threads.py` against #calvo, not by
+the runs table: no thread with more than three Gable messages after the
+announcement, no repeated sentence, no escalation, a flyer link at the end.
+A flagged thread is read and classified before anything is changed.
 
 ### Phase 2 — after Phase 1 has run for a week on real listings
 
