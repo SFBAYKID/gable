@@ -45,28 +45,32 @@ tests: the condo address, the clipped face inside a bleeding well, the
 delivered layout note, the retry, and every silent-site branch.
 `agents/profile_lookup.py` was split from `website.py` at the 800-line ceiling.
 
+**Deployed (`1207109`) and the runs resumed from the droplet.** Brittney's
+flyer is in her thread, built from the source Carmen edited at 20:01, with no
+layout note and the credential read from her profile — the site answered this
+time. Lina's first resume found a fifth defect: `tools/run_row.py --resume`
+re-read the sheet's `10600 partridge lane b3` instead of the address Carmen
+had stated in the thread, and posted one more address ask there. The Slack
+path had always laid the stated address over the row; the tool did not.
+`store.stated_address` is now the one reader both use, with a test. That
+message in her thread is this session's, not Gable's design.
+
 **Not a defect, but parked:** a Sold listing from 2026-08-31 evening is still
 waiting for its property photo in its own thread.
 
 ## What I need from Chase
 
-- **The two stuck runs.** Deploy is by `make deploy`. If this session could
-  not resume them itself (see the note that follows this section once deploy
-  has run), each can be released from Slack by replying "run it again" in its
-  thread, or from the droplet:
-
-  ```
-  ssh -i ~/.ssh/gable_droplet root@143.110.146.87 \
-    "cd /opt/gable && sudo -u gable ./.venv/bin/python -m tools.run_row 'Form Responses 1' 136 --resume"
-  ssh -i ~/.ssh/gable_droplet root@143.110.146.87 \
-    "cd /opt/gable && sudo -u gable ./.venv/bin/python -m tools.run_row 'Form Responses 1' 137 --resume"
-  ```
-
-  Row 136 is Lina Mariner, row 137 is Brittney Bushee. Both hold their photo.
 - **One judgment call to confirm.** A silent website now yields the brokerage
   credential when the roster row is complete. Emptying
   `GABLE_DEFAULT_AGENT_CREDENTIAL` restores the old stop, as the 2026-08-19
   decision promised; nothing else changes.
+- **If Lina's thread still shows no flyer**, the second resume did not land.
+  Reply "run it again" in her thread, or from the droplet:
+
+  ```
+  ssh -i ~/.ssh/gable_droplet root@143.110.146.87 \
+    "cd /opt/gable && sudo -u gable ./.venv/bin/python -m tools.run_row 'Form Responses 1' 136 --resume"
+  ```
 
 
 ## 2026-08-27 — Porsher Howard's Client Review Post: asked five times for a photo the design cannot hold

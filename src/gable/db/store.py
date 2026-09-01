@@ -324,10 +324,7 @@ def load_submission(
     # ever asks when the form's own value cannot be read. Laid over the stored
     # row rather than written into it, so re-reading the sheet — which every
     # resume does — cannot quietly undo the correction.
-    stated = connection.execute(
-        "SELECT address FROM stated_addresses WHERE response_row_id = ?",
-        (response_row_id,),
-    ).fetchone()
+    stated = stated_address(connection, response_row_id)
     return StoredSubmission(
         response_row_id=row["response_row_id"],
         sheet_row=int(row["sheet_row"]),
@@ -336,7 +333,7 @@ def load_submission(
             agent_email=row["agent_email"],
             agent_name=row["agent_name"],
             request_type=row["request_type"],
-            address=str(stated["address"]) if stated else row["address"],
+            address=stated or row["address"],
             post_details=row["post_details"],
             open_house=row["open_house"],
             new_price=row["new_price"],
@@ -560,6 +557,32 @@ SUPPLIABLE_FIELDS: Final[frozenset[str]] = frozenset(
     # answer has to be recordable or the question is another dead end.
     {"beds", "baths", "square_feet", "list_price", "open_house", "review_quote", "client_name"}
 )
+
+
+def stated_address(connection: sqlite3.Connection, response_row_id: str) -> str:
+    """The address a person gave for this submission, or "" when nobody has.
+
+    One reader for the two paths that resume a run. The Slack path laid the
+    stated address over the row and the manual resume tool did not, so on
+    2026-09-01 `tools/run_row.py --resume` rebuilt Lina Mariner's listing from
+    the sheet's `10600 partridge lane b3` and asked for the whole address a
+    fourth time, after Carmen had supplied it and Gable had recorded it.
+
+    Args:
+        connection: An open connection.
+        response_row_id: The submission's identity.
+
+    Returns:
+        The stated address, or "".
+
+    Raises:
+        sqlite3.Error: on a query failure.
+    """
+    row = connection.execute(
+        "SELECT address FROM stated_addresses WHERE response_row_id = ?",
+        (response_row_id,),
+    ).fetchone()
+    return str(row["address"]) if row else ""
 
 
 def remember_stated_address(

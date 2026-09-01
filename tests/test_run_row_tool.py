@@ -17,6 +17,7 @@ import pytest
 
 from gable import spend
 from gable.db.schema import apply_migrations, connect
+from gable.listings.intake import Intake
 from gable.pipeline.questions import ReconcileState, Reconciliation
 from gable.sheets import repository as sheet_repo
 
@@ -45,6 +46,8 @@ def _exercise_main(
     existing: object | None = None,
     result_status: str = "delivered",
     resume: bool = False,
+    stated_address: str = "",
+    resumed_with: list[str] | None = None,
 ) -> tuple[int, list[BuildCall], _Connection]:
     credential = tmp_path / "service-account.json"
     credential.write_text("{}", encoding="utf-8")
@@ -61,12 +64,20 @@ def _exercise_main(
         slack_channel_id="C0B02721MNK",
         spend_ceiling_usd=int(spend.DEFAULT_CEILING_USD),
     )
-    intake = SimpleNamespace(
+    intake = Intake(
+        agent_email="mike@cornerhouserealty.com",
         agent_name="Mike Kulnich",
         request_type="Sold",
         address="123 Main St",
+        post_details="",
+        open_house="",
+        new_price="",
+        closing_price="",
+        extra_notes="",
+        side="",
+        notes="",
     )
-    submission = SimpleNamespace(
+    submission = sheet_repo.Submission(
         response_row_id="response-47",
         sheet_row=47,
         submitted_at="2026-08-13T12:00:00Z",
@@ -93,6 +104,7 @@ def _exercise_main(
     monkeypatch.setattr("tools.run_row.sync_contacts", lambda *_args: None)
     monkeypatch.setattr("tools.run_row.store.record_submission", lambda *_args: None)
     monkeypatch.setattr("tools.run_row.store.latest_run", lambda *_args: existing)
+    monkeypatch.setattr("tools.run_row.store.stated_address", lambda *_args: stated_address)
 
     class _Slack:
         def auth_test(self) -> dict[str, str]:
@@ -122,7 +134,9 @@ def _exercise_main(
             resume_fields: dict[str, object] | None = None,
             expected_status: str | None = None,
         ) -> SimpleNamespace:
-            assert item is submission
+            assert item is submission or stated_address, "the row is resumed as read"
+            if resumed_with is not None:
+                resumed_with.append(str(item.intake.address))  # type: ignore[attr-defined]
             assert run_id == "run-existing"
             resume_calls.append((resume_fields, expected_status))
             return SimpleNamespace(run_id=run_id, status=result_status, said=[])
@@ -355,3 +369,36 @@ def test_read_one_reconciles_and_selects_one_atomic_sheet_snapshot(tmp_path: Pat
             sheet_repo.parse_submissions(first, "Form Responses 1"),
         )[1].response_row_id
     )
+
+
+def test_manual_resume_uses_the_address_stated_in_the_thread(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Lina Mariner, 2026-09-01: resumed by hand from the sheet's unreadable address.
+
+    Carmen had supplied the whole address in the thread and Gable had recorded
+    it; the manual resume re-read the sheet and asked for it a fourth time.
+    """
+    existing = SimpleNamespace(
+        status="needs_info",
+        is_paused=True,
+        photo_url="http://images.example/condo.jpg",
+        slack_thread_ts="1788276190.462989",
+        run_id="run-existing",
+        template_label="Under Contract",
+    )
+    resumed_with: list[str] = []
+
+    exit_code, build_calls, _connection = _exercise_main(
+        monkeypatch,
+        tmp_path,
+        existing=existing,
+        resume=True,
+        stated_address="10600 Partridge Ln Apt B3, Cockeysville, MD 21030",
+        resumed_with=resumed_with,
+    )
+
+    assert exit_code == 0
+    assert len(build_calls) == 1
+    assert resumed_with == ["10600 Partridge Ln Apt B3, Cockeysville, MD 21030"]

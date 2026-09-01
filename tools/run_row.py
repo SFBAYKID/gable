@@ -28,6 +28,7 @@ from __future__ import annotations
 import argparse
 import logging
 import sys
+from dataclasses import replace
 from sqlite3 import Connection
 from typing import Any, Final
 
@@ -283,6 +284,13 @@ def main(argv: list[str] | None = None) -> int:
             if existing is None:
                 logger.error("row %d has never been run, so there is nothing to resume", args.row)
                 return 2
+            # The address a person gave in the thread outranks the sheet's, the
+            # same way it does when the Slack path resumes. Without this the
+            # sheet's unreadable address came back and was asked about again.
+            stated = store.stated_address(connection, submission.response_row_id)
+            if stated and stated != submission.intake.address:
+                logger.info("row %d resumes with the address stated in its thread", args.row)
+                submission = replace(submission, intake=replace(submission.intake, address=stated))
             if not existing.is_paused:
                 logger.error(
                     "the most recent run for row %d is %s, not paused",
