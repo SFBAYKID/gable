@@ -76,6 +76,33 @@ three Gable messages after the announcement, a repeated sentence, an
 escalation, or no flyer link at the end, and exits 1 when anything is flagged.
 It reads only.
 
+## 0c. Build a test flyer from a design on demand
+
+The scheduled scan builds a test flyer from every added or edited design. To
+run that build by hand, in the playground:
+
+```bash
+ssh -i ~/.ssh/gable_droplet root@143.110.146.87 \
+  'cd /opt/gable && sudo -u gable env GABLE_SLACK_CHANNEL_ID=C0B02721MNK \
+     /opt/gable/.venv/bin/python -m tools.canary --source "Under Contract" --post'
+```
+
+It copies the design into the Gable drive, fills it with sample values, places
+a sample photograph and face, runs the readback, fitting and layout checks,
+posts one message with what it found (or that it found nothing), and trashes
+the copy. Costs Drive writes and no model spend. Without `--post` it only
+prints.
+
+## 0d. Rehearse before deploy
+
+Any change to what Gable asks, builds, or says — the runner, the ask, the
+Slack handlers, the address rules — is rehearsed in the playground before it
+is pushed: seed a `Testing_1` row with `tools/seed_test_rows.py`, run it with
+the channel override, and read the thread. The resume-tool defect on
+2026-09-01 was found by resuming a real listing in #calvo; a playground row
+would have shown it first. This is part of the definition of done in
+CLAUDE.md §10, not a courtesy.
+
 ## 1. Complete local gate
 
 From the repository root:

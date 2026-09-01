@@ -129,6 +129,9 @@ SQLite database:
 
 ```bash
 .venv/bin/python tools/template_smoke_test.py --source Sold
+.venv/bin/python tools/canary.py --source Sold          # build a test flyer, report, trash
+.venv/bin/python tools/audit_threads.py --days 7        # flag threads that read wrong
+.venv/bin/python tools/refresh_address_corpus.py        # replay every real address
 ```
 
 The tool creates one recoverable Drive copy, runs the production triage logic,

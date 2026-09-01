@@ -535,6 +535,13 @@ A task is complete only when all of these are true:
 - [ ] Failure paths are tested, not just the happy path.
 - [ ] No secret appears in any log, commit, or docstring.
 - [ ] `.env.example` covers every variable the code reads.
+- [ ] **A change to what Gable asks, builds, or says was rehearsed in the
+      playground** (`C0B02721MNK`, a `Testing_1` row, the channel override in
+      `TESTING.md` §0d) and the thread read clean before the push. A unit
+      suite that is green every time has not caught a single incident in the
+      decision log; the playground thread is the test that would have.
+- [ ] If the address rules changed, `tools/refresh_address_corpus.py` was run
+      and its diff read.
 - [ ] **You did the §2.7 documentation sweep** — every doc your change made
       false is now true, in this commit, and the decision log has a row if a
       design decision moved.
