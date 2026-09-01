@@ -496,3 +496,23 @@ def test_a_condo_with_a_five_digit_house_number_is_one_property() -> None:
     assert not [problem for problem in problems if problem.field_name == "address"]
     two = "10600 Partridge Ln, Cockeysville, MD 21030 10602 Partridge Ln, Cockeysville, MD 21030"
     assert not template_manifest.names_one_property(two)
+
+
+def test_the_batched_ask_and_the_build_check_say_the_same_thing_about_two_properties() -> None:
+    """One sentence, from one function, on both paths.
+
+    Row 534 in the playground, 2026-09-01: the first ask called a two-property
+    field a street-and-city problem, and the check after the photo called it
+    two properties.
+    """
+    from gable.slides import manifest as template_manifest
+
+    both = "5111 Hanover Pike Manchester, MD 21102 75 S Ralph Street Westminster, MD 21157"
+    sold = template_manifest.manifest_for("Sold")
+
+    assert template_manifest.needs_a_whole_address(sold, {"address": both})
+    assert "more than one property" in template_manifest.address_ask(both)
+    problems = template_manifest.validate(sold, {"address": both})
+    assert [p.say for p in problems if p.field_name == "address"] == [
+        template_manifest.address_ask(both)
+    ]

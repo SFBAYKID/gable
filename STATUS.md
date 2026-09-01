@@ -2,6 +2,55 @@
 
 Last updated 2026-09-01 by the building agent.
 
+## 2026-09-01 — "How do we ensure it stops?": seven changes, all deployed, all rehearsed in the playground
+
+Chase, after the two Under Contract threads: "This keeps happening, how do we
+ensure it stops?" The honest diagnosis was three causes, not bad luck: Carmen
+was the test harness, Gable was built to stop and each stop was being removed
+one at a time after it hurt, and several facts had two readers that drifted.
+Seven changes, each with its own commit and decision-log row:
+
+1. **A real-address corpus.** Every address the form has ever received is
+   replayed through the runner's own reader (`tools/refresh_address_corpus.py`,
+   `tests/test_address_corpus.py`). Reviewing the first corpus found three more
+   defects in an afternoon — "802 Dressage Ct" printed as "Dressage CT", a
+   trailing slash hiding a ZIP, and 18 of 140 rows asked about for one missing
+   comma the manifest already knew how to add on only one of two paths. 102 of
+   140 real addresses now read as whole, up from 88.
+2. **A canary build on every added or edited design.** `pipeline/canary.py`
+   builds a test flyer with sample values, a sample photograph and face, runs
+   the same readback, fitting and layout checks a listing gets, reports in the
+   design's thread, and trashes the copy. Run live against Under Contract from
+   the playground: built, found nothing wrong (Carmen had fixed the well),
+   posted, copy confirmed in the Drive trash.
+3. **A repeat guard.** A run never says the same sentence twice: the second
+   time is one escalation naming Chase, the third is silence. Proven live on
+   `Testing_1` row 534, a two-property address: ask, one re-ask with the photo
+   held, escalation, then nothing — three Gable messages, run still paused.
+4. **The stop policy.** A flyer that exists is sent. Only four stops survive
+   after the copy, all about a fact, listed in ARCHITECTURE.md §4.7b. Proven
+   live on row 535: delivered with the vision pass's note that the sample
+   photo is a striped placeholder, one message, link at the end.
+5. **No swallowed failures.** A repo standard walks every except handler.
+6. **Rehearse before deploy.** CLAUDE.md §10 and TESTING.md §0d.
+7. **A thread audit.** `tools/audit_threads.py` read the playground after the
+   runs above and flagged exactly the escalated thread and passed the delivered
+   one.
+
+Also today, fixed and deployed before this build: the condo-as-two-properties
+defect, the headshot audit charging the design's overhang to Gable, a built
+flyer withheld over twenty points, a swallowed website timeout, and the manual
+resume ignoring a stated address. Both stuck listings were delivered.
+
+**One correction to own.** Two commits went to `main` mid-afternoon with two
+docstring lint findings and without their decision rows, because a gate piped
+into `tail` could not fail the chain. Fixed in the next commit; every chain
+since runs with `set -o pipefail`.
+
+**What I need from Chase:** nothing blocking. The silent-website credential
+fallback from this morning remains the one judgment call to confirm.
+
+
 ## 2026-09-01 — two Under Contract threads: a condo called two properties, and a built flyer withheld over twenty points
 
 Reported by Chase from #calvo with both threads pasted. Four defects, all fixed

@@ -296,29 +296,38 @@ def _word(token: str) -> str:
 
 
 def _state_index(parts: list[str]) -> int | None:
-    """Where the state sits in a space-split address, if a code is there.
+    """The first state position; see `_state_indices`."""
+    found = _state_indices(parts)
+    return found[0] if found else None
+
+
+def _state_indices(parts: list[str]) -> list[int]:
+    """Where the state sits in a space-split address, wherever a code is there.
 
     Args:
         parts: The address split on single spaces, commas still attached.
 
     Returns:
-        The index of the token that is a state code AND sits where a state
-        belongs — last, or immediately before the ZIP — or None. Position is
-        the whole test: "Ct" mid-street is a court, "OR" between two lot
-        numbers is a conjunction, "Maryland Ave" is a street, and none of them
-        are the state. Never index zero, which is the house number.
+        Every index of a token that is a state code AND sits where a state
+        belongs — last, or immediately before a ZIP. Position is the whole
+        test: "Ct" mid-street is a court, "OR" between two lot numbers is a
+        conjunction, "Maryland Ave" is a street, and none of them are the
+        state. Never index zero, which is the house number. A field holding
+        two listings has two, and both are cased, so the two-property question
+        quotes it tidily rather than half-tidied.
 
     Raises:
         Nothing.
     """
+    found: list[int] = []
     for index, token in enumerate(parts):
         if index == 0 or token.strip(",.").upper() not in STATE_CODES:
             continue
         is_last = index == len(parts) - 1
         followed_by_zip = not is_last and bool(_ZIP.match(parts[index + 1].strip(",.")))
         if is_last or followed_by_zip:
-            return index
-    return None
+            found.append(index)
+    return found
 
 
 def _fold_state_name(text: str) -> str:
@@ -464,8 +473,7 @@ def tidy(address: str) -> str:
     # and also northeast — so "123 ne 4th st" would otherwise be punctuated as
     # though Nebraska appeared in the middle of a street name.
     parts = text.split(" ")
-    state_at = _state_index(parts)
-    if state_at is not None:
+    for state_at in _state_indices(parts):
         previous = parts[state_at - 1]
         if not previous.endswith(","):
             parts[state_at - 1] = previous + ","

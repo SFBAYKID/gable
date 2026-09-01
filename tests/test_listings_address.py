@@ -249,3 +249,12 @@ def test_a_stated_correction_ends_where_it_started() -> None:
     ):
         once = tidy(written)
         assert tidy(once) == once, written
+
+
+def test_every_state_position_is_cased_in_a_two_listing_field() -> None:
+    """The two-property question quotes the field; half-cased it read as sloppy."""
+    both = "5111 Hanover Pike Manchester, Md 21102 75 S Ralph Street Westminster, Md 21157"
+
+    assert tidy(both) == (
+        "5111 Hanover Pike Manchester, MD 21102 75 S Ralph Street Westminster, MD 21157"
+    )

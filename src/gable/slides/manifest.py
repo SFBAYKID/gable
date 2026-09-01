@@ -230,26 +230,16 @@ def validate(manifest: Manifest, values: dict[str, str]) -> list[Problem]:
         if not value:
             continue
 
-        if slot.kind == ADDRESS and not names_one_property(value):
+        if slot.kind == ADDRESS and needs_a_whole_address(manifest, {slot.name: value}):
+            # The same sentence the batched ask uses, from `address_ask`. Two
+            # readers of one question drifted twice: once into "what is the
+            # full address?" and once, on 2026-09-01, into the batched ask
+            # calling a two-property field a street-and-city problem while
+            # this check, one step later, called it two properties.
             problems.append(
                 Problem(
                     slot.name,
-                    f"The address reads {value!r}, which looks like more than one "
-                    "property. Which one is this post for?",
-                )
-            )
-            continue
-
-        if slot.kind == ADDRESS and not ADDRESS_SHAPE.match(value):
-            # The same sentence the batched ask uses. This used to say "I could
-            # not separate the street, city, state and ZIP confidently. What is
-            # the full address?" — vague about which part was missing, and
-            # asking for the whole thing back when Gable had already printed the
-            # street twice in the same thread. See `address.incomplete_address`.
-            problems.append(
-                Problem(
-                    slot.name,
-                    incomplete_address(value),
+                    address_ask(value),
                     releasable=_is_printable_partial_address(value),
                 )
             )
@@ -335,4 +325,29 @@ def needs_a_whole_address(manifest: Manifest, values: dict[str, str]) -> bool:
     if manifest.find("address") is None:
         return False
     supplied = values.get("address", "").strip()
-    return bool(supplied) and not ADDRESS_SHAPE.match(supplied)
+    return bool(supplied) and (
+        not names_one_property(supplied) or not ADDRESS_SHAPE.match(supplied)
+    )
+
+
+def address_ask(value: str) -> str:
+    """The one sentence for an address that cannot be printed as supplied.
+
+    Args:
+        value: The tidied address.
+
+    Returns:
+        The two-property question when the field holds more than one ZIP,
+        otherwise `incomplete_address`'s sentence naming the missing part.
+        Both the batched ask and `validate` say exactly this, so a listing
+        hears one question rather than two versions of it.
+
+    Raises:
+        Nothing.
+    """
+    if not names_one_property(value):
+        return (
+            f"The address reads {value!r}, which looks like more than one property. "
+            "Which one is this post for?"
+        )
+    return incomplete_address(value)
