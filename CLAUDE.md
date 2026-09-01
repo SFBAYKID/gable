@@ -347,6 +347,22 @@ call on 2026-08-12:
     build already guarded its hero work and the ask did not, so they disagreed
     and the ask won.
 
+16. **A five-digit house number reads as a ZIP to a `\d{5}` pattern, and a
+    headshot well can be drawn past the page edge.** Both from the live channel
+    on 2026-09-01. Lina Mariner's `10600 Partridge Ln Apt B3, Cockeysville, MD
+    21030` was reported as two properties three times; `listings.address.zip_codes`
+    is now the one ZIP reader and skips the house number. Measured through the
+    service account: the face Gable created on flyer
+    `1KOdSeqIkOWH763m5c9zPdlN4fNUXZaBCkk7ZY6IhYzU` sits at y 753.91pt, height
+    277.84pt, bottom 1031.75pt on a 1012pt page, and the current Under Contract
+    well (`p1_i92`, 211.94 by 297.58pt) ends exactly at the page edge with its
+    top 39.34pt under the title band. Carmen edited that file at 20:01, after
+    the build, so the pre-edit well ending where the face does is inferred from
+    those two readings, not read directly. Either way the clipped face matched
+    no frame within 2pt, the overhang was charged to Gable, and a built flyer
+    was withheld. A created image inside a deleted frame now inherits that
+    frame's overhang, and a regression is delivered with its measurement.
+
 Each of these cost a real failure to learn. They are in the decision log with
 their evidence.
 

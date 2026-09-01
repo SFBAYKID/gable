@@ -163,3 +163,53 @@ def test_a_photo_pushed_beyond_the_frame_it_replaced_is_still_reported() -> None
 
     assert len(found) == 1
     assert "the property photo" in found[0]
+
+
+def _under_contract_face(well_bottom: float, *, delete_well: bool = True) -> tuple[dict, dict]:
+    """The Under Contract geometry of 2026-09-01, in points.
+
+    The headshot well sat under the title band and ran past the page bottom by
+    design; placement clipped the face clear of the band, so the face was
+    inside the well rather than on it.
+    """
+    band = _shape("band", 23.49, 667.83, 658.98, 85.94, text="Under Contract")
+    well = _shape("well", 598.06, well_bottom - 297.58, 211.94, 297.58)
+    face = _shape("gableFace_1", 598.06, 753.91, 211.94, well_bottom - 753.91)
+    built = [band, face] if delete_well else [band, well, face]
+    return _deck(band, well), _deck(*built)
+
+
+def test_a_face_clipped_inside_a_bleeding_well_inherits_the_wells_overhang() -> None:
+    """Brittney Bushee's flyer, 2026-09-01: the design's overhang charged to Gable.
+
+    The face was forty points lower and twenty points shorter than the well it
+    replaced, so no frame matched it within two points, and its twenty points
+    past the bottom edge — the well's own — parked the run. A created image
+    inside a frame the design had, and which Gable deleted, cannot reach
+    further off the page than that frame did.
+    """
+    design, built = _under_contract_face(1031.75)
+
+    assert layout.regressions(design, built) == []
+
+
+def test_a_face_pushed_below_its_deleted_well_is_still_reported() -> None:
+    design, built = _under_contract_face(1031.75)
+    face = next(e for e in built["slides"][0]["pageElements"] if e["objectId"] == "gableFace_1")
+    face["transform"]["translateY"] += 30 * PT
+
+    found = layout.regressions(design, built)
+
+    assert len(found) == 1
+    assert "the agent photo" in found[0]
+    assert "bottom" in found[0]
+
+
+def test_a_face_inside_a_well_the_design_still_has_did_not_replace_it() -> None:
+    """A frame still present in the built copy was not the one Gable drew over."""
+    design, built = _under_contract_face(1031.75, delete_well=False)
+
+    found = layout.regressions(design, built)
+
+    assert len(found) == 1
+    assert "the agent photo" in found[0]

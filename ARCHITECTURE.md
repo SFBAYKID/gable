@@ -228,7 +228,8 @@ the templates, and **each is found by name, never by position**:
 Last Name | Phone` — and mirrors it into the local `salespeople` table on every
 pass. It is a **human-owned working document**: Gable mirrors its exact contents
 atomically and refuses duplicates. When that row or one of its name, email, or
-direct-phone values is missing, `agents/website.py` may fill only the blank for
+direct-phone values is missing, `agents/website.py` — with the site read itself
+in `agents/profile_lookup.py` — may fill only the blank for
 that run from one exact-name profile whose submitted email appears on
 `cornerhouserealty.com`.
 
@@ -239,7 +240,12 @@ agent brands themselves rather than an error. A disagreement pauses. A site
 that cannot answer yields to the workbook, because a cross-check that halts
 every listing when a web request fails is worse than the defect it hunts.
 When source text requires an agent title or credential the same exact profile
-must supply it; Gable never infers REALTOR merely from the person's profession.
+supplies it, and a profile that states none falls back to the configured
+brokerage credential; Gable never infers REALTOR merely from the person's
+profession. The read is tried once more after a transient failure. A site that
+does not answer at all, on a row the roster already completes, yields the same
+brokerage credential with `brokerage_default` provenance and one sentence in
+the delivery message; a site that answers "no such profile" still pauses.
 It does not write the website result into the workbook or SQLite roster, and a
 conflict between submitted, workbook, and official-site values pauses rather
 than selecting the value that looks most plausible.
@@ -668,14 +674,15 @@ neither permits paid enlargement of the supplied real photo.
 | Google client failure | Record or report the affected operation; do not claim success |
 | Firecrawl down | Leave public facts unresolved and pause rather than invent them |
 | No photo found | Status `needs_photo`, ask Carmen, do not block the batch |
-| Unknown or incomplete agent | Check one exact official-domain profile for workbook blanks; pause on unavailable, ambiguous, or conflicting evidence and never overwrite a source |
+| Unknown or incomplete agent | Check one exact official-domain profile for workbook blanks; pause on ambiguous or conflicting evidence and never overwrite a source. A site that does not answer is retried once, then yields to a complete roster row and the brokerage credential; it pauses only where the roster leaves a blank |
 | Local photo publish fails | Keep that listing paused and report the failed stage |
 | Slack disconnect | Bolt reconnects; log it, never exit |
 | Slides mutation is rejected or incomplete | Stop that listing and translate the failure into plain language |
 | Template field is missing or unsafe | Stop before copy and ask for a source-template correction |
 | Very small supplied image | Keep the complete source at no more than 2x over a blurred, darkened same-photo fill |
 | Supplied photo contradicts listing | Keep the rejected draft internal; ask once for the correct image and accept it on the same run |
-| Vision unavailable or inconclusive | Status `needs_review`; never deliver as ready |
+| Vision unavailable or inconclusive | Deliver the built flyer and say the inspection could not run (2026-08-17); only a flyer that does not exist or cannot be read back is held |
+| Geometric audit finds a regression | Deliver with the measurement under the link and record it on the run; never held (2026-09-01) |
 | Drive quota / non-shared drive | Refused at startup by `config.py`, not at render time |
 
 **One listing failing must never stop the batch.** Wrap per-listing processing so

@@ -6,6 +6,7 @@ import json
 import urllib.parse
 
 from gable.agents.contacts import Contact
+from gable.agents.profile_lookup import lookup_official_profile
 from gable.agents.profile_page import OFFICIAL_PAGES_API
 from gable.agents.website import (
     BROKERAGE_SOURCE,
@@ -13,7 +14,6 @@ from gable.agents.website import (
     WORKBOOK_SOURCE,
     OfficialProfile,
     ProfileLookup,
-    lookup_official_profile,
     unidentified_pause,
     validate_contact,
 )

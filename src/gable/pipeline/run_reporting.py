@@ -537,20 +537,34 @@ def fill_failure(pairs: dict[str, str], changed: int) -> Unfinished | None:
     )
 
 
-def layout_failure(source: dict[str, Any], built: dict[str, Any]) -> Unfinished | None:
-    """Why a built flyer moved its design's layout, if it did.
+@dataclass(frozen=True, slots=True)
+class LayoutNotice:
+    """What a built flyer did to its design's layout: said with the link, recorded."""
+
+    spoken: str
+    detail: str
+
+
+def layout_notice(source: dict[str, Any], built: dict[str, Any]) -> LayoutNotice | None:
+    """What a built flyer did to its design's layout, if anything.
 
     Chase reported a band running off the page edge and elements running into
     each other on 2026-08-14, and the rendered inspection had reported neither.
     Rectangles are evidence where pixels were an opinion. Judged against this
     design's own geometry, so its deliberate bleeds stay silent.
 
+    It is a notice, not a stop. Until 2026-09-01 it parked the run in review
+    with the flyer built and its link withheld, and Carmen — told the headshot
+    sat twenty points low — asked for it anyway and was refused. A flyer a
+    check disliked is delivered with what was noticed; see the runner.
+
     Args:
         source: The design as filed in Generic Templates.
         built: The finished copy.
 
     Returns:
-        What to say and what to record, or None when nothing moved.
+        What to say under the link and what to record, or None when nothing
+        moved.
 
     Raises:
         Nothing.
@@ -558,9 +572,13 @@ def layout_failure(source: dict[str, Any], built: dict[str, Any]) -> Unfinished 
     moved = layout.regressions(source, built)
     if not moved:
         return None
-    return Unfinished(
-        safe(f"I built the flyer, but {moved[0][0].lower()}{moved[0][1:]}"),
-        f"layout regression against the source design: {moved[0]}",
+    sentence = moved[0]
+    return LayoutNotice(
+        safe(
+            f"{sentence[0].upper()}{sentence[1:]} I have not corrected that, so give it a "
+            "look before it goes out."
+        ),
+        f"layout regression against the source design: {sentence}",
     )
 
 
@@ -648,4 +666,3 @@ def reframe_offer(carries_a_photo: bool) -> str:
     if not carries_a_photo:
         return ""
     return "Send another photo here if you want it framed differently and I will redo it."
-

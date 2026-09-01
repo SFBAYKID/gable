@@ -177,3 +177,28 @@ def test_a_town_named_after_a_state_keeps_its_own_state() -> None:
 def test_a_state_name_is_never_the_whole_address() -> None:
     """`Maryland 20716` names no property, so nothing is folded into a state."""
     assert tidy("Maryland 20716") == "Maryland 20716"
+
+
+def test_a_five_digit_house_number_is_not_a_zip() -> None:
+    """Lina Mariner's condo, 2026-09-01: one property, asked about three times.
+
+    "10600" is the house number. Counted as a ZIP it made the address look like
+    two properties, and earlier in the same thread it made "10600 partridge
+    lane b3" look as though it carried a ZIP and lacked only a state.
+    """
+    from gable.listings.address import incomplete_address, zip_codes
+
+    assert zip_codes("10600 Partridge Ln Apt B3, Cockeysville, MD 21030") == ["21030"]
+    assert zip_codes("10600 partridge lane b3") == []
+    assert zip_codes("10600-10602 Partridge Ln, Cockeysville, MD 21030") == ["21030"]
+    assert zip_codes("1234A Main St, Baltimore, MD 21230-1234") == ["21230-1234"]
+    assert "it has no state or ZIP code" in incomplete_address("10600 Partridge Lane, B3")
+
+
+def test_a_second_property_with_a_five_digit_house_number_still_counts() -> None:
+    """Only the leading house number is exempt; a second one is a second property."""
+    from gable.listings.address import zip_codes
+
+    two = "10600 Partridge Ln, Cockeysville, MD 21030 10602 Partridge Ln, Cockeysville, MD 21030"
+
+    assert len(zip_codes(two)) >= 2

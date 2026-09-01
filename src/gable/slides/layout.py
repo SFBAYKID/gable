@@ -214,18 +214,37 @@ def regressions(source: dict[str, Any], built: dict[str, Any]) -> list[str]:
 _SAME_FRAME_EMU: Final[float] = 2 * EMU_PER_POINT
 
 
-def _frame_it_replaced(box: Box, source_boxes: dict[str, Box]) -> Box | None:
+def _frame_it_replaced(
+    box: Box,
+    source_boxes: dict[str, Box],
+    built_ids: frozenset[str] = frozenset(),
+) -> Box | None:
     """The design's own frame that this created image was drawn over.
 
     A created object has a new id, so it looks as though it has no prior claim
     on the layout. It has one: placement deletes the measured frame and creates
-    the image at that frame's exact position and size. Sold's photo well starts
+    the image at that frame's position and size. Sold's photo well starts
     three points off the left edge, so every flyer built on it was reported as
     pushing the photo off the page — a defect belonging to the design.
+
+    The image is not always the frame's exact rectangle. A headshot well is
+    first clipped clear of its neighbours (`framing.clear_of_neighbours`), so
+    the face lands INSIDE the frame rather than on it. On 2026-09-01 the Under
+    Contract design's headshot well ran 20 points past the bottom of the page
+    and its top sat under the title band; the face was placed in the clipped
+    rectangle, 40 points lower and 20 points shorter than the well, so it
+    matched no frame within two points and the design's own overhang was
+    charged to Gable. Carmen was told the flyer could not be released. An
+    image that lies within a frame the design had — and which is gone from the
+    built copy, because Gable deleted it to put the image there — cannot reach
+    further off the page than that frame did.
 
     Args:
         box: A created image.
         source_boxes: The design's own elements, by object id.
+        built_ids: Every object id present in the built copy. A source frame
+            absent from it is one Gable deleted, which is the only kind a
+            created image can be standing in.
 
     Returns:
         The frame it stands in, or None when nothing in the design matches, in
@@ -236,7 +255,7 @@ def _frame_it_replaced(box: Box, source_boxes: dict[str, Box]) -> Box | None:
     """
     if not box.is_created:
         return None
-    return next(
+    same = next(
         (
             candidate
             for candidate in source_boxes.values()
@@ -247,6 +266,23 @@ def _frame_it_replaced(box: Box, source_boxes: dict[str, Box]) -> Box | None:
         ),
         None,
     )
+    if same is not None:
+        return same
+    # Smallest first: the deleted well the image sits in, not a background
+    # panel that happens to enclose both.
+    containing = sorted(
+        (
+            candidate
+            for candidate in source_boxes.values()
+            if candidate.object_id not in built_ids
+            and box.x >= candidate.x - _SAME_FRAME_EMU
+            and box.y >= candidate.y - _SAME_FRAME_EMU
+            and box.right <= candidate.right + _SAME_FRAME_EMU
+            and box.bottom <= candidate.bottom + _SAME_FRAME_EMU
+        ),
+        key=lambda candidate: candidate.width * candidate.height,
+    )
+    return containing[0] if containing else None
 
 
 def _bleeds(
@@ -257,11 +293,13 @@ def _bleeds(
 ) -> list[tuple[float, str]]:
     """Elements reaching further off the page than the design meant them to."""
     found: list[tuple[float, str]] = []
+    built_ids = frozenset(box.object_id for box in built_boxes)
     for box in built_boxes:
         over = box.overflow(page_width, page_height)
         # A design's own overhang is the designer's decision. Only the amount
-        # Gable added counts, and an object Gable created has no prior claim.
-        source = source_boxes.get(box.object_id) or _frame_it_replaced(box, source_boxes)
+        # Gable added counts, and an object Gable created has no prior claim
+        # beyond the frame it was drawn into.
+        source = source_boxes.get(box.object_id) or _frame_it_replaced(box, source_boxes, built_ids)
         before = (
             source.overflow(page_width, page_height) if source is not None else (0.0, 0.0, 0.0, 0.0)
         )

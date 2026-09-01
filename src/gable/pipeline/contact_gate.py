@@ -98,12 +98,7 @@ class ContactGate:
                 # down" whether it was a timeout, a spent Firecrawl budget, or a
                 # bug, and all three were guessed at once before this line.
                 logger.exception("the official profile lookup for %s could not complete", email)
-                self._official_result = website.ProfileLookup(
-                    problem=(
-                        "I could not complete the check against the official "
-                        "Corner House Realty website"
-                    )
-                )
+                self._official_result = website.unavailable_lookup()
         return self._official_result
 
     def check(self, run_id: str, *, require_title: bool = False) -> website.ContactCheck:

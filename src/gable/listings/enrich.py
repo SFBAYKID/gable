@@ -35,6 +35,7 @@ from sqlite3 import Connection
 from typing import Any, Final
 
 from gable import spend
+from gable.listings.address import zip_codes
 
 #: Firecrawl search. https://docs.firecrawl.dev/api-reference/endpoint/search
 _SEARCH_URL: Final[str] = "https://api.firecrawl.dev/v2/search"
@@ -231,16 +232,19 @@ def _property_sections(address: str, result: Mapping[str, Any]) -> tuple[str, ..
         return ()
     street = _phrase_pattern(parts[0])
     city = _phrase_pattern(parts[-2])
-    zip_match = re.search(r"\b\d{5}(?:-\d{4})?\b", address)
-    if street is None or city is None or zip_match is None:
+    # The last ZIP, never the house number: a five-digit house number read as
+    # the ZIP would demand that "10600" surround the values on the page.
+    zips = zip_codes(address)
+    if street is None or city is None or not zips:
         return ()
+    requested_zip = zips[-1]
     unit: re.Pattern[str] | None = None
     for part in parts[1:-2]:
         folded = _identity_text(part)
         if re.match(r"^(?:unit|apt|apartment|suite|ste)\b", folded):
             unit = _phrase_pattern(part)
             break
-    zip_pattern = re.compile(rf"(?<!\d){re.escape(zip_match.group(0))}(?!\d)")
+    zip_pattern = re.compile(rf"(?<!\d){re.escape(requested_zip)}(?!\d)")
     sections: list[str] = []
     for name in ("title", "description", "markdown"):
         raw = str(result.get(name) or "")

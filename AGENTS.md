@@ -171,6 +171,12 @@ credential in capitals. Chase confirmed on
 2026-08-19 that all 38 agents on the roster hold it, so this states a fact about
 the brokerage rather than guessing about a person, and the run event records
 which of the two answered. The profile always wins when it states a title.
+When the website does not answer at all — a timeout, not a profile that names
+nobody — and the roster row already proves the name, email and direct phone,
+the flyer still goes out with that brokerage credential and the delivery
+message says the site was not reached. Silence is not evidence about the
+agent, and stopping there sent Carmen to correct a request and a roster row
+that were both right on 2026-09-01.
 
 Gable therefore never asks anyone for a credential. It must never ask for one to
 be added to the request or to Agents Contact Information: neither place can
@@ -639,6 +645,10 @@ photograph beats hers, and it leaves her with nothing to act on — the reason t
 build it by hand instead. She reviews every post before a client sees it, so the
 honest move is to send the flyer and say plainly what was noticed. What still
 holds a run is a flyer that does not exist or could not be read back at all.
+The geometric audit (`slides/layout.py`) follows the same rule: a headshot or
+band measured further off the page than the design drew it is said under the
+link, never used to withhold it. Carmen was refused a built flyer over twenty
+points on 2026-09-01, asked for it anyway, and was refused again.
 
 The older rule sent a failed post back to Carmen rather than forward to
 `delivered`, on the reasoning that Gable delivering something it doubts is the

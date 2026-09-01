@@ -189,7 +189,7 @@ def test_a_one_word_signature_at_the_end_is_the_client() -> None:
     """
     values = review_values(
         "Client Review Post",
-        'Five star review\n\n"Porsher Howard was the best of all of the realtors I\'ve '
+        "Five star review\n\n\"Porsher Howard was the best of all of the realtors I've "
         "dealt with over the years. She was friendly, courteous and efficient in her "
         "communication skills. She made our home buying experience so much easier and "
         'enjoyable. I feel like I have a new friend in this world thanks to Porsher."\n'

@@ -433,6 +433,34 @@ _WORD_LIKE_STATE_CODES: Final[frozenset[str]] = frozenset(
 #: which of the two is wrong needs to know whether it is there at all.
 ZIP_ANYWHERE: Final[re.Pattern[str]] = re.compile(r"\b\d{5}(?:-\d{4})?\b")
 
+#: The house number that opens an address. Five-digit house numbers are
+#: ordinary — "10600 Partridge Ln" — and to a ZIP pattern they are a ZIP. On
+#: 2026-09-01 that read "10600 Partridge Ln Apt B3, Cockeysville, MD 21030" as
+#: carrying two ZIPs, so Gable told Carmen the address "looks like more than
+#: one property" and asked which one, three times, while she said it was one
+#: condo. Earlier in the same thread it had read "10600 partridge lane b3" as
+#: having a ZIP and reported only the state missing. A range ("10600-10602")
+#: and a letter suffix ("1234A") are house numbers too.
+_LEADING_HOUSE_NUMBER: Final[re.Pattern[str]] = re.compile(r"^\s*\d+(?:-\d+)?[A-Za-z]?\s+")
+
+
+def zip_codes(address: str) -> list[str]:
+    """Every ZIP-shaped token in an address, not counting its house number.
+
+    Args:
+        address: The address, as typed or tidied.
+
+    Returns:
+        The five-digit (or ZIP+4) tokens in order of appearance, with the
+        leading house number left out. Anything else that is five digits long
+        still counts, because a second house number mid-string belongs to a
+        second property and the caller counting ZIPs wants to know about it.
+
+    Raises:
+        Nothing.
+    """
+    return ZIP_ANYWHERE.findall(_LEADING_HOUSE_NUMBER.sub("", address, count=1))
+
 
 def incomplete_address(supplied: str) -> str:
     """Ask for the rest of an address that was supplied but cannot be printed.
@@ -480,7 +508,9 @@ def incomplete_address(supplied: str) -> str:
     tail = set(words[-3:])
     found -= {code for code in _WORD_LIKE_STATE_CODES if code not in tail}
     has_state = bool(found)
-    has_zip = bool(ZIP_ANYWHERE.search(address))
+    # Not the house number: "10600 partridge lane b3" has none of the four
+    # parts a design prints after the street, and was told only "no state".
+    has_zip = bool(zip_codes(address))
     if not has_state and not has_zip:
         fault = "it has no state or ZIP code"
     elif not has_state:

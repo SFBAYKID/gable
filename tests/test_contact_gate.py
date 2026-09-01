@@ -193,3 +193,36 @@ def test_an_agent_the_roster_does_not_carry_is_not_guessed_at(tmp_path: Path) ->
     assert "belongs to whoever submitted the form" in checked.problem
     assert "Agents Contact Information" in checked.problem
     connection.close()
+
+
+def test_a_lookup_that_raises_is_recorded_as_the_site_being_silent(tmp_path: Path) -> None:
+    """The gate's own failure boundary marks the result unavailable.
+
+    The credential fallback and the honest pause both then see the site's
+    silence for what it is rather than as an answer about the agent.
+    """
+    connection = connect(tmp_path / "contact-gate-silent.db")
+    apply_migrations(connection)
+    item = submission(
+        rid="rid-contact-gate-silent",
+        name="Lolo Simmons",
+        email="lolo@cornerhouserealty.com",
+    )
+    record(connection, item)
+    connection.execute(
+        "INSERT INTO salespeople (email, first_name, last_name, phone, template, synced_at)"
+        " VALUES ('lolo@cornerhouserealty.com','Lolo','Simmons','(443) 854-8554','','now')"
+    )
+    run = store.start_run(connection, item.response_row_id)
+
+    def raising(_name: str, _email: str, _phone: str = "") -> ProfileLookup:
+        raise OSError("test official-site outage")
+
+    gate = ContactGate(connection, item.intake, raising, default_agent_credential="Realtor")
+
+    assert gate.check(run.run_id).ready is True
+    titled = gate.check(run.run_id, require_title=True)
+
+    assert titled.ready is True
+    assert titled.title == "Realtor"
+    assert "did not answer" in titled.note

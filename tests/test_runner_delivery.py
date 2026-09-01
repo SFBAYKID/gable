@@ -638,3 +638,56 @@ def test_a_vision_check_that_could_not_run_says_so_and_still_delivers(
     assert result.output_url
     assert any("could not complete the visual inspection" in message for message in result.said)
     assert not any("your flyer is ready" in message.lower() for message in result.said)
+
+
+def test_a_layout_change_is_delivered_with_a_note_not_withheld(db: sqlite3.Connection) -> None:
+    """Brittney Bushee, 2026-09-01, asked for the flyer anyway and was refused.
+
+    The flyer was built and its link sat in the database while Carmen was told
+    it could not be released. A rectangle Gable moved is said under the link,
+    exactly as a finding from the rendered inspection is; she can fix twenty
+    points in Slides faster than she can read about them.
+    """
+    from gable.slides.layout import EMU_PER_POINT
+
+    pt = EMU_PER_POINT
+
+    def shape(object_id: str, x: float, y: float, w: float, h: float) -> dict[str, object]:
+        return {
+            "objectId": object_id,
+            "size": {"width": {"magnitude": w * pt}, "height": {"magnitude": h * pt}},
+            "transform": {"scaleX": 1, "scaleY": 1, "translateX": x * pt, "translateY": y * pt},
+        }
+
+    def deck(*elements: dict[str, object]) -> dict[str, object]:
+        return {
+            "pageSize": {"width": {"magnitude": 810 * pt}, "height": {"magnitude": 1012 * pt}},
+            "slides": [{"objectId": "p", "pageElements": list(elements)}],
+        }
+
+    presentations = {
+        "tmpl-1": deck(shape("band", 0, 960, 810, 52)),
+        "out-1": deck(shape("band", 0, 980, 810, 52)),
+    }
+    submission = _submission(rid="rid-layout-note")
+    _record(db, submission)
+    rec = Recorder()
+    runner = _runner(db, rec)
+    runner.read_presentation = lambda file_id: presentations[file_id]
+    result = runner.run(submission)
+
+    assert result.status == "delivered"
+    assert result.output_url
+    spoken = " ".join(rec.said)
+    assert "Open the flyer" in spoken, "the link is the whole point"
+    assert "past the bottom edge" in spoken, "the measurement travels with the link"
+    assert "give it a look" in spoken
+    assert "ready" not in spoken, "it is built, not finished"
+    current = store.run_by_id(db, result.run_id)
+    assert current is not None
+    assert current.status == "delivered"
+    recorded = db.execute(
+        "SELECT detail FROM run_events WHERE run_id = ? AND detail LIKE '%layout regression%'",
+        (result.run_id,),
+    ).fetchall()
+    assert recorded, "the measurement is recorded even though it did not stop the run"

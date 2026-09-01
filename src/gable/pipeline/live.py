@@ -15,7 +15,7 @@ from sqlite3 import Connection
 from typing import Any
 
 from gable import spend
-from gable.agents.website import lookup_official_profile
+from gable.agents.profile_lookup import lookup_official_profile
 from gable.config import Settings
 from gable.db import store
 from gable.listings.enrich import default_research

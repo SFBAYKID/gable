@@ -22,7 +22,7 @@ import re
 from dataclasses import dataclass
 from typing import Final
 
-from gable.listings.address import incomplete_address
+from gable.listings.address import incomplete_address, zip_codes
 from gable.listings.address import tidy as tidy_address
 
 #: Field kinds, which decide how a value is checked.
@@ -289,9 +289,12 @@ def validate(manifest: Manifest, values: dict[str, str]) -> list[Problem]:
 #: been printed as an incomplete-but-true address, which it is not: it is false
 #: about both properties. A flyer carrying it would be wrong in the one way that
 #: matters most, so it asks instead.
-_ZIP_ANYWHERE: Final[re.Pattern[str]] = re.compile(r"\b\d{5}(?:-\d{4})?\b")
-
-
+#:
+#: The count leaves the house number out. This module used its own five-digit
+#: pattern, which took "10600" in "10600 Partridge Ln Apt B3, Cockeysville, MD
+#: 21030" for a ZIP and asked Carmen which of two properties a single condo was
+#: — three times, on 2026-09-01, each time she said it was one. Five-digit house
+#: numbers are ordinary; `listings.address.zip_codes` is the one ZIP reader.
 def names_one_property(value: str) -> bool:
     """Whether an address field describes a single property.
 
@@ -305,7 +308,7 @@ def names_one_property(value: str) -> bool:
     Raises:
         Nothing.
     """
-    return len(_ZIP_ANYWHERE.findall(value)) <= 1
+    return len(zip_codes(value)) <= 1
 
 
 #: A street line and a ZIP, with no confident city and state between them. This

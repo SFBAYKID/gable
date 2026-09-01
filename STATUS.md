@@ -1,6 +1,73 @@
 # Gable — status, and what's needed from Chase
 
-Last updated 2026-08-27 by the building agent.
+Last updated 2026-09-01 by the building agent.
+
+## 2026-09-01 — two Under Contract threads: a condo called two properties, and a built flyer withheld over twenty points
+
+Reported by Chase from #calvo with both threads pasted. Four defects, all fixed
+with regression tests; deployment and the two stuck runs are covered under
+"What I need from Chase".
+
+**Lina Mariner, 10600 Partridge Ln Apt B3.** The form gave `10600 partridge
+lane b3`. Gable asked for the whole address and the photo, Carmen supplied both,
+and Gable then asked "which one is this post for?" — three times, while she
+said three ways that it was one condo. The house number is five digits, and the
+two-property check counted it as a second ZIP. The same pattern had already
+made the opening message say only "it has no state" when the address had
+neither a state nor a ZIP. `listings.address.zip_codes` is now the one ZIP
+reader and leaves the house number out; the manifest, the incomplete-address
+sentence and the research identity window use it.
+
+**Brittney Bushee, 2038 Kurtz Ave.** Three things, in sequence.
+
+1. Gable built the flyer, then said the agent photo ran 20 points past the
+   bottom edge and did not send the link. Measured through the service
+   account: the design's own headshot well bled past the page, and the face was
+   created inside it, clipped clear of the title band — 40 points lower and 20
+   points shorter than the well — so the audit matched it to no frame and
+   charged the design's overhang to Gable. A created image inside a frame Gable
+   deleted now inherits that frame's overhang.
+2. Carmen said "That's ok. Please send it and I can adjust" and was refused.
+   The flyer existed; its link was in the database. A layout regression is now
+   delivered with the measurement under the link, the way a vision finding has
+   been since 2026-08-17. Chase's rule: Gable produces the flyer no matter what.
+3. "Recheck it" rebuilt from the source Carmen had just edited, and the
+   official-site profile read timed out once. The exception was swallowed with
+   no log line, the memoised gate reused the failure for the credential phase,
+   and the pause told her to correct the request or the roster — both right.
+   The read is retried once after a transient failure and logs the cause; a
+   silent site on a complete roster row now yields the brokerage credential and
+   says so in the delivery message; a pause the silence still forces names the
+   true remedy, which is to run again.
+
+**Verified.** The whole suite, `mypy --strict` and `ruff` pass with the new
+tests: the condo address, the clipped face inside a bleeding well, the
+delivered layout note, the retry, and every silent-site branch.
+`agents/profile_lookup.py` was split from `website.py` at the 800-line ceiling.
+
+**Not a defect, but parked:** a Sold listing from 2026-08-31 evening is still
+waiting for its property photo in its own thread.
+
+## What I need from Chase
+
+- **The two stuck runs.** Deploy is by `make deploy`. If this session could
+  not resume them itself (see the note that follows this section once deploy
+  has run), each can be released from Slack by replying "run it again" in its
+  thread, or from the droplet:
+
+  ```
+  ssh -i ~/.ssh/gable_droplet root@143.110.146.87 \
+    "cd /opt/gable && sudo -u gable ./.venv/bin/python -m tools.run_row 'Form Responses 1' 136 --resume"
+  ssh -i ~/.ssh/gable_droplet root@143.110.146.87 \
+    "cd /opt/gable && sudo -u gable ./.venv/bin/python -m tools.run_row 'Form Responses 1' 137 --resume"
+  ```
+
+  Row 136 is Lina Mariner, row 137 is Brittney Bushee. Both hold their photo.
+- **One judgment call to confirm.** A silent website now yields the brokerage
+  credential when the roster row is complete. Emptying
+  `GABLE_DEFAULT_AGENT_CREDENTIAL` restores the old stop, as the 2026-08-19
+  decision promised; nothing else changes.
+
 
 ## 2026-08-27 — Porsher Howard's Client Review Post: asked five times for a photo the design cannot hold
 
@@ -130,7 +197,7 @@ Seven test flyers now sit in the Gable output folder from this session. They are
 named for their agent and address and were deliberately left rather than trashed,
 so the runs stay auditable.
 
-## What I need from Chase
+## What I needed from Chase on 2026-08-27
 
 Nothing on this one. Deployed (`eda7fe6`, `75e8d94`), the run was resumed, and
 Carmen has the flyer in her thread. The open questions closed themselves:

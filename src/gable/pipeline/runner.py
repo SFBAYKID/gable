@@ -107,11 +107,7 @@ class Runner:
     #: workbook has no complete, exact record. The unit-test default performs
     #: no hidden I/O; ``pipeline.live`` supplies the bounded website client.
     official_contact_lookup: Callable[[str, str, str], agent_website.ProfileLookup] = (
-        lambda _name, _email, _phone: agent_website.ProfileLookup(
-            problem=(
-                "I could not complete the check against the official Corner House Realty website"
-            )
-        )
+        lambda _name, _email, _phone: agent_website.unavailable_lookup()
     )
     #: The credential every agent at this brokerage holds, printed when a design
     #: has a title field and the agent's official profile leaves its job title
@@ -317,10 +313,14 @@ class Runner:
             template_label=template_label,
         )
         resolution = template_fields.resolve(self.read_slide_text(template_id))
+        # A credential printed from the brokerage default because the official
+        # site did not answer is said once, with the link, not withheld.
+        credential_note = ""
         if "agent_title" in resolution.fields:
             contact = contact_gate.check(run_id, require_title=True)
             if not contact.ready:
                 return self._ask(run_id, intake, contact.problem, [], result, status="needs_info")
+            credential_note = contact.note
         clearance_problem = self.template_clearance(template_id, template_label)
         if clearance_problem:
             return self._ask(
@@ -392,6 +392,8 @@ class Runner:
         # frame; neither becomes another Slack question. The notes are folded
         # into the one post-build outcome, after the rendered vision gate.
         advisories = [safe(issue.advisory) for issue in measured.warnings if issue.advisory]
+        if credential_note:
+            advisories.append(safe(credential_note))
 
         # Asked WITH the photograph rather than one step after it; see
         # `manifest.needs_a_whole_address` for the round trip that cost.
@@ -629,22 +631,24 @@ class Runner:
             logger.info("run %s refitted %d text box(es)", run_id, text_fit.count)
             advisories.append(safe(text_fit.note))
 
-        # 7b. Measure what the build did to the design's own layout.
-        unfinished = run_reporting.layout_failure(
+        # 7b. Measure what the build did to the design's own layout. A change
+        # is SAID, under the link, not used to withhold the flyer. This used to
+        # park the run in review, and on 2026-09-01 Brittney Bushee's Under
+        # Contract flyer — built, linked in the database, one headshot twenty
+        # points low — was described to Carmen instead of sent. She answered
+        # "That's ok. Please send it and I can adjust" and was refused. Chase's
+        # rule of 2026-08-20 is that Gable produces the flyer no matter what,
+        # and his 2026-08-17 rule is that a flyer a check disliked still goes
+        # out with what was noticed. A rectangle is no exception: she can fix
+        # twenty points in Slides in less time than it takes to read about it.
+        moved = run_reporting.layout_notice(
             self.read_presentation(template_id),
             self.read_presentation(output_id),
         )
-        if unfinished is not None:
-            logger.error("run %s moved the layout: %s", run_id, unfinished.detail)
-            return self._outcome(
-                run_id,
-                unfinished.spoken,
-                result,
-                status="needs_review",
-                detail=unfinished.detail,
-                output_file_id=output_id,
-                output_url=output_url,
-            )
+        layout_noticed = ""
+        if moved is not None:
+            logger.warning("run %s moved the layout: %s", run_id, moved.detail)
+            layout_noticed = moved.spoken
 
         # 7c. Check it twice: once on the text, once by looking at it.
         checked = run_reporting.verify_rendered(
@@ -658,8 +662,9 @@ class Runner:
             resolution=resolution,
             values=values,
             text_fit=text_fit,
-            # 7b returned nothing, so every rectangle matches the design.
-            layout_verified=True,
+            # When 7b found nothing, every rectangle matches the design and a
+            # layout opinion from the render cannot be a defect Gable made.
+            layout_verified=moved is None,
         )
 
         # A built flyer is delivered even when a check disliked it. Two real
@@ -671,7 +676,10 @@ class Runner:
         # Gable's judgement of her own photograph beats hers, which is backwards:
         # she reviews every post before a client sees it, so the honest move is
         # to send the flyer and say plainly what was noticed. Chase's call,
-        # 2026-08-17, after seeing both threads.
+        # 2026-08-17, after seeing both threads. A rectangle 7b measured is
+        # noticed the same way, since 2026-09-01.
+        noticed_parts: list[str] = [layout_noticed]
+        noticed_details: list[str] = [moved.detail] if moved is not None else []
         if not checked.ok:
             result.output_url = output_url
             # When another photograph is the whole remedy, the flyer still goes
@@ -684,34 +692,10 @@ class Runner:
             # that accepts the photo rather than one that refuses it.
             if checked.needs_replacement_photo:
                 store.set_awaiting_photo(self.connection, run_id, True)
-            noticed = safe(
-                paragraphs(
-                    checked.spoken,
-                    run_reporting.reframe_offer(manifest_carries_a_photo),
-                )
+            noticed_parts.extend(
+                [checked.spoken, run_reporting.reframe_offer(manifest_carries_a_photo)]
             )
-            message = run_reporting.delivery_message(
-                self.connection,
-                run_id,
-                output_url=output_url,
-                run_notes=run_notes,
-                advisories=advisories,
-                left_blank=run_reporting.unfilled(resolution.fields, values),
-                price_missing_note=price_note(intake, "price" in resolution.fields),
-                noticed=noticed,
-            )
-            return self._outcome(
-                run_id,
-                message,
-                result,
-                status="delivered",
-                pending_status="building",
-                detail=f"delivered with what the checks noticed: {checked.detail}",
-                confirmation_detail="Slack confirmed the delivery message",
-                output_file_id=output_id,
-                output_url=output_url,
-            )
-
+            noticed_details.append(checked.detail)
         # The verified file and exact link message are persisted before Slack.
         # Until Slack confirms the post the run remains building and the
         # process-lifetime outbox retries without rebuilding the flyer.
@@ -725,6 +709,7 @@ class Runner:
             advisories=advisories,
             left_blank=run_reporting.unfilled(resolution.fields, values),
             price_missing_note=price_note(intake, "price" in resolution.fields),
+            noticed=safe(paragraphs(*noticed_parts)),
         )
         return self._outcome(
             run_id,
@@ -732,7 +717,11 @@ class Runner:
             result,
             status="delivered",
             pending_status="building",
-            detail="flyer verified and waiting for its Slack delivery message",
+            detail=(
+                f"delivered with what the checks noticed: {'; '.join(noticed_details)}"[:400]
+                if noticed_details
+                else "flyer verified and waiting for its Slack delivery message"
+            ),
             confirmation_detail="Slack confirmed the delivery message",
             output_file_id=output_id,
             output_url=output_url,

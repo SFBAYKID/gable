@@ -25,24 +25,13 @@ never become an agent's direct line.
 
 from __future__ import annotations
 
-import json
-import urllib.parse
-import urllib.request
+import logging
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import Final
 
 from gable.agents.contacts import Contact
 from gable.agents.names import clean_name
-from gable.agents.profile_page import (
-    OFFICIAL_PAGES_API,
-    Fetch,
-    _fetch,
-    _official_url,
-    _ProfileParser,
-    _title,
-    _unique,
-)
 
 WORKBOOK_SOURCE: Final[str] = "contact_workbook"
 WEBSITE_SOURCE: Final[str] = "official_website"
@@ -51,14 +40,11 @@ WEBSITE_SOURCE: Final[str] = "official_website"
 #: which of the two answered, and so an audit can find every flyer that leaned
 #: on the default.
 BROKERAGE_SOURCE: Final[str] = "brokerage_default"
-#: How many same-named candidate pages are worth reading before giving up. Two
-#: is the real case — a profile and its open-houses twin — and the cap bounds a
-#: pathological search result rather than fetching the whole site.
-_MAX_CANDIDATE_PROFILES: Final[int] = 3
 #: Punctuation that can sit at the edge of a written name without being part of
 #: it — the comma in "Caleb Olawuyi, Realtor" is the case that reached Carmen.
 _EDGE_PUNCTUATION: Final[str] = ",.;:!?()[]{}\"'"
 
+logger = logging.getLogger("gable.agents.website")
 
 
 @dataclass(frozen=True, slots=True)
@@ -83,6 +69,32 @@ class ProfileLookup:
     #: this agent's — not that the website is missing them — and it reads very
     #: differently to whoever has to fix it.
     found_but_unproven: bool = False
+    #: The site did not answer — a timeout, a connection failure, a malformed
+    #: response — so nothing is known either way. Distinct from a site that
+    #: answered "no such agent": that is evidence about the request, this is
+    #: not. On 2026-09-01 one twenty-second timeout on a recheck told Carmen to
+    #: "correct the request or Agents Contact Information" for an agent whose
+    #: request and roster row were both fine.
+    unavailable: bool = False
+
+
+#: What the official site's silence is called in a pause or a delivery note.
+SITE_UNAVAILABLE: Final[str] = (
+    "I could not complete the check against the official Corner House Realty website"
+)
+
+
+def unavailable_lookup() -> ProfileLookup:
+    """The one result every network or parsing failure resolves to.
+
+    Returns:
+        A `ProfileLookup` naming the site's silence, marked `unavailable` so
+        the caller can tell it from an answer.
+
+    Raises:
+        Nothing.
+    """
+    return ProfileLookup(problem=SITE_UNAVAILABLE, unavailable=True)
 
 
 @dataclass(frozen=True, slots=True)
@@ -99,6 +111,10 @@ class ContactCheck:
     title_source: str = ""
     source_url: str = ""
     problem: str = ""
+    #: Something the person should hear once the flyer is delivered, in
+    #: Carmen's words. Today it is one sentence: the credential came from the
+    #: brokerage default because the site could not be read for this run.
+    note: str = ""
 
     @property
     def ready(self) -> bool:
@@ -272,6 +288,60 @@ def _pause(label: str, detail: str) -> str:
     return (
         f"{label} — {detail} I left every submitted and filed contact detail unchanged. "
         "Correct the request or Agents Contact Information, then tell me to run again."
+    )
+
+
+def _unavailable_pause(label: str, row_complete: bool, require_title: bool) -> str:
+    """Say the site did not answer, and name a remedy that can actually work.
+
+    The generic remedy sends a person to correct the request or the roster.
+    When the site simply did not answer, neither is wrong, and Carmen followed
+    that instruction on 2026-09-01 for Brittney Bushee — "her contact info is
+    on the spreadsheet" — with nothing to correct. What was wanted from the
+    site is named, and the remedy is the true one: try again.
+
+    Args:
+        label: The agent's name, or the request's label when there is none.
+        row_complete: Whether the filed roster row already proves every
+            contact detail, so the site was only wanted for a credential.
+        require_title: Whether the selected design prints a credential.
+
+    Returns:
+        One pause message in Carmen's words.
+
+    Raises:
+        Nothing.
+    """
+    if row_complete and require_title:
+        wanted = "the credential this design prints"
+    elif row_complete:
+        wanted = "a cross-check of the filed phone number"
+    else:
+        wanted = "the contact details the roster does not carry for this agent"
+    return (
+        f"{label} — the official Corner House Realty website did not answer when I looked "
+        f"for the profile, and I needed it for {wanted}. Nothing about the request or Agents "
+        "Contact Information needs changing. Tell me to run again and I will check it again."
+    )
+
+
+def _site_silent_note(label: str, credential: str) -> str:
+    """The delivery sentence for a credential the site could not be asked about.
+
+    Args:
+        label: The agent's name.
+        credential: The brokerage-wide credential that was printed.
+
+    Returns:
+        One sentence for the delivery message.
+
+    Raises:
+        Nothing.
+    """
+    return (
+        f"The official Corner House Realty website did not answer when I checked {label}'s "
+        f"profile, so the credential on the flyer is the brokerage's {credential} rather than "
+        "one read from that page."
     )
 
 
@@ -462,13 +532,38 @@ def validate_contact(
     try:
         looked_up = official_lookup(name, email)
     except Exception:
-        looked_up = ProfileLookup(
-            problem=(
-                "I could not complete the check against the official Corner House Realty website"
-            )
-        )
+        logger.exception("the official profile lookup for %s raised", email)
+        looked_up = unavailable_lookup()
     profile = looked_up.profile
     if profile is None:
+        row_complete = name_ready and email_ready and phone_ready and workbook is not None
+        if (
+            looked_up.unavailable
+            and row_complete
+            and workbook is not None
+            and require_title
+            and default_title.strip()
+        ):
+            # The site's silence is not evidence about this agent. Every contact
+            # detail is already proven from the filed row, and the only thing
+            # the profile was wanted for is a credential that Chase settled on
+            # 2026-08-19 as a fact about the whole brokerage. Stopping here
+            # sent Carmen to correct a request and a roster row that were both
+            # right; the flyer goes out with the brokerage credential and says
+            # so, and the provenance records which source answered.
+            return ContactCheck(
+                name=workbook_name,
+                email=email,
+                phone=workbook.phone.strip(),
+                title=default_title.strip(),
+                name_source=WORKBOOK_SOURCE,
+                email_source=WORKBOOK_SOURCE,
+                phone_source=WORKBOOK_SOURCE,
+                title_source=BROKERAGE_SOURCE,
+                note=_site_silent_note(label, default_title.strip()),
+            )
+        if looked_up.unavailable:
+            return ContactCheck(problem=_unavailable_pause(label, row_complete, require_title))
         detail = looked_up.problem or (
             "I could not find one exact agent profile on the official Corner House Realty website"
         )
@@ -529,155 +624,3 @@ def validate_contact(
         ),
         source_url=profile.source_url,
     )
-
-
-def lookup_official_profile(
-    agent_name: str,
-    agent_email: str,
-    known_phone: str = "",
-    *,
-    fetch: Fetch = _fetch,
-) -> ProfileLookup:
-    """Find one official profile and prove it belongs to this agent.
-
-    The name locates a candidate — exactly, or allowing a self-branding suffix
-    such as "Bobby Carr The Dog Walking Realtor" for an official "Bobby Carr".
-    Identity is then proven by a contact detail on the profile itself: the
-    submitted email, or the filed direct phone when the agent submits from a
-    personal address the brokerage page does not list.
-
-    Args:
-        agent_name: Name submitted on the request form.
-        agent_email: Email submitted on the request form.
-        known_phone: The contact workbook's direct phone for this agent, used
-            as the identity proof when the profile does not show their email.
-            Empty means email is the only accepted proof.
-        fetch: Bounded HTTP seam, injectable for hermetic tests.
-
-    Returns:
-        One exact, official-domain profile or a plain-language refusal.
-
-    Raises:
-        Nothing. Network and parsing failures become a safe lookup problem.
-    """
-    name = clean_name(agent_name)
-    email_address = agent_email.strip().lower()
-    if not name or not email_address:
-        return ProfileLookup(problem="the request does not identify one agent by name and email")
-    try:
-
-        def _titles(term: str) -> list[tuple[str, str]]:
-            """Every official-domain page title the site returns for one term."""
-            query = urllib.parse.urlencode(
-                {"search": term, "per_page": "20", "_fields": "link,title"}
-            )
-            raw, final_api_url = fetch(f"{OFFICIAL_PAGES_API}?{query}")
-            if not _official_url(final_api_url):
-                raise ValueError("the page search left the official domain")
-            payload: object = json.loads(raw)
-            if not isinstance(payload, list):
-                raise ValueError("the page search did not return a list")
-            found: list[tuple[str, str]] = []
-            for item in payload:
-                if not isinstance(item, Mapping):
-                    continue
-                link = item.get("link", "")
-                if isinstance(link, str) and _official_url(link):
-                    found.append((link, _title(item.get("title"))))
-            return found
-
-        # WordPress requires every search term to match, so "Bobby Carr The Dog
-        # Walking Realtor" returns nothing at all while "Bobby Carr" returns his
-        # profile. A branded name therefore needs a second, shorter query before
-        # there is anything to match against.
-        results = _titles(name)
-        words = _name_words(name)
-        if not results and len(words) > 2:
-            # The retry drops the branding and any punctuation attached to it.
-            # "Caleb Olawuyi, Realtor" searched whole returns nothing at all.
-            results = _titles(" ".join(words[:2]))
-
-        exact: list[tuple[str, str]] = []
-        branded: list[tuple[str, str]] = []
-        for link, title in results:
-            if _name_key(title) == _name_key(name):
-                exact.append((link, title))
-            elif _is_branded_form_of(name, title):
-                branded.append((link, title))
-        # An agent who brands themselves — "Bobby Carr The Dog Walking Realtor"
-        # against an official "Bobby Carr" — has no exact profile, and refusing
-        # there denied him every design that prints a credential. The branded
-        # form is only ever a fallback for finding a candidate; identity is
-        # still proven below by a contact detail, never by the name.
-        candidates = list(dict.fromkeys(exact or branded))
-        if not candidates:
-            return ProfileLookup(
-                problem=(
-                    "the official Corner House Realty website has no exact profile for this agent"
-                )
-            )
-
-        # One agent can hold several pages under the identical title: Melanie
-        # Humeniuk's profile and her open-houses page are both called exactly
-        # "Melanie Humeniuk", and refusing on the count alone denied her every
-        # design that prints a credential. The name nominates here too, and the
-        # contact detail decides — read each candidate and keep the ones that
-        # actually carry this agent's email or filed direct phone.
-        proven: list[OfficialProfile] = []
-        for profile_url, profile_name in candidates[:_MAX_CANDIDATE_PROFILES]:
-            profile_html, final_profile_url = fetch(profile_url)
-            if not _official_url(final_profile_url):
-                raise ValueError("the profile left the official domain")
-            parser = _ProfileParser()
-            parser.feed(profile_html.decode("utf-8", errors="replace"))
-            emails = _unique([value.lower() for value in parser.emails])
-            phones = _unique(parser.phones)
-            titles = _unique([clean_name(value) for value in parser.title_parts])
-            if len(phones) != 1 or not _phone_is_usable(phones[0]):
-                continue
-            # The email is the usual proof; the filed direct phone is the
-            # fallback for an agent who submits from a personal address the
-            # brokerage page does not list, which is how Bobby Carr's gmail
-            # failed against his official profile. A page matching on neither is
-            # somebody else, whatever it is called.
-            if email_address not in emails and (
-                not known_phone or _phone_key(known_phone) != _phone_key(phones[0])
-            ):
-                continue
-            proven.append(
-                OfficialProfile(
-                    name=profile_name,
-                    email=email_address,
-                    phone=phones[0],
-                    title=titles[0] if len(titles) == 1 else "",
-                    source_url=final_profile_url,
-                )
-            )
-        if not proven:
-            return ProfileLookup(
-                problem=(
-                    "the official profile does not show the submitted email address "
-                    "or the filed direct phone"
-                ),
-                found_but_unproven=True,
-            )
-        # Duplicate pages for one person agree with each other. Pages that
-        # disagree on the direct line are not one person, and choosing between
-        # them is the guess this module exists to refuse.
-        if len({_phone_key(found.phone) for found in proven}) > 1:
-            return ProfileLookup(
-                problem=(
-                    "the official Corner House Realty website shows more than one direct "
-                    "phone number for this agent"
-                )
-            )
-        # Prefer a page carrying a credential: the open-houses twin usually has
-        # none, and an empty title would be reported as a missing credential.
-        titled = next((found for found in proven if found.title), None)
-        return ProfileLookup(profile=titled or proven[0])
-    except Exception:
-        return ProfileLookup(
-            problem=(
-                "I could not complete the check against the official Corner House Realty website"
-            )
-        )

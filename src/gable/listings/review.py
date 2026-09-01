@@ -60,8 +60,7 @@ _ATTRIBUTION: Final[re.Pattern[str]] = re.compile(
 #: asked for a quote AND a name the form had already carried all along.
 _TRAILING_NAME: Final[re.Pattern[str]] = re.compile(
     # \u2019 spelled as an escape, for the reason given on _NAME_LINE above.
-    "^[-\u2013\u2014]?\\s*"
-    "(?P<name>[A-Z][a-zA-Z'\u2019\\-]+(?:\\s+[A-Z][a-zA-Z'\u2019\\-]+){0,2})$"
+    "^[-\u2013\u2014]?\\s*(?P<name>[A-Z][a-zA-Z'\u2019\\-]+(?:\\s+[A-Z][a-zA-Z'\u2019\\-]+){0,2})$"
 )
 
 #: Quotation marks a submission wraps its review in. The designs draw their own

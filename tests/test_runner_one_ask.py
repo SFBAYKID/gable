@@ -477,3 +477,22 @@ def test_values_are_not_released_by_a_sentence_that_never_went_out(
     run_speech.record_the_ask(db, run.run_id, outstanding)
 
     assert store.blanks_approved(db, run.run_id) is False
+
+
+def test_a_condo_with_a_five_digit_house_number_is_one_property() -> None:
+    """Lina Mariner, 2026-09-01: told three times that one condo was two properties.
+
+    The whole-address shape passes, so the flyer builds. Before this the house
+    number "10600" was counted as a second ZIP.
+    """
+    from gable.slides import manifest as template_manifest
+
+    condo = "10600 Partridge Ln Apt B3, Cockeysville, MD 21030"
+
+    assert template_manifest.names_one_property(condo)
+    problems = template_manifest.validate(
+        template_manifest.manifest_for("Under Contract"), {"address": condo}
+    )
+    assert not [problem for problem in problems if problem.field_name == "address"]
+    two = "10600 Partridge Ln, Cockeysville, MD 21030 10602 Partridge Ln, Cockeysville, MD 21030"
+    assert not template_manifest.names_one_property(two)
