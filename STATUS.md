@@ -223,3 +223,38 @@ waiting for its property photo in its own thread.
 
 Older entries: `STATUS_ARCHIVE_2026-08-27.md`, then the archives before it.
 
+
+## 2026-09-20 — three designs could not fill the agent's name, found while rehearsing
+
+Carmen's 2026-08-26 edits changed the sample agent on New Listing and Open
+House to **Lina Mariner** and on New Listing with Open House to **Brittany
+Tawney**. `SAMPLE_AGENT_NAMES` matches the literal a design ships with, so none
+of the three resolved `agent_name` any more, and the slot was simply not
+replaced. A rehearsal flyer for Andy Jang came back carrying **Lina Mariner's
+name above Andy's phone, email and face**.
+
+Nothing wrong reached Carmen: the last delivered New Listing was 2026-08-19,
+before the edit. The next one would have. The two names are now in the table and
+a test reads the live New Listing text verbatim.
+
+**Three things this turned up that are yours, not mine:**
+
+1. **New Listing with Open House cannot fill its phone at all.** It carries
+   `C: 717-524-8010` over `O: 410-305-9006` in one box. The `C:/O:` convention
+   is supported, but those exact numbers are not in `SAMPLE_CONTACTS`, and
+   `run_values.OFFICE_PHONE` is `443.499.3839` — a different office number.
+   Whether 410-305-9006 is the current office number that should stay, or both
+   should be replaced with the agent's, decides what gets printed on a real
+   flyer, so I did not guess. Today the design refuses to deliver, which is the
+   safe behaviour: the run stops at "the phone number 717-524-8010 is not this
+   listing's". That is the one design of the three still blocked.
+2. **The canary built New Listing the same day and reported nothing wrong** —
+   while the flyer it built carried the wrong agent's name. It checks fields,
+   frames, fitting and geometry, not "every slot the design displays was
+   actually filled". Adding that check is the thing most likely to catch the
+   next edit, and it is a decision about what counts as a clean canary.
+3. **The shared spend ceiling is exhausted** — "Testing has cost about $59.49
+   so far, $0.00 left". Every visual inspection in today's rehearsals was
+   skipped, and the flyers were delivered saying so, which is the designed
+   behaviour. Raising it is your call; I have not touched it. It means the
+   three-photo work has **not** been through the visual judge even once.

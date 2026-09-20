@@ -34,6 +34,21 @@ SAMPLE_AGENT_NAMES: Final[tuple[str, ...]] = (
     # somebody else's testimonial flyer.
     "Sebastion Johnson",
     "Sebastian Johnson",
+    # Carmen edited New Listing, Open House and New Listing with Open House on
+    # 2026-08-26 and their sample agent changed with them. Read live 2026-09-20:
+    # New Listing and Open House now carry "Lina Mariner", New Listing with
+    # Open House "Brittany Tawney", and neither was here -- so `agent_name`
+    # resolved to nothing on three of the six designs and `replaceAllText` had
+    # nothing to replace. A rehearsal flyer built for Andy Jang came back
+    # carrying Lina Mariner's NAME above Andy's phone, email and face. No real
+    # listing had used any of the three since the edit, so nothing wrong
+    # reached Carmen; the next one would have.
+    #
+    # Like every name above these are real Corner House agents, left in the
+    # designs as sample content. Adding one is safe for the person themselves:
+    # their own listing replaces the name with the same name.
+    "Lina Mariner",
+    "Brittany Tawney",
 )
 
 #: Field name -> patterns that mean it, most specific first. Bracketed forms are

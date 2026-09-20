@@ -293,3 +293,40 @@ def test_a_time_with_no_date_fills_the_one_box_design_once() -> None:
     pairs = fields.replacements(resolution, {"open_house": "2-4PM"})
 
     assert pairs["SUNDAY, MAY 24TH\n1 PM - 3 PM"] == "2-4PM"
+
+
+def test_every_live_design_s_current_sample_agent_name_is_recognised() -> None:
+    """A design's sample agent changes when Carmen edits it, and three did.
+
+    Read from the live designs on 2026-09-20, after the 2026-08-26 edits: New
+    Listing and Open House carry "Lina Mariner" and New Listing with Open House
+    carries "Brittany Tawney". None was in `SAMPLE_AGENT_NAMES`, so `agent_name`
+    resolved to nothing on half the catalogue and `replaceAllText` had nothing
+    to replace — a rehearsal flyer for Andy Jang came back with Lina Mariner's
+    name above Andy's phone, email and face.
+
+    This is the check that was missing, not the table entry. A name here is a
+    real Corner House agent's, and the cost of one going unrecognised is their
+    name on somebody else's listing.
+    """
+    for sample in ("Lina Mariner", "Brittany Tawney", "Kelli Kulnich", "Sebastion Johnson"):
+        assert fields.resolve([sample]).fields.get("agent_name") == sample
+
+
+def test_the_agent_name_is_actually_replaced_on_the_current_new_listing_text() -> None:
+    """The live New Listing text, verbatim, must fill with the real agent's name."""
+    current = [
+        "JUST LISTED",
+        "5556 DOLORES AVE\nBALTIMORE, MD 21227",
+        "443-279-8864",
+        "REALTOR",
+        "Lina Mariner",
+        "Lina@cornerhouserealty.com",
+        "QUESTIONS ABOUT THIS PROPERTY?",
+        "DM me!",
+        "$249,900",
+    ]
+    resolved = fields.resolve(current)
+    pairs = fields.replacements(resolved, {"agent_name": "Andy Jang"})
+
+    assert pairs["Lina Mariner"] == "Andy Jang"
