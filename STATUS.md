@@ -41,11 +41,18 @@ of the listing.
    samples. Baking corners into a PNG alpha channel would work but needs a
    radius nothing reports.
 
-**The photo work has not been through the visual judge.** The shared spend
-ceiling is exhausted, so every rehearsal today delivered with "I could not
-complete the visual inspection" — the designed behaviour, and honest, but it
-means no model has looked at a three-photo flyer. I read the renders myself and
-they are right; that is not the same check.
+**The photo work has been through the visual judge**, on the second attempt.
+Every rehearsal before that delivered with "I could not complete the visual
+inspection", which I reported as an exhausted budget. It was not: the ledger
+holds $59.49 against a configured ceiling of $500, with roughly $440 free.
+`tools/rehearse_property_photos.py` simply never called `spend.configure_ceiling`,
+so it kept the module's $50 default while the droplet is set far higher. Fixed;
+the judge now runs, and on a three-photo New Listing with Open House it raised
+nothing about the photographs — only the price box, which is deliberately empty
+and which Gable's own next sentence explains.
+
+**Production was never affected.** `slackapp/runtime.py` configures the ceiling
+at startup, so the live service has always had the full $500.
 
 **Cancellation is still not built.** "Cancel this" still gets an acknowledgment
 and no action; it was looked at during this work and deliberately left alone,
@@ -253,11 +260,11 @@ a test reads the live New Listing text verbatim.
    frames, fitting and geometry, not "every slot the design displays was
    actually filled". Adding that check is the thing most likely to catch the
    next edit, and it is a decision about what counts as a clean canary.
-3. **The shared spend ceiling is exhausted** — "Testing has cost about $59.49
-   so far, $0.00 left". Every visual inspection in today's rehearsals was
-   skipped, and the flyers were delivered saying so, which is the designed
-   behaviour. Raising it is your call; I have not touched it. It means the
-   three-photo work has **not** been through the visual judge even once.
+3. **Nothing is wrong with the budget.** I reported the ceiling as exhausted;
+   it is not. $59.49 reserved since 2026-08-11 against a configured $500, and
+   the live service reads that setting correctly. What was capped at $50 was
+   the rehearsal tool's own process, because it skipped `configure_ceiling`.
+   No decision needed from you.
 
 
 ## 2026-09-20 — the thread audit has never read a thread

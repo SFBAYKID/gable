@@ -110,6 +110,15 @@ def main() -> None:
     if settings.db_path == production.db_path:
         raise RehearsalError("--db must not be the production database")
 
+    # Without this the module keeps its $50 default while the droplet is
+    # configured for far more, so a rehearsal silently loses the visual
+    # inspection -- reported as "the shared spend ceiling blocked the
+    # finished-flyer inspection" with no hint that the cap is this process's
+    # own. Every other entry point does it: `cli`, `slackapp.runtime`, and
+    # `tools.run_row`. Missing it here on 2026-09-20 meant no three-photo
+    # flyer went through the visual judge, and the ledger was read as
+    # exhausted when it was not.
+    spend.configure_ceiling(settings.spend_ceiling_usd)
     budget = connect(production.db_path)
     if not settings.db_path.exists():
         with sqlite3.connect(settings.db_path) as target:
