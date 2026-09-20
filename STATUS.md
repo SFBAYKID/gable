@@ -258,3 +258,49 @@ a test reads the live New Listing text verbatim.
    skipped, and the flyers were delivered saying so, which is the designed
    behaviour. Raising it is your call; I have not touched it. It means the
    three-photo work has **not** been through the visual judge even once.
+
+
+## 2026-09-20 — the thread audit has never read a thread
+
+`tools/audit_threads.py` asked Slack for `oldest` with seven decimal places.
+Slack timestamps have six, and `conversations.history` answers the long form
+with an empty list, `ok: true`, and no error. Since it was written on
+2026-09-01 it has printed **"0 thread(s), 0 flagged"** and exited 0 for every
+channel and every window.
+
+CLAUDE.md §7 makes this the exit condition for Phase 1 — "'Clean' is measured by
+`tools/audit_threads.py` against #calvo, not by the runs table" — and the
+standing instruction was to run it daily through the watch week. It would have
+reported a clean week without reading anything.
+
+Fixed and pushed. **The first real run, 30 days of #calvo: 52 threads, 44
+flagged.** Most are a single announcement with no flyer link after it. Two are
+long: Elliot Mitchell's Under Contract (5 messages) and John Murrow's New
+Listing with Open House (6 — the three-photo refusal). That list is the real
+state of the last month and wants reading before anything is concluded from it;
+I have not classified them.
+
+## 2026-09-20 — Carmen's three-photo thread cannot be finished yet
+
+Chase asked for the flyer to be built into the thread where Carmen originally
+sent the three photos (#calvo, `1789769011.017599`). I have not posted there.
+Her run `run-d48d586200a7` is still parked in `needs_photo` — she said "can
+cancel the request" and there is no cancel tool, so it never closed — and her
+three uploads are still recoverable: `F0C2TTL0059`, `F0C3021QEEN`,
+`F0C3UFCSXEC`.
+
+Two things stop it, and neither is the photo work:
+
+1. **That design cannot fill its phone box** (see the decision-log row). It
+   would build and then refuse with "the phone number 717-524-8010 is not this
+   listing's", which would be a seventh Gable message in a thread Carmen
+   already ended, with no flyer at the end of it. **The brokerage lists
+   `443.499.3839` for Catonsville and Sykesville and `410.305.9006` for
+   Reisterstown, so the design's `O:` line is a real office, just a different
+   branch, and the roster has no branch per agent.** Chase: should that line
+   keep the design's own office, be replaced with the agent's, or come out?
+2. **John Murrow has no headshot on file.** Gable said so in its first message
+   in that thread, and the Head Shots folder is human-owned.
+
+The moment the phone question is answered and a headshot exists, resuming that
+run places all three of her photos — the code for it is deployed and rehearsed.

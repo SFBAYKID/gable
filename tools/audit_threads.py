@@ -123,6 +123,34 @@ def audit_thread(
     )
 
 
+def slack_timestamp(epoch_seconds: float) -> str:
+    """Format a time the way Slack writes its own message timestamps.
+
+    Slack timestamps carry exactly six decimal places. `str(time.time() - ...)`
+    produces up to seven, and `conversations.history` answers a seven-decimal
+    `oldest` with an empty message list, `ok: true` and `has_more: false` --
+    no error, nothing to notice.
+
+    This audit is what CLAUDE.md section 7 makes Phase 1's exit condition:
+    "'Clean' is measured by `tools/audit_threads.py` against #calvo, not by the
+    runs table." It was therefore printing "0 thread(s), 0 flagged" and exiting
+    0 for every channel and every window, which reads exactly like a clean week.
+    Proven against the live API 2026-09-20: the same call with a seven-decimal
+    `oldest` returned 0 messages and with the integer second returned 52,
+    including threads posted minutes earlier.
+
+    Args:
+        epoch_seconds: A UNIX time.
+
+    Returns:
+        The time as Slack writes it, to six decimal places.
+
+    Raises:
+        Nothing.
+    """
+    return f"{epoch_seconds:.6f}"
+
+
 def _paged(call: Any, key: str, **arguments: Any) -> list[dict[str, Any]]:  # noqa: ANN401
     """Follow Slack cursors for one list-returning method, within the page cap."""
     found: list[dict[str, Any]] = []
@@ -157,7 +185,7 @@ def audit_channel(client: Any, channel: str, days: int) -> list[ThreadReport]:  
     identity = client.auth_test()
     bot_id = str(identity.get("bot_id") or "")
     bot_user_id = str(identity.get("user_id") or "")
-    oldest = str(time.time() - days * 86400)
+    oldest = slack_timestamp(time.time() - days * 86400)
     roots = _paged(
         client.conversations_history, "messages", channel=channel, oldest=oldest, limit=PAGE_SIZE
     )

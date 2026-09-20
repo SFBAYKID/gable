@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from tools.audit_threads import audit_channel, audit_thread, render
+from tools.audit_threads import audit_channel, audit_thread, render, slack_timestamp
 
 BOT = "BGABLE"
 LINK = "Your flyer is ready. <https://docs.google.com/presentation/d/abc/edit|Open the flyer>"
@@ -117,3 +117,40 @@ def test_only_threads_gable_opened_are_audited() -> None:
 
     assert [report.thread_ts for report in reports] == ["2.0"]
     assert "0 flagged" in render(reports)
+
+
+def test_the_window_is_written_the_way_slack_writes_a_timestamp() -> None:
+    """Seven decimal places returns an empty channel, with `ok: true` and no error.
+
+    `str(time.time() - days * 86400)` produces up to seven decimals and a Slack
+    timestamp carries exactly six. `conversations.history` answered the long
+    form with no messages at all, so this audit printed "0 thread(s), 0 flagged"
+    and exited 0 for every channel and every window — which is exactly what a
+    clean week looks like, and it is the measure CLAUDE.md section 7 makes
+    Phase 1's exit condition.
+
+    Proven against the live API on 2026-09-20: the same call with
+    `oldest="1789849389.2922757"` returned 0 messages, and with
+    `oldest="1789849389"` returned 52, including threads minutes old.
+    """
+    for moment in (1789849389.2922757, 1789849389.0, 0.1234567891, 1.5):
+        written = slack_timestamp(moment)
+        assert len(written.partition(".")[2]) == 6, written
+        assert abs(float(written) - moment) <= 1e-6
+
+
+def test_the_audit_asks_slack_for_the_window_it_was_given() -> None:
+    """A read that silently matches nothing is not a clean audit."""
+    asked: list[dict[str, Any]] = []
+
+    class Client:
+        def auth_test(self) -> dict[str, str]:
+            return {"bot_id": BOT, "user_id": "UGABLE"}
+
+        def conversations_history(self, **arguments: Any) -> dict[str, Any]:  # noqa: ANN401
+            asked.append(arguments)
+            return {"messages": []}
+
+    audit_channel(Client(), "C0B02721MNK", days=1)
+
+    assert asked and len(asked[0]["oldest"].partition(".")[2]) == 6
