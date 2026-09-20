@@ -68,6 +68,22 @@ SAMPLE_CONTACTS: Final[tuple[str, ...]] = (
     "410.456.6868",
     "808.225.8640",
     "410-999-9999",
+    # New Listing with Open House, read live 2026-09-20 after Carmen's
+    # 2026-08-26 edit: `C: 717-524-8010` over `O: 410-305-9006` in one box.
+    # Neither was here, so the box resolved to nothing and every build of that
+    # design stopped at "the phone number 717-524-8010 is not this listing's" —
+    # correctly, because 717-524-8010 is Brittany Tawney's own cell.
+    #
+    # 410-305-9006 is NOT a stale sample: cornerhouserealty.com lists it as the
+    # Reisterstown office, with 443.499.3839 (`run_values.OFFICE_PHONE`, still
+    # current) for Catonsville and Sykesville. It is here because the roster
+    # carries no branch for an agent, so Gable cannot know which office belongs
+    # on a given flyer — and the shipped `C:/O:` convention replaces the whole
+    # box with the agent's own number rather than printing any office at all.
+    # Printing one agent's cell, or another branch's office, on somebody else's
+    # flyer are both worse than printing neither.
+    "717-524-8010",
+    "410-305-9006",
     "kelli@cornerhouserealty.com",
     "louis@cornerhouserealty.com",
     "kirby-jay@cornerhouserealty.com",

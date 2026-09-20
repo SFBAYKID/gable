@@ -60,6 +60,29 @@ It reads the response tab through the service account and never writes to it.
 A verdict that changed is a fix or a regression, and the diff is where you
 decide which. A new row is a new real input the suite now knows about.
 
+## 0a. Refresh the live design text
+
+`tests/fixtures/live_design_text.json` is what the six designs in Generic
+Templates actually say. `tests/test_live_design_text.py` holds every design to
+it: each slot a design displays must resolve to a field Gable can fill, because
+a slot that does not resolve is never replaced and the design's own sample —
+a real Corner House agent's name, cell or address — prints on somebody else's
+flyer. **After any design edit**, refresh it and read the diff:
+
+```bash
+PYTHONPATH=src .venv/bin/python tools/refresh_design_text.py
+```
+
+It reads through the service account with read-only scopes and never writes to
+Drive. A changed line is either a fix or a regression, and the diff is where you
+decide which; a new unresolved slot fails the suite by name.
+
+This exists because Carmen's 2026-08-26 edits changed the sample agent on three
+designs, `agent_name` stopped resolving on half the catalogue, and nothing
+noticed until a flyer built for Andy Jang came back under Lina Mariner's name on
+2026-09-20 — with a green suite, and a canary on the same design reporting
+nothing wrong.
+
 ## 0b. Audit the threads
 
 After a live test, and weekly against production, read the channel the way a
@@ -75,6 +98,12 @@ Drop the channel override to audit #calvo. It flags any thread with more than
 three Gable messages after the announcement, a repeated sentence, an
 escalation, or no flyer link at the end, and exits 1 when anything is flagged.
 It reads only.
+
+Until 2026-09-20 it asked Slack for an `oldest` with seven decimal places, which
+`conversations.history` answers with an empty list and `ok: true` — so it read
+nothing and printed "0 thread(s), 0 flagged" whatever the channel held. If you
+ever see that line against a channel you know has threads, suspect the window
+before you believe the verdict.
 
 ## 0c. Build a test flyer from a design on demand
 

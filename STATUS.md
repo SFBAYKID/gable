@@ -289,18 +289,13 @@ cancel the request" and there is no cancel tool, so it never closed — and her
 three uploads are still recoverable: `F0C2TTL0059`, `F0C3021QEEN`,
 `F0C3UFCSXEC`.
 
-Two things stop it, and neither is the photo work:
+**The phone box is fixed.** It needed no decision after all: the shipped
+`C:/O:` convention already replaces the whole box with the agent's own number
+rather than printing any office, so the two current sample numbers just needed
+recording. That design now builds — rehearsed in the playground with Carmen's
+own three photos, on her design, and the flyer is right.
 
-1. **That design cannot fill its phone box** (see the decision-log row). It
-   would build and then refuse with "the phone number 717-524-8010 is not this
-   listing's", which would be a seventh Gable message in a thread Carmen
-   already ended, with no flyer at the end of it. **The brokerage lists
-   `443.499.3839` for Catonsville and Sykesville and `410.305.9006` for
-   Reisterstown, so the design's `O:` line is a real office, just a different
-   branch, and the roster has no branch per agent.** Chase: should that line
-   keep the design's own office, be replaced with the agent's, or come out?
-2. **John Murrow has no headshot on file.** Gable said so in its first message
-   in that thread, and the Head Shots folder is human-owned.
-
-The moment the phone question is answered and a headshot exists, resuming that
-run places all three of her photos — the code for it is deployed and rehearsed.
+**One thing still stops her thread: John Murrow has no headshot on file.**
+Gable said so in its first message there, and the Head Shots folder is
+human-owned — Gable cannot fill it. Add a headshot for him and the run resumes
+onto all three of her photos.
