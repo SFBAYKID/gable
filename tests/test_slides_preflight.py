@@ -570,13 +570,22 @@ def test_releasing_blank_values_frees_only_the_missing_value_blockers() -> None:
     ]
 
 
-def test_a_group_scales_the_type_but_a_box_transform_only_shapes_the_box() -> None:
-    """The real New Listing with Open House title, measured 2026-08-14.
+def test_neither_transform_scales_the_type_but_both_shape_the_box() -> None:
+    """The real New Listing with Open House credential box, measured twice.
 
     It is stored as a 3,000,000 EMU square scaled to 1.11 x 0.13, inside a group
     scaled 0.75, and declared at 18.79pt. Multiplying both scales into the font
-    read it as 1.79pt and refused the design as unreadable; the box transform
-    shapes the box, and only the group scales the type.
+    read it as 1.79pt and refused the design as unreadable (2026-08-14).
+
+    Multiplying only the GROUP scale read it as 14.09pt, which was assumed and
+    is also wrong. Measured against the renderer 2026-09-20: this box is 197.1pt
+    wide, and "TEAM LEADER + REALTOR" needs 177.3pt at 14.09pt but 236.4pt at
+    18.79pt. Rendered, it wraps -- so the type is 18.79pt, the size it declares.
+    Reading it as 14.09pt meant nothing shrank it and the word REALTOR wrapped
+    on top of the phone number on a flyer delivered to Carmen. Shrinking it to
+    15.6pt was rendered too, and fits on one line.
+
+    So: both transforms shape the box, neither scales the type.
     """
     title = {
         "objectId": "p1_i103",
@@ -612,9 +621,24 @@ def test_a_group_scales_the_type_but_a_box_transform_only_shapes_the_box() -> No
 
     box = next(item for item in measure.text_boxes(presentation) if item.object_id == "p1_i103")
 
-    assert round(box.font_size_pt, 2) == 14.09
+    assert round(box.font_size_pt, 2) == 18.79
     assert box.font_size_pt > fitting.MIN_READABLE_PT
+    # The box IS scaled by both, and stays so: 197.1pt of usable width.
     assert round(box.width_emu) == 2502813
+
+    # And the whole point: at that size the credential overflows this box, so
+    # the fitter cuts it instead of letting it wrap onto the phone number.
+    fit = fitting.fit_for(
+        box.object_id,
+        "TEAM LEADER + REALTOR",
+        box.font_size_pt,
+        box.width_emu,
+        box.lines,
+        box.weight,
+        "EB Garamond",
+    )
+    assert fit.overflows
+    assert 15.0 < fit.fitted_pt < 16.0, fit.fitted_pt
 
 
 def test_a_title_no_design_has_room_for_falls_back_to_its_credential() -> None:

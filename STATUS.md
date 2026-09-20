@@ -289,6 +289,13 @@ cancel the request" and there is no cancel tool, so it never closed — and her
 three uploads are still recoverable: `F0C2TTL0059`, `F0C3021QEEN`,
 `F0C3UFCSXEC`.
 
+**The credential overlap is fixed.** The first flyer built into her thread had
+"TEAM LEADER + REALTOR" wrapped on top of John Murrow's phone number.
+`measure.text_boxes` was reading grouped text as `declared * group_scale`,
+which made a box that overflows look like it fits, so the fitter left it alone.
+A group's scale shapes the box and does not scale the type — measured against
+the renderer both ways. Text that does not fit is now always shrunk.
+
 **The phone box is fixed.** It needed no decision after all: the shipped
 `C:/O:` convention already replaces the whole box with the agent's own number
 rather than printing any office, so the two current sample numbers just needed

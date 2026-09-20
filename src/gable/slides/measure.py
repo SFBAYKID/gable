@@ -51,12 +51,15 @@ def _leaves_with_group_scale(
 ) -> list[tuple[dict[str, Any], float, float, float]]:
     """Every leaf element with the scale its enclosing groups apply.
 
-    The two scales are kept apart deliberately. An element's own transform
-    shapes its box — New Listing with Open House stores its title as a 3,000,000
-    EMU square scaled to 1.11 x 0.13 — and does not change the size of the type
-    inside it. A GROUP's scale does change the rendered type, because the whole
-    group is drawn smaller. Multiplying the two together read that title as
-    1.79pt and refused the design as unreadable.
+    An element's own transform shapes its box — New Listing with Open House
+    stores its title as a 3,000,000 EMU square scaled to 1.11 x 0.13 — and does
+    not change the size of the type inside it. Multiplying it into the type size
+    read that title as 1.79pt and refused the design as unreadable.
+
+    A group's scale does not change the rendered type either. That was assumed
+    here until 2026-09-20 and measured against the renderer that day: see
+    `text_boxes`. The scale is still returned, because the caller measures the
+    box in absolute EMU and a reader needs to see where that came from.
 
     Args:
         elements: A `pageElements` list, or a group's children.
@@ -105,14 +108,26 @@ def text_boxes(presentation: dict[str, Any]) -> list[fitting.TextBox]:
         # New Listing with Open House scales its REALTOR box to 0.75, so its
         # own numbers overstated the usable width by a third and the design was
         # refused outright rather than measured.
-        for element, group_scale_y, width, height in _leaves_with_group_scale(
+        #
+        # The WIDTH is group-scaled; the TYPE SIZE is not. Slides renders the
+        # text at the size it declares whatever the shape around it is scaled
+        # to, and `declared * group_scale_y` therefore under-read every grouped
+        # box by that factor. Measured against the renderer 2026-09-20 on New
+        # Listing with Open House's credential box, the only grouped box any
+        # run fills: 197.1pt wide, "TEAM LEADER + REALTOR" declared at 18.79pt.
+        # Scaled it reads 14.09pt, needs 177.3pt, and fits — so nothing shrank
+        # it, and the word REALTOR wrapped onto the phone number on a flyer
+        # delivered to Carmen. Unscaled it needs 236.4pt, overflows, and is cut
+        # to 15.66pt. Both predictions were confirmed by rendering the design:
+        # at 18.79pt it wraps, at 15.6pt it does not.
+        for element, _group_scale_y, width, height in _leaves_with_group_scale(
             page.get("pageElements", [])
         ):
             text = text_content(element)
             if not text:
                 continue
             declared = font_size_pt(element)
-            size_pt = declared * group_scale_y if declared else _implied_font_size_pt(height)
+            size_pt = declared if declared else _implied_font_size_pt(height)
             lines = 1
             if size_pt > 0 and height > 0:
                 lines = max(1, int((height / fitting.EMU_PER_POINT) // (size_pt * 1.2)))
