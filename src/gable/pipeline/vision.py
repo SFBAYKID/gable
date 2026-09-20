@@ -472,6 +472,7 @@ def _inspect(
     model: str | None = None,
     reference_image_bytes: bytes = b"",
     schema: dict[str, Any] | None = None,
+    additional_reference_images: tuple[bytes, ...] = (),
 ) -> Inspection:
     """Run one strict, fail-closed visual inspection request."""
     key = api_key or ""
@@ -486,6 +487,14 @@ def _inspect(
             {
                 "type": "input_image",
                 "image_url": f"data:image/jpeg;base64,{reference}",
+                "detail": "original",
+            }
+        )
+    for source in additional_reference_images:
+        content.append(
+            {
+                "type": "input_image",
+                "image_url": "data:image/jpeg;base64," + base64.b64encode(source).decode(),
                 "detail": "original",
             }
         )
@@ -585,6 +594,7 @@ def inspect(
     model: str | None = None,
     reference_image_bytes: bytes = b"",
     expected_placeholders: tuple[str, ...] = (),
+    additional_reference_images: tuple[bytes, ...] = (),
 ) -> Inspection:
     """Ask a vision model whether a rendered flyer looks right.
 
@@ -595,6 +605,7 @@ def inspect(
         reference_image_bytes: The person's original property photo, when
             available. It is compared with the photo visible in the flyer in
             the same call, so a bad crop or placement cannot pass as good layout.
+        additional_reference_images: Remaining source photos in left-to-right placement order.
         expected_placeholders: The design's own sample text for fields nobody
             supplied. Named in the prompt so a correct flyer is not parked in
             review for showing exactly what it was asked to show.
@@ -611,10 +622,20 @@ def inspect(
     """
     return _inspect(
         image_bytes,
-        PROMPT + kept_placeholder_note(expected_placeholders),
+        PROMPT
+        + (
+            "\nThere are multiple source photos before the LAST image, which is the flyer. "
+            "The first source is main; the others belong left-to-right in the smaller spaces. "
+            "Compare EVERY placed picture with its corresponding source. References to the "
+            "SECOND image as output above mean the LAST image for this batch."
+            if additional_reference_images
+            else ""
+        )
+        + kept_placeholder_note(expected_placeholders),
         api_key=api_key,
         model=model,
         reference_image_bytes=reference_image_bytes,
+        additional_reference_images=additional_reference_images,
     )
 
 

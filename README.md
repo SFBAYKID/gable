@@ -1,7 +1,7 @@
 # Gable
 
-Gable turns one Google Form submission plus one human-supplied property photo
-into an editable Google Slides flyer. It works in Slack with Carmen and Chase,
+Gable turns one Google Form submission plus the human-supplied property
+photographs into an editable Google Slides flyer. It works in Slack with Carmen and Chase,
 never publishes outside the configured Gable channel, and never calls a flyer
 ready unless its deterministic checks and rendered-image inspection both pass.
 
@@ -23,13 +23,16 @@ decision history live in `CLAUDE.md` and `ARCHITECTURE.md`.
    Readable overflow and photo cropping are corrected automatically, then
    reported in the single outcome after render inspection.
 5. A Slack photo keeps its original composition until the exact frame is known.
-   Gable then crops and resizes once. A very small upload remains at no more
+   Gable then crops and resizes once, per photograph. Designs that draw a row
+   of smaller photos under the main one take up to three; Gable measures the
+   row on every build and asks for the number of the one that should be main,
+   because it never sees the uploads themselves. A very small upload remains at no more
    than 2x over a blurred, darkened fill made only from that same photo; no image
    model invents property detail.
 6. Gable copies the template, fills standalone fields, reads every value back,
-   places the hero and headshot, fits only text it changed, renders a thumbnail,
-   and asks the configured vision model to compare the supplied property photo
-   with the visible result.
+   places every property photograph and the headshot, fits only text it
+   changed, renders a thumbnail, and asks the configured vision model to
+   compare each supplied property photo with the visible result.
 7. Only a confident pass is linked as ready. The output is a live Slides file,
    so Carmen can also correct it directly. A rejected draft stays internal and
    its bad link is not offered in Slack.
@@ -55,6 +58,10 @@ alignment, padding, and off-canvas artwork before they are certified.
   and sample-value conventions are resolved by `slides/fields.py`.
 - Keep one separate, unfilled main-photo shape near the top of the slide. Gable
   refuses to infer a frame when more than one candidate is plausible.
+- A row of smaller photo shapes below it is filled only on designs whose row
+  has been measured live. Two axis-aligned landscape shapes of equal height on
+  one line, not overlapping, is what makes the row readable; anything else is
+  refused rather than guessed at.
 - Keep an agent portrait as one separate shape or image beside the agent name
   and at least one phone, email, or title field. Gable ignores square images
   without that contact-card evidence and refuses multiple portrait candidates.
@@ -164,8 +171,11 @@ nonempty preview is a stop condition.
   copy, fail closed when visual review is unavailable or uncertain, and leave
   an editable Slides file for the final human decision.
 - Hero-photo web search, Drive-photo selection, MLS access, and synthetic
-  property-photo generation are not connected. The runtime uses the one photo
-  supplied in the listing's Slack thread.
+  property-photo generation are not connected. The runtime uses only the
+  photographs supplied in the listing's Slack thread.
+- A design's rounded photo corners are not preserved. The Slides API exposes
+  neither the picture inside a `CUSTOM` shape nor its corner radius, so every
+  placed photograph is a plain rectangle.
 - The append-only run-event ledger has no operator history viewer yet.
 - Automatic focal-point crop retries and second-model visual consensus are not
   connected; both need measured reliability evidence before becoming gates.

@@ -91,12 +91,14 @@ def test_schema_six_migrates_through_current_durable_state(
     _remove_v13_submission_columns(connection)
     _remove_v14_run_columns(connection)
     _remove_v15_template_columns(connection)
+    connection.execute("ALTER TABLE runs DROP COLUMN property_photos")
+    connection.execute("ALTER TABLE runs DROP COLUMN pending_photo_files")
     connection.execute("DELETE FROM schema_version WHERE version >= 7")
     assert current_version(connection) == 6
 
-    assert apply_migrations(connection) == 9
+    assert apply_migrations(connection) == 10
 
-    assert current_version(connection) == SCHEMA_VERSION == 15
+    assert current_version(connection) == SCHEMA_VERSION == 16
     columns = connection.execute("PRAGMA table_info(operation_releases)").fetchall()
     assert [str(row["name"]) for row in columns] == [
         "id",
@@ -130,12 +132,14 @@ def test_deployed_schema_seven_gains_the_generalized_outbox(tmp_path: Path) -> N
     _remove_v13_submission_columns(connection)
     _remove_v14_run_columns(connection)
     _remove_v15_template_columns(connection)
+    connection.execute("ALTER TABLE runs DROP COLUMN property_photos")
+    connection.execute("ALTER TABLE runs DROP COLUMN pending_photo_files")
     connection.execute("DELETE FROM schema_version WHERE version >= 8")
     assert current_version(connection) == 7
 
-    assert apply_migrations(connection) == 8
+    assert apply_migrations(connection) == 9
 
-    assert current_version(connection) == SCHEMA_VERSION == 15
+    assert current_version(connection) == SCHEMA_VERSION == 16
     columns = {
         str(row["name"])
         for row in connection.execute("PRAGMA table_info(run_questions)").fetchall()

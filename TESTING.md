@@ -103,6 +103,44 @@ the channel override, and read the thread. The resume-tool defect on
 would have shown it first. This is part of the definition of done in
 CLAUDE.md §10, not a courtesy.
 
+## 0e. Rehearse a multi-photo upload
+
+A batch of property photos cannot be driven from Slack for the reason in the
+safety-boundary section: a scripted post carries a `bot_id` and `routing.py`
+drops it. `tools/rehearse_property_photos.py` drives the two calls the listener
+makes instead — the real `PhotoHandoff` and the real runner — against files a
+person has already uploaded to the playground by hand.
+
+1. In `C0B02721MNK`, upload the photos in one message and copy each file id
+   (the `F…` value in the file's Slack link).
+2. Seed a `Testing_1` row for a design with a row of smaller wells: New
+   Listing, New Listing with Open House, or Open House.
+3. Run it, with an isolated copy of the database:
+
+```bash
+ssh -i ~/.ssh/gable_droplet root@143.110.146.87 \
+  'cd /opt/gable && sudo -u gable /opt/gable/.venv/bin/python -m tools.rehearse_property_photos \
+     --row <row> --file F0000000001 --file F0000000002 --file F0000000003 \
+     --db /tmp/gable-rehearsal.db'
+```
+
+Running it from a staging directory before deploy needs `PYTHONPATH` set to
+that directory's `src`, because `gable` is installed into the droplet's venv as
+an editable pointer to `/opt/gable/src` and would otherwise win.
+
+It copies the production database rather than writing to it, posts only to the
+playground, keeps paid calls on the **production** spend ledger so a rehearsal
+cannot spend past the ceiling that protects a real listing, prints the thread
+at the end, and asserts that repeating the same upload builds nothing a second
+time. Pass `--text ""` to rehearse the branch where Gable has to ask which
+photo is the main one.
+
+Then open the flyer and look at it. The three checks the render has to pass are
+the ones no unit test can make: each photograph is in the well it was meant
+for, in upload order left to right; none is stretched, squashed, or cropped
+through the middle of the house; and no sample house survives anywhere on the
+page.
+
 ## 1. Complete local gate
 
 From the repository root:

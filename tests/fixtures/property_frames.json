@@ -1,0 +1,2167 @@
+[
+  {
+    "name": "New Listing",
+    "presentation": {
+      "pageSize": {
+        "width": {
+          "magnitude": 10287000,
+          "unit": "EMU"
+        },
+        "height": {
+          "magnitude": 12852400,
+          "unit": "EMU"
+        }
+      },
+      "slides": [
+        {
+          "objectId": "p1",
+          "pageElements": [
+            {
+              "objectId": "p1_i2",
+              "transform": {
+                "scaleX": 0.7500000000000001,
+                "scaleY": 0.7499999999999999,
+                "translateX": 1832952,
+                "translateY": 203017,
+                "unit": "EMU"
+              },
+              "elementGroup": {
+                "children": []
+              }
+            },
+            {
+              "objectId": "p1_i6",
+              "size": {
+                "width": {
+                  "magnitude": 3000000,
+                  "unit": "EMU"
+                },
+                "height": {
+                  "magnitude": 3000000,
+                  "unit": "EMU"
+                }
+              },
+              "transform": {
+                "scaleX": 2.2070320000000003,
+                "translateX": 1823696,
+                "translateY": 2023405,
+                "unit": "EMU"
+              },
+              "line": {}
+            },
+            {
+              "objectId": "p1_i7",
+              "size": {
+                "width": {
+                  "magnitude": 172697425,
+                  "unit": "EMU"
+                },
+                "height": {
+                  "magnitude": 113404650,
+                  "unit": "EMU"
+                }
+              },
+              "transform": {
+                "scaleX": 0.04,
+                "scaleY": 0.04,
+                "translateX": 1680296,
+                "translateY": 3766635,
+                "unit": "EMU"
+              },
+              "shape": {
+                "shapeProperties": {
+                  "shapeBackgroundFill": {}
+                }
+              }
+            },
+            {
+              "objectId": "p1_i8",
+              "size": {
+                "width": {
+                  "magnitude": 83226475,
+                  "unit": "EMU"
+                },
+                "height": {
+                  "magnitude": 54652050,
+                  "unit": "EMU"
+                }
+              },
+              "transform": {
+                "scaleX": 0.039999999999999994,
+                "scaleY": 0.04,
+                "translateX": 1680296,
+                "translateY": 8474271,
+                "unit": "EMU"
+              },
+              "shape": {
+                "shapeProperties": {
+                  "shapeBackgroundFill": {}
+                }
+              }
+            },
+            {
+              "objectId": "p1_i9",
+              "size": {
+                "width": {
+                  "magnitude": 83226475,
+                  "unit": "EMU"
+                },
+                "height": {
+                  "magnitude": 54652050,
+                  "unit": "EMU"
+                }
+              },
+              "transform": {
+                "scaleX": 0.039999999999999994,
+                "scaleY": 0.04,
+                "translateX": 5277645,
+                "translateY": 8474271,
+                "unit": "EMU"
+              },
+              "shape": {
+                "shapeProperties": {
+                  "shapeBackgroundFill": {}
+                }
+              }
+            },
+            {
+              "objectId": "p1_i10",
+              "size": {
+                "width": {
+                  "magnitude": 3000000,
+                  "unit": "EMU"
+                },
+                "height": {
+                  "magnitude": 3000000,
+                  "unit": "EMU"
+                }
+              },
+              "transform": {
+                "scaleX": 0.651863,
+                "translateX": 2910488,
+                "translateY": 11661051,
+                "unit": "EMU"
+              },
+              "line": {}
+            },
+            {
+              "objectId": "p1_i11",
+              "size": {
+                "width": {
+                  "magnitude": 9038500,
+                  "unit": "EMU"
+                },
+                "height": {
+                  "magnitude": 9038500,
+                  "unit": "EMU"
+                }
+              },
+              "transform": {
+                "scaleX": 0.04,
+                "scaleY": 0.04,
+                "translateX": 2910488,
+                "translateY": 12267344,
+                "unit": "EMU"
+              },
+              "shape": {
+                "shapeProperties": {
+                  "shapeBackgroundFill": {}
+                }
+              }
+            },
+            {
+              "objectId": "p1_i12",
+              "size": {
+                "width": {
+                  "magnitude": 9038500,
+                  "unit": "EMU"
+                },
+                "height": {
+                  "magnitude": 9038500,
+                  "unit": "EMU"
+                }
+              },
+              "transform": {
+                "scaleX": 0.04,
+                "scaleY": 0.04,
+                "translateX": 2910488,
+                "translateY": 11814540,
+                "unit": "EMU"
+              },
+              "shape": {
+                "shapeProperties": {
+                  "shapeBackgroundFill": {}
+                }
+              }
+            },
+            {
+              "objectId": "p1_i13",
+              "size": {
+                "width": {
+                  "magnitude": 58080375,
+                  "unit": "EMU"
+                },
+                "height": {
+                  "magnitude": 99502100,
+                  "unit": "EMU"
+                }
+              },
+              "transform": {
+                "scaleX": 0.04,
+                "scaleY": 0.0374,
+                "translateX": 245550,
+                "translateY": 9291575,
+                "unit": "EMU"
+              },
+              "shape": {
+                "shapeProperties": {
+                  "shapeBackgroundFill": {}
+                }
+              }
+            },
+            {
+              "objectId": "p1_i14",
+              "transform": {
+                "scaleX": 3.796874805560794,
+                "scaleY": 3.7968772778652244,
+                "translateX": 6179221,
+                "translateY": 10831803,
+                "unit": "EMU"
+              },
+              "elementGroup": {
+                "children": []
+              }
+            },
+            {
+              "objectId": "p1_i17",
+              "size": {
+                "width": {
+                  "magnitude": 15822000,
+                  "unit": "EMU"
+                },
+                "height": {
+                  "magnitude": 10838075,
+                  "unit": "EMU"
+                }
+              },
+              "transform": {
+                "scaleX": 0.032704497960762045,
+                "scaleY": 0.03270449796076204,
+                "shearX": 0.02303075798002556,
+                "shearY": -0.023030757980025563,
+                "translateX": 9293435.175485227,
+                "translateY": 12194442.92551194,
+                "unit": "EMU"
+              },
+              "shape": {
+                "shapeProperties": {
+                  "shapeBackgroundFill": {}
+                }
+              }
+            },
+            {
+              "objectId": "p1_i18",
+              "transform": {
+                "scaleX": 3.796875,
+                "scaleY": 3.7968782120936244,
+                "translateX": 3600450,
+                "translateY": 3318960,
+                "unit": "EMU"
+              },
+              "elementGroup": {
+                "children": []
+              }
+            },
+            {
+              "objectId": "p1_i21",
+              "size": {
+                "width": {
+                  "magnitude": 3000000,
+                  "unit": "EMU"
+                },
+                "height": {
+                  "magnitude": 3000000,
+                  "unit": "EMU"
+                }
+              },
+              "transform": {
+                "scaleX": 2.346103,
+                "scaleY": 0.30783066666666664,
+                "translateX": 1624345,
+                "translateY": 908628.0000000001,
+                "unit": "EMU"
+              },
+              "shape": {
+                "shapeType": "TEXT_BOX",
+                "shapeProperties": {
+                  "shapeBackgroundFill": {
+                    "propertyState": "NOT_RENDERED",
+                    "solidFill": {
+                      "color": {
+                        "rgbColor": {
+                          "red": 1,
+                          "green": 1,
+                          "blue": 1
+                        }
+                      },
+                      "alpha": 1
+                    }
+                  }
+                },
+                "text": {
+                  "textElements": [
+                    {
+                      "textRun": {
+                        "content": "Label"
+                      }
+                    }
+                  ]
+                }
+              }
+            },
+            {
+              "objectId": "p1_i22",
+              "size": {
+                "width": {
+                  "magnitude": 3000000,
+                  "unit": "EMU"
+                },
+                "height": {
+                  "magnitude": 3000000,
+                  "unit": "EMU"
+                }
+              },
+              "transform": {
+                "scaleX": 2.433837333333333,
+                "scaleY": 0.280134,
+                "translateX": 1483488,
+                "translateY": 2297582,
+                "unit": "EMU"
+              },
+              "shape": {
+                "shapeType": "TEXT_BOX",
+                "shapeProperties": {
+                  "shapeBackgroundFill": {
+                    "propertyState": "NOT_RENDERED",
+                    "solidFill": {
+                      "color": {
+                        "rgbColor": {
+                          "red": 1,
+                          "green": 1,
+                          "blue": 1
+                        }
+                      },
+                      "alpha": 1
+                    }
+                  }
+                },
+                "text": {
+                  "textElements": [
+                    {
+                      "textRun": {
+                        "content": "Label"
+                      }
+                    }
+                  ]
+                }
+              }
+            },
+            {
+              "objectId": "p1_i23",
+              "size": {
+                "width": {
+                  "magnitude": 3000000,
+                  "unit": "EMU"
+                },
+                "height": {
+                  "magnitude": 3000000,
+                  "unit": "EMU"
+                }
+              },
+              "transform": {
+                "scaleX": 0.843707,
+                "scaleY": 0.08849800000000001,
+                "translateX": 3476650,
+                "translateY": 11862563,
+                "unit": "EMU"
+              },
+              "shape": {
+                "shapeType": "TEXT_BOX",
+                "shapeProperties": {
+                  "shapeBackgroundFill": {
+                    "propertyState": "NOT_RENDERED",
+                    "solidFill": {
+                      "color": {
+                        "rgbColor": {
+                          "red": 1,
+                          "green": 1,
+                          "blue": 1
+                        }
+                      },
+                      "alpha": 1
+                    }
+                  }
+                },
+                "text": {
+                  "textElements": [
+                    {
+                      "textRun": {
+                        "content": "Label"
+                      }
+                    }
+                  ]
+                }
+              }
+            },
+            {
+              "objectId": "p1_i24",
+              "size": {
+                "width": {
+                  "magnitude": 3000000,
+                  "unit": "EMU"
+                },
+                "height": {
+                  "magnitude": 3000000,
+                  "unit": "EMU"
+                }
+              },
+              "transform": {
+                "scaleX": 0.843707,
+                "scaleY": 0.09301999999999999,
+                "translateX": 2923565,
+                "translateY": 11278282,
+                "unit": "EMU"
+              },
+              "shape": {
+                "shapeType": "TEXT_BOX",
+                "shapeProperties": {
+                  "shapeBackgroundFill": {
+                    "propertyState": "NOT_RENDERED",
+                    "solidFill": {
+                      "color": {
+                        "rgbColor": {
+                          "red": 1,
+                          "green": 1,
+                          "blue": 1
+                        }
+                      },
+                      "alpha": 1
+                    }
+                  }
+                },
+                "text": {
+                  "textElements": [
+                    {
+                      "textRun": {
+                        "content": "Label"
+                      }
+                    }
+                  ]
+                }
+              }
+            },
+            {
+              "objectId": "p1_i25",
+              "size": {
+                "width": {
+                  "magnitude": 3000000,
+                  "unit": "EMU"
+                },
+                "height": {
+                  "magnitude": 3000000,
+                  "unit": "EMU"
+                }
+              },
+              "transform": {
+                "scaleX": 0.843707,
+                "scaleY": 0.134516,
+                "translateX": 2910488,
+                "translateY": 10830383,
+                "unit": "EMU"
+              },
+              "shape": {
+                "shapeType": "TEXT_BOX",
+                "shapeProperties": {
+                  "shapeBackgroundFill": {
+                    "propertyState": "NOT_RENDERED",
+                    "solidFill": {
+                      "color": {
+                        "rgbColor": {
+                          "red": 1,
+                          "green": 1,
+                          "blue": 1
+                        }
+                      },
+                      "alpha": 1
+                    }
+                  }
+                },
+                "text": {
+                  "textElements": [
+                    {
+                      "textRun": {
+                        "content": "Label"
+                      }
+                    }
+                  ]
+                }
+              }
+            },
+            {
+              "objectId": "p1_i26",
+              "size": {
+                "width": {
+                  "magnitude": 3000000,
+                  "unit": "EMU"
+                },
+                "height": {
+                  "magnitude": 3000000,
+                  "unit": "EMU"
+                }
+              },
+              "transform": {
+                "scaleX": 0.8505526666666667,
+                "scaleY": 0.08849800000000001,
+                "translateX": 3442111,
+                "translateY": 12315367,
+                "unit": "EMU"
+              },
+              "shape": {
+                "shapeType": "TEXT_BOX",
+                "shapeProperties": {
+                  "shapeBackgroundFill": {
+                    "propertyState": "NOT_RENDERED",
+                    "solidFill": {
+                      "color": {
+                        "rgbColor": {
+                          "red": 1,
+                          "green": 1,
+                          "blue": 1
+                        }
+                      },
+                      "alpha": 1
+                    }
+                  }
+                },
+                "text": {
+                  "textElements": [
+                    {
+                      "textRun": {
+                        "content": "Label"
+                      }
+                    }
+                  ]
+                }
+              }
+            },
+            {
+              "objectId": "p1_i27",
+              "size": {
+                "width": {
+                  "magnitude": 3000000,
+                  "unit": "EMU"
+                },
+                "height": {
+                  "magnitude": 3000000,
+                  "unit": "EMU"
+                }
+              },
+              "transform": {
+                "scaleX": 1.2683576666666667,
+                "scaleY": 0.3429,
+                "translateX": 6274471,
+                "translateY": 10966609,
+                "unit": "EMU"
+              },
+              "shape": {
+                "shapeType": "TEXT_BOX",
+                "shapeProperties": {
+                  "shapeBackgroundFill": {
+                    "propertyState": "NOT_RENDERED",
+                    "solidFill": {
+                      "color": {
+                        "rgbColor": {
+                          "red": 1,
+                          "green": 1,
+                          "blue": 1
+                        }
+                      },
+                      "alpha": 1
+                    }
+                  }
+                },
+                "text": {
+                  "textElements": [
+                    {
+                      "textRun": {
+                        "content": "Label"
+                      }
+                    }
+                  ]
+                }
+              }
+            },
+            {
+              "objectId": "p1_i28",
+              "size": {
+                "width": {
+                  "magnitude": 3000000,
+                  "unit": "EMU"
+                },
+                "height": {
+                  "magnitude": 3000000,
+                  "unit": "EMU"
+                }
+              },
+              "transform": {
+                "scaleX": 0.540668,
+                "scaleY": 0.17145,
+                "translateX": 7351462,
+                "translateY": 11995310,
+                "unit": "EMU"
+              },
+              "shape": {
+                "shapeType": "TEXT_BOX",
+                "shapeProperties": {
+                  "shapeBackgroundFill": {
+                    "propertyState": "NOT_RENDERED",
+                    "solidFill": {
+                      "color": {
+                        "rgbColor": {
+                          "red": 1,
+                          "green": 1,
+                          "blue": 1
+                        }
+                      },
+                      "alpha": 1
+                    }
+                  }
+                },
+                "text": {
+                  "textElements": [
+                    {
+                      "textRun": {
+                        "content": "Label"
+                      }
+                    }
+                  ]
+                }
+              }
+            },
+            {
+              "objectId": "p1_i29",
+              "size": {
+                "width": {
+                  "magnitude": 3000000,
+                  "unit": "EMU"
+                },
+                "height": {
+                  "magnitude": 3000000,
+                  "unit": "EMU"
+                }
+              },
+              "transform": {
+                "scaleX": 1.0287,
+                "scaleY": 0.18288,
+                "translateX": 3600450,
+                "translateY": 3373815,
+                "unit": "EMU"
+              },
+              "shape": {
+                "shapeType": "TEXT_BOX",
+                "shapeProperties": {
+                  "shapeBackgroundFill": {
+                    "propertyState": "NOT_RENDERED",
+                    "solidFill": {
+                      "color": {
+                        "rgbColor": {
+                          "red": 1,
+                          "green": 1,
+                          "blue": 1
+                        }
+                      },
+                      "alpha": 1
+                    }
+                  }
+                },
+                "text": {
+                  "textElements": [
+                    {
+                      "textRun": {
+                        "content": "Label"
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "name": "New Listing with Open House",
+    "presentation": {
+      "pageSize": {
+        "width": {
+          "magnitude": 10287000,
+          "unit": "EMU"
+        },
+        "height": {
+          "magnitude": 12852400,
+          "unit": "EMU"
+        }
+      },
+      "slides": [
+        {
+          "objectId": "p1",
+          "pageElements": [
+            {
+              "objectId": "p1_i2",
+              "transform": {
+                "scaleX": 3.1156,
+                "scaleY": 3.2629,
+                "translateX": -0.0025,
+                "translateY": 7749125,
+                "unit": "EMU"
+              },
+              "elementGroup": {
+                "children": []
+              }
+            },
+            {
+              "objectId": "p1_i5",
+              "transform": {
+                "scaleX": 3.7378,
+                "scaleY": 3.7969,
+                "translateX": 6396975,
+                "translateY": 10559611.870000001,
+                "unit": "EMU"
+              },
+              "elementGroup": {
+                "children": []
+              }
+            },
+            {
+              "objectId": "p1_i8",
+              "size": {
+                "width": {
+                  "magnitude": 23179125,
+                  "unit": "EMU"
+                },
+                "height": {
+                  "magnitude": 15877700,
+                  "unit": "EMU"
+                }
+              },
+              "transform": {
+                "scaleX": 0.032704497960762045,
+                "scaleY": 0.032704497960762045,
+                "shearX": 0.023030757980025563,
+                "shearY": -0.023030757980025563,
+                "translateX": 9365884.943862902,
+                "translateY": 11871274.305396084,
+                "unit": "EMU"
+              },
+              "shape": {
+                "shapeProperties": {
+                  "shapeBackgroundFill": {}
+                }
+              }
+            },
+            {
+              "objectId": "p1_i9",
+              "transform": {
+                "scaleX": 3.502,
+                "scaleY": 2.7184,
+                "translateY": 12542500.7075,
+                "unit": "EMU"
+              },
+              "elementGroup": {
+                "children": []
+              }
+            },
+            {
+              "objectId": "p1_i12",
+              "size": {
+                "width": {
+                  "magnitude": 3000000,
+                  "unit": "EMU"
+                },
+                "height": {
+                  "magnitude": 3000000,
+                  "unit": "EMU"
+                }
+              },
+              "transform": {
+                "scaleX": 1.8234,
+                "scaleY": 0.2821,
+                "translateX": 589972.5725,
+                "translateY": 7893725,
+                "unit": "EMU"
+              },
+              "shape": {
+                "shapeType": "TEXT_BOX",
+                "shapeProperties": {
+                  "shapeBackgroundFill": {
+                    "propertyState": "NOT_RENDERED",
+                    "solidFill": {
+                      "color": {
+                        "rgbColor": {
+                          "red": 1,
+                          "green": 1,
+                          "blue": 1
+                        }
+                      },
+                      "alpha": 1
+                    }
+                  }
+                },
+                "text": {
+                  "textElements": [
+                    {
+                      "textRun": {
+                        "content": "Label"
+                      }
+                    }
+                  ]
+                }
+              }
+            },
+            {
+              "objectId": "p1_i13",
+              "size": {
+                "width": {
+                  "magnitude": 3000000,
+                  "unit": "EMU"
+                },
+                "height": {
+                  "magnitude": 3000000,
+                  "unit": "EMU"
+                }
+              },
+              "transform": {
+                "scaleX": 1.3016026666666667,
+                "scaleY": 0,
+                "translateX": 750724,
+                "translateY": 8832881,
+                "unit": "EMU"
+              },
+              "line": {}
+            },
+            {
+              "objectId": "p1_i14",
+              "transform": {
+                "scaleX": 2.0871,
+                "scaleY": 2.2254,
+                "translateX": 642600.0549999999,
+                "translateY": 9727250,
+                "unit": "EMU"
+              },
+              "elementGroup": {
+                "children": []
+              }
+            },
+            {
+              "objectId": "p1_i17",
+              "transform": {
+                "scaleX": 0.7500000000000001,
+                "scaleY": 0.7499989203615492,
+                "translateX": 2881064,
+                "translateY": 11204736,
+                "unit": "EMU"
+              },
+              "elementGroup": {
+                "children": []
+              }
+            },
+            {
+              "objectId": "p1_i20",
+              "size": {
+                "width": {
+                  "magnitude": 102254925,
+                  "unit": "EMU"
+                },
+                "height": {
+                  "magnitude": 108206275,
+                  "unit": "EMU"
+                }
+              },
+              "transform": {
+                "scaleX": 0.028284271247461905,
+                "scaleY": 0.028284271247461905,
+                "shearX": -0.028284271247461898,
+                "shearY": 0.028284271247461898,
+                "translateX": 7509709.298844291,
+                "translateY": 6098184.666066836,
+                "unit": "EMU"
+              },
+              "shape": {
+                "shapeProperties": {
+                  "shapeBackgroundFill": {}
+                }
+              }
+            },
+            {
+              "objectId": "p1_i21",
+              "size": {
+                "width": {
+                  "magnitude": 9227150,
+                  "unit": "EMU"
+                },
+                "height": {
+                  "magnitude": 9227150,
+                  "unit": "EMU"
+                }
+              },
+              "transform": {
+                "scaleX": 0.04,
+                "scaleY": 0.04,
+                "translateX": 2937634,
+                "translateY": 11632324,
+                "unit": "EMU"
+              },
+              "shape": {
+                "shapeProperties": {
+                  "shapeBackgroundFill": {}
+                }
+              }
+            },
+            {
+              "objectId": "p1_i22",
+              "size": {
+                "width": {
+                  "magnitude": 68081250,
+                  "unit": "EMU"
+                },
+                "height": {
+                  "magnitude": 23978700,
+                  "unit": "EMU"
+                }
+              },
+              "transform": {
+                "scaleX": 0.04,
+                "scaleY": 0.04,
+                "translateX": 3781875,
+                "translateY": -158252,
+                "unit": "EMU"
+              },
+              "shape": {
+                "shapeProperties": {
+                  "shapeBackgroundFill": {}
+                }
+              }
+            },
+            {
+              "objectId": "p1_i24",
+              "size": {
+                "width": {
+                  "magnitude": 37029150,
+                  "unit": "EMU"
+                },
+                "height": {
+                  "magnitude": 16852175,
+                  "unit": "EMU"
+                }
+              },
+              "transform": {
+                "scaleX": 0.2581875630415497,
+                "scaleY": 0.25818744464735266,
+                "translateX": 363267,
+                "translateY": 651144,
+                "unit": "EMU"
+              },
+              "shape": {
+                "shapeType": "CUSTOM",
+                "shapeProperties": {
+                  "shapeBackgroundFill": {}
+                }
+              }
+            },
+            {
+              "objectId": "p1_i26",
+              "size": {
+                "width": {
+                  "magnitude": 17583550,
+                  "unit": "EMU"
+                },
+                "height": {
+                  "magnitude": 9210975,
+                  "unit": "EMU"
+                }
+              },
+              "transform": {
+                "scaleX": 0.25818768109966417,
+                "scaleY": 0.25818743401214317,
+                "translateX": 383907,
+                "translateY": 5161413,
+                "unit": "EMU"
+              },
+              "shape": {
+                "shapeType": "CUSTOM",
+                "shapeProperties": {
+                  "shapeBackgroundFill": {}
+                }
+              }
+            },
+            {
+              "objectId": "p1_i28",
+              "size": {
+                "width": {
+                  "magnitude": 17583550,
+                  "unit": "EMU"
+                },
+                "height": {
+                  "magnitude": 9210975,
+                  "unit": "EMU"
+                }
+              },
+              "transform": {
+                "scaleX": 0.25818768109966417,
+                "scaleY": 0.25818743401214317,
+                "translateX": 5383877,
+                "translateY": 5161413,
+                "unit": "EMU"
+              },
+              "shape": {
+                "shapeType": "CUSTOM",
+                "shapeProperties": {
+                  "shapeBackgroundFill": {}
+                }
+              }
+            },
+            {
+              "objectId": "p1_i29",
+              "size": {
+                "width": {
+                  "magnitude": 53452900,
+                  "unit": "EMU"
+                },
+                "height": {
+                  "magnitude": 90640075,
+                  "unit": "EMU"
+                }
+              },
+              "transform": {
+                "scaleX": 0.04,
+                "scaleY": 0.0369,
+                "translateX": 363275,
+                "translateY": 9739274.8575,
+                "unit": "EMU"
+              },
+              "shape": {
+                "shapeProperties": {
+                  "shapeBackgroundFill": {}
+                }
+              }
+            },
+            {
+              "objectId": "p1_i30",
+              "size": {
+                "width": {
+                  "magnitude": 3000000,
+                  "unit": "EMU"
+                },
+                "height": {
+                  "magnitude": 3000000,
+                  "unit": "EMU"
+                }
+              },
+              "transform": {
+                "scaleX": 0.7192,
+                "scaleY": 0.2347,
+                "translateX": 3370448.0000000005,
+                "translateY": 11632331,
+                "unit": "EMU"
+              },
+              "shape": {
+                "shapeType": "TEXT_BOX",
+                "shapeProperties": {
+                  "shapeBackgroundFill": {
+                    "propertyState": "NOT_RENDERED",
+                    "solidFill": {
+                      "color": {
+                        "rgbColor": {
+                          "red": 1,
+                          "green": 1,
+                          "blue": 1
+                        }
+                      },
+                      "alpha": 1
+                    }
+                  }
+                },
+                "text": {
+                  "textElements": [
+                    {
+                      "textRun": {
+                        "content": "Label"
+                      }
+                    }
+                  ]
+                }
+              }
+            },
+            {
+              "objectId": "p1_i31",
+              "size": {
+                "width": {
+                  "magnitude": 3000000,
+                  "unit": "EMU"
+                },
+                "height": {
+                  "magnitude": 3000000,
+                  "unit": "EMU"
+                }
+              },
+              "transform": {
+                "scaleX": 0.834271,
+                "scaleY": 0.132976,
+                "translateX": 2881064,
+                "translateY": 10788216,
+                "unit": "EMU"
+              },
+              "shape": {
+                "shapeType": "TEXT_BOX",
+                "shapeProperties": {
+                  "shapeBackgroundFill": {
+                    "propertyState": "NOT_RENDERED",
+                    "solidFill": {
+                      "color": {
+                        "rgbColor": {
+                          "red": 1,
+                          "green": 1,
+                          "blue": 1
+                        }
+                      },
+                      "alpha": 1
+                    }
+                  }
+                },
+                "text": {
+                  "textElements": [
+                    {
+                      "textRun": {
+                        "content": "Label"
+                      }
+                    }
+                  ]
+                }
+              }
+            },
+            {
+              "objectId": "p1_i32",
+              "size": {
+                "width": {
+                  "magnitude": 3000000,
+                  "unit": "EMU"
+                },
+                "height": {
+                  "magnitude": 3000000,
+                  "unit": "EMU"
+                }
+              },
+              "transform": {
+                "scaleX": 1.4722,
+                "scaleY": 0.2311,
+                "translateX": 445545.5,
+                "translateY": 8943073,
+                "unit": "EMU"
+              },
+              "shape": {
+                "shapeType": "TEXT_BOX",
+                "shapeProperties": {
+                  "shapeBackgroundFill": {
+                    "propertyState": "NOT_RENDERED",
+                    "solidFill": {
+                      "color": {
+                        "rgbColor": {
+                          "red": 1,
+                          "green": 1,
+                          "blue": 1
+                        }
+                      },
+                      "alpha": 1
+                    }
+                  }
+                },
+                "text": {
+                  "textElements": [
+                    {
+                      "textRun": {
+                        "content": "Label"
+                      }
+                    }
+                  ]
+                }
+              }
+            },
+            {
+              "objectId": "p1_i33",
+              "size": {
+                "width": {
+                  "magnitude": 3000000,
+                  "unit": "EMU"
+                },
+                "height": {
+                  "magnitude": 3000000,
+                  "unit": "EMU"
+                }
+              },
+              "transform": {
+                "scaleX": 0.7874,
+                "scaleY": 0.1804,
+                "translateX": 1472755,
+                "translateY": 9748205,
+                "unit": "EMU"
+              },
+              "shape": {
+                "shapeType": "TEXT_BOX",
+                "shapeProperties": {
+                  "shapeBackgroundFill": {
+                    "propertyState": "NOT_RENDERED",
+                    "solidFill": {
+                      "color": {
+                        "rgbColor": {
+                          "red": 1,
+                          "green": 1,
+                          "blue": 1
+                        }
+                      },
+                      "alpha": 1
+                    }
+                  }
+                },
+                "text": {
+                  "textElements": [
+                    {
+                      "textRun": {
+                        "content": "Label"
+                      }
+                    }
+                  ]
+                }
+              }
+            },
+            {
+              "objectId": "p1_i34",
+              "size": {
+                "width": {
+                  "magnitude": 3000000,
+                  "unit": "EMU"
+                },
+                "height": {
+                  "magnitude": 3000000,
+                  "unit": "EMU"
+                }
+              },
+              "transform": {
+                "scaleX": 1.717,
+                "scaleY": 0.1026,
+                "translateX": 2568021.5,
+                "translateY": 12676199,
+                "unit": "EMU"
+              },
+              "shape": {
+                "shapeType": "TEXT_BOX",
+                "shapeProperties": {
+                  "shapeBackgroundFill": {
+                    "propertyState": "NOT_RENDERED",
+                    "solidFill": {
+                      "color": {
+                        "rgbColor": {
+                          "red": 1,
+                          "green": 1,
+                          "blue": 1
+                        }
+                      },
+                      "alpha": 1
+                    }
+                  }
+                },
+                "text": {
+                  "textElements": [
+                    {
+                      "textRun": {
+                        "content": "Label"
+                      }
+                    }
+                  ]
+                }
+              }
+            },
+            {
+              "objectId": "p1_i35",
+              "size": {
+                "width": {
+                  "magnitude": 3000000,
+                  "unit": "EMU"
+                },
+                "height": {
+                  "magnitude": 3000000,
+                  "unit": "EMU"
+                }
+              },
+              "transform": {
+                "scaleX": 1.3246373333333334,
+                "scaleY": 0.25399866666666665,
+                "translateX": 5111026,
+                "translateY": 8458188,
+                "unit": "EMU"
+              },
+              "shape": {
+                "shapeType": "TEXT_BOX",
+                "shapeProperties": {
+                  "shapeBackgroundFill": {
+                    "propertyState": "NOT_RENDERED",
+                    "solidFill": {
+                      "color": {
+                        "rgbColor": {
+                          "red": 1,
+                          "green": 1,
+                          "blue": 1
+                        }
+                      },
+                      "alpha": 1
+                    }
+                  }
+                },
+                "text": {
+                  "textElements": [
+                    {
+                      "textRun": {
+                        "content": "Label"
+                      }
+                    }
+                  ]
+                }
+              }
+            },
+            {
+              "objectId": "p1_i36",
+              "size": {
+                "width": {
+                  "magnitude": 3000000,
+                  "unit": "EMU"
+                },
+                "height": {
+                  "magnitude": 3000000,
+                  "unit": "EMU"
+                }
+              },
+              "transform": {
+                "scaleX": 0.7841656666666668,
+                "scaleY": 0.17423333333333332,
+                "translateX": 5921733,
+                "translateY": 9420210,
+                "unit": "EMU"
+              },
+              "shape": {
+                "shapeType": "TEXT_BOX",
+                "shapeProperties": {
+                  "shapeBackgroundFill": {
+                    "propertyState": "NOT_RENDERED",
+                    "solidFill": {
+                      "color": {
+                        "rgbColor": {
+                          "red": 1,
+                          "green": 1,
+                          "blue": 1
+                        }
+                      },
+                      "alpha": 1
+                    }
+                  }
+                },
+                "text": {
+                  "textElements": [
+                    {
+                      "textRun": {
+                        "content": "Label"
+                      }
+                    }
+                  ]
+                }
+              }
+            },
+            {
+              "objectId": "p1_i37",
+              "size": {
+                "width": {
+                  "magnitude": 3000000,
+                  "unit": "EMU"
+                },
+                "height": {
+                  "magnitude": 3000000,
+                  "unit": "EMU"
+                }
+              },
+              "transform": {
+                "scaleX": 1.2683576666666667,
+                "scaleY": 0.28680833333333333,
+                "translateX": 6481927,
+                "translateY": 10754259,
+                "unit": "EMU"
+              },
+              "shape": {
+                "shapeType": "TEXT_BOX",
+                "shapeProperties": {
+                  "shapeBackgroundFill": {
+                    "propertyState": "NOT_RENDERED",
+                    "solidFill": {
+                      "color": {
+                        "rgbColor": {
+                          "red": 1,
+                          "green": 1,
+                          "blue": 1
+                        }
+                      },
+                      "alpha": 1
+                    }
+                  }
+                },
+                "text": {
+                  "textElements": [
+                    {
+                      "textRun": {
+                        "content": "Label"
+                      }
+                    }
+                  ]
+                }
+              }
+            },
+            {
+              "objectId": "p1_i38",
+              "size": {
+                "width": {
+                  "magnitude": 3000000,
+                  "unit": "EMU"
+                },
+                "height": {
+                  "magnitude": 3000000,
+                  "unit": "EMU"
+                }
+              },
+              "transform": {
+                "scaleX": 0.540668,
+                "scaleY": 0.12065,
+                "translateX": 7492755,
+                "translateY": 11688976,
+                "unit": "EMU"
+              },
+              "shape": {
+                "shapeType": "TEXT_BOX",
+                "shapeProperties": {
+                  "shapeBackgroundFill": {
+                    "propertyState": "NOT_RENDERED",
+                    "solidFill": {
+                      "color": {
+                        "rgbColor": {
+                          "red": 1,
+                          "green": 1,
+                          "blue": 1
+                        }
+                      },
+                      "alpha": 1
+                    }
+                  }
+                },
+                "text": {
+                  "textElements": [
+                    {
+                      "textRun": {
+                        "content": "Label"
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "name": "Open House",
+    "presentation": {
+      "pageSize": {
+        "width": {
+          "magnitude": 10287000,
+          "unit": "EMU"
+        },
+        "height": {
+          "magnitude": 12852400,
+          "unit": "EMU"
+        }
+      },
+      "slides": [
+        {
+          "objectId": "p1",
+          "pageElements": [
+            {
+              "objectId": "p1_i2",
+              "transform": {
+                "scaleX": 3.547,
+                "scaleY": 3.7969,
+                "translateX": -0.0075,
+                "translateY": -252400,
+                "unit": "EMU"
+              },
+              "elementGroup": {
+                "children": []
+              }
+            },
+            {
+              "objectId": "p1_i5",
+              "transform": {
+                "scaleX": 0.7500000000000001,
+                "scaleY": 0.7499999999999999,
+                "translateX": 1832952,
+                "translateY": 66930,
+                "unit": "EMU"
+              },
+              "elementGroup": {
+                "children": []
+              }
+            },
+            {
+              "objectId": "p1_i9",
+              "size": {
+                "width": {
+                  "magnitude": 3000000,
+                  "unit": "EMU"
+                },
+                "height": {
+                  "magnitude": 3000000,
+                  "unit": "EMU"
+                }
+              },
+              "transform": {
+                "scaleX": 2.2070320000000003,
+                "translateX": 1823696,
+                "translateY": 2023405,
+                "unit": "EMU"
+              },
+              "line": {}
+            },
+            {
+              "objectId": "p1_i10",
+              "size": {
+                "width": {
+                  "magnitude": 190328475,
+                  "unit": "EMU"
+                },
+                "height": {
+                  "magnitude": 113404650,
+                  "unit": "EMU"
+                }
+              },
+              "transform": {
+                "scaleX": 0.04,
+                "scaleY": 0.04,
+                "translateX": 1327675,
+                "translateY": 3765214,
+                "unit": "EMU"
+              },
+              "shape": {
+                "shapeProperties": {
+                  "shapeBackgroundFill": {}
+                }
+              }
+            },
+            {
+              "objectId": "p1_i11",
+              "transform": {
+                "scaleX": 3.547,
+                "scaleY": 3.7969,
+                "translateX": 50.21,
+                "translateY": 10036375,
+                "unit": "EMU"
+              },
+              "elementGroup": {
+                "children": []
+              }
+            },
+            {
+              "objectId": "p1_i14",
+              "size": {
+                "width": {
+                  "magnitude": 95164250,
+                  "unit": "EMU"
+                },
+                "height": {
+                  "magnitude": 54652050,
+                  "unit": "EMU"
+                }
+              },
+              "transform": {
+                "scaleX": 0.039999999999999994,
+                "scaleY": 0.04,
+                "translateX": 1327675,
+                "translateY": 8491900,
+                "unit": "EMU"
+              },
+              "shape": {
+                "shapeProperties": {
+                  "shapeBackgroundFill": {}
+                }
+              }
+            },
+            {
+              "objectId": "p1_i15",
+              "size": {
+                "width": {
+                  "magnitude": 88296725,
+                  "unit": "EMU"
+                },
+                "height": {
+                  "magnitude": 54652050,
+                  "unit": "EMU"
+                }
+              },
+              "transform": {
+                "scaleX": 0.04,
+                "scaleY": 0.04,
+                "translateX": 5402534,
+                "translateY": 8491900,
+                "unit": "EMU"
+              },
+              "shape": {
+                "shapeProperties": {
+                  "shapeBackgroundFill": {}
+                }
+              }
+            },
+            {
+              "objectId": "p1_i16",
+              "size": {
+                "width": {
+                  "magnitude": 3000000,
+                  "unit": "EMU"
+                },
+                "height": {
+                  "magnitude": 3000000,
+                  "unit": "EMU"
+                }
+              },
+              "transform": {
+                "scaleX": 0.651863,
+                "translateX": 2910488,
+                "translateY": 11661051,
+                "unit": "EMU"
+              },
+              "line": {}
+            },
+            {
+              "objectId": "p1_i17",
+              "size": {
+                "width": {
+                  "magnitude": 9038500,
+                  "unit": "EMU"
+                },
+                "height": {
+                  "magnitude": 9038500,
+                  "unit": "EMU"
+                }
+              },
+              "transform": {
+                "scaleX": 0.04,
+                "scaleY": 0.04,
+                "translateX": 2910488,
+                "translateY": 12267344,
+                "unit": "EMU"
+              },
+              "shape": {
+                "shapeProperties": {
+                  "shapeBackgroundFill": {}
+                }
+              }
+            },
+            {
+              "objectId": "p1_i18",
+              "size": {
+                "width": {
+                  "magnitude": 9038500,
+                  "unit": "EMU"
+                },
+                "height": {
+                  "magnitude": 9038500,
+                  "unit": "EMU"
+                }
+              },
+              "transform": {
+                "scaleX": 0.04,
+                "scaleY": 0.04,
+                "translateX": 2910488,
+                "translateY": 11814540,
+                "unit": "EMU"
+              },
+              "shape": {
+                "shapeProperties": {
+                  "shapeBackgroundFill": {}
+                }
+              }
+            },
+            {
+              "objectId": "p1_i19",
+              "size": {
+                "width": {
+                  "magnitude": 58080375,
+                  "unit": "EMU"
+                },
+                "height": {
+                  "magnitude": 99502100,
+                  "unit": "EMU"
+                }
+              },
+              "transform": {
+                "scaleX": 0.04,
+                "scaleY": 0.039999999999999994,
+                "translateX": 337047,
+                "translateY": 9131496,
+                "unit": "EMU"
+              },
+              "shape": {
+                "shapeProperties": {
+                  "shapeBackgroundFill": {}
+                }
+              }
+            },
+            {
+              "objectId": "p1_i20",
+              "transform": {
+                "scaleX": 3.796874805560794,
+                "scaleY": 3.7968772778652244,
+                "translateX": 6179221,
+                "translateY": 10831803,
+                "unit": "EMU"
+              },
+              "elementGroup": {
+                "children": []
+              }
+            },
+            {
+              "objectId": "p1_i23",
+              "size": {
+                "width": {
+                  "magnitude": 15822000,
+                  "unit": "EMU"
+                },
+                "height": {
+                  "magnitude": 10838075,
+                  "unit": "EMU"
+                }
+              },
+              "transform": {
+                "scaleX": 0.032704497960762045,
+                "scaleY": 0.03270449796076204,
+                "shearX": 0.02303075798002556,
+                "shearY": -0.023030757980025563,
+                "translateX": 9293435.175485227,
+                "translateY": 12194442.92551194,
+                "unit": "EMU"
+              },
+              "shape": {
+                "shapeProperties": {
+                  "shapeBackgroundFill": {}
+                }
+              }
+            },
+            {
+              "objectId": "p1_i24",
+              "transform": {
+                "scaleX": 3.796875,
+                "scaleY": 3.7968782120936244,
+                "translateX": 3600450,
+                "translateY": 3318960,
+                "unit": "EMU"
+              },
+              "elementGroup": {
+                "children": []
+              }
+            },
+            {
+              "objectId": "p1_i27",
+              "size": {
+                "width": {
+                  "magnitude": 3000000,
+                  "unit": "EMU"
+                },
+                "height": {
+                  "magnitude": 3000000,
+                  "unit": "EMU"
+                }
+              },
+              "transform": {
+                "scaleX": 2.665018,
+                "scaleY": 0.3461923333333333,
+                "translateX": 1136717,
+                "translateY": 965778.0000000001,
+                "unit": "EMU"
+              },
+              "shape": {
+                "shapeType": "TEXT_BOX",
+                "shapeProperties": {
+                  "shapeBackgroundFill": {
+                    "propertyState": "NOT_RENDERED",
+                    "solidFill": {
+                      "color": {
+                        "rgbColor": {
+                          "red": 1,
+                          "green": 1,
+                          "blue": 1
+                        }
+                      },
+                      "alpha": 1
+                    }
+                  }
+                },
+                "text": {
+                  "textElements": [
+                    {
+                      "textRun": {
+                        "content": "Label"
+                      }
+                    }
+                  ]
+                }
+              }
+            },
+            {
+              "objectId": "p1_i28",
+              "size": {
+                "width": {
+                  "magnitude": 3000000,
+                  "unit": "EMU"
+                },
+                "height": {
+                  "magnitude": 3000000,
+                  "unit": "EMU"
+                }
+              },
+              "transform": {
+                "scaleX": 2.433837333333333,
+                "scaleY": 0.280134,
+                "translateX": 1508002,
+                "translateY": 2116607,
+                "unit": "EMU"
+              },
+              "shape": {
+                "shapeType": "TEXT_BOX",
+                "shapeProperties": {
+                  "shapeBackgroundFill": {
+                    "propertyState": "NOT_RENDERED",
+                    "solidFill": {
+                      "color": {
+                        "rgbColor": {
+                          "red": 1,
+                          "green": 1,
+                          "blue": 1
+                        }
+                      },
+                      "alpha": 1
+                    }
+                  }
+                },
+                "text": {
+                  "textElements": [
+                    {
+                      "textRun": {
+                        "content": "Label"
+                      }
+                    }
+                  ]
+                }
+              }
+            },
+            {
+              "objectId": "p1_i29",
+              "size": {
+                "width": {
+                  "magnitude": 3000000,
+                  "unit": "EMU"
+                },
+                "height": {
+                  "magnitude": 3000000,
+                  "unit": "EMU"
+                }
+              },
+              "transform": {
+                "scaleX": 0.843707,
+                "scaleY": 0.08849800000000001,
+                "translateX": 3476650,
+                "translateY": 11862563,
+                "unit": "EMU"
+              },
+              "shape": {
+                "shapeType": "TEXT_BOX",
+                "shapeProperties": {
+                  "shapeBackgroundFill": {
+                    "propertyState": "NOT_RENDERED",
+                    "solidFill": {
+                      "color": {
+                        "rgbColor": {
+                          "red": 1,
+                          "green": 1,
+                          "blue": 1
+                        }
+                      },
+                      "alpha": 1
+                    }
+                  }
+                },
+                "text": {
+                  "textElements": [
+                    {
+                      "textRun": {
+                        "content": "Label"
+                      }
+                    }
+                  ]
+                }
+              }
+            },
+            {
+              "objectId": "p1_i30",
+              "size": {
+                "width": {
+                  "magnitude": 3000000,
+                  "unit": "EMU"
+                },
+                "height": {
+                  "magnitude": 3000000,
+                  "unit": "EMU"
+                }
+              },
+              "transform": {
+                "scaleX": 0.843707,
+                "scaleY": 0.09301999999999999,
+                "translateX": 2923565,
+                "translateY": 11278282,
+                "unit": "EMU"
+              },
+              "shape": {
+                "shapeType": "TEXT_BOX",
+                "shapeProperties": {
+                  "shapeBackgroundFill": {
+                    "propertyState": "NOT_RENDERED",
+                    "solidFill": {
+                      "color": {
+                        "rgbColor": {
+                          "red": 1,
+                          "green": 1,
+                          "blue": 1
+                        }
+                      },
+                      "alpha": 1
+                    }
+                  }
+                },
+                "text": {
+                  "textElements": [
+                    {
+                      "textRun": {
+                        "content": "Label"
+                      }
+                    }
+                  ]
+                }
+              }
+            },
+            {
+              "objectId": "p1_i31",
+              "size": {
+                "width": {
+                  "magnitude": 3000000,
+                  "unit": "EMU"
+                },
+                "height": {
+                  "magnitude": 3000000,
+                  "unit": "EMU"
+                }
+              },
+              "transform": {
+                "scaleX": 0.843707,
+                "scaleY": 0.134516,
+                "translateX": 2910488,
+                "translateY": 10830383,
+                "unit": "EMU"
+              },
+              "shape": {
+                "shapeType": "TEXT_BOX",
+                "shapeProperties": {
+                  "shapeBackgroundFill": {
+                    "propertyState": "NOT_RENDERED",
+                    "solidFill": {
+                      "color": {
+                        "rgbColor": {
+                          "red": 1,
+                          "green": 1,
+                          "blue": 1
+                        }
+                      },
+                      "alpha": 1
+                    }
+                  }
+                },
+                "text": {
+                  "textElements": [
+                    {
+                      "textRun": {
+                        "content": "Label"
+                      }
+                    }
+                  ]
+                }
+              }
+            },
+            {
+              "objectId": "p1_i32",
+              "size": {
+                "width": {
+                  "magnitude": 3000000,
+                  "unit": "EMU"
+                },
+                "height": {
+                  "magnitude": 3000000,
+                  "unit": "EMU"
+                }
+              },
+              "transform": {
+                "scaleX": 0.8505526666666667,
+                "scaleY": 0.08849800000000001,
+                "translateX": 3442111,
+                "translateY": 12315367,
+                "unit": "EMU"
+              },
+              "shape": {
+                "shapeType": "TEXT_BOX",
+                "shapeProperties": {
+                  "shapeBackgroundFill": {
+                    "propertyState": "NOT_RENDERED",
+                    "solidFill": {
+                      "color": {
+                        "rgbColor": {
+                          "red": 1,
+                          "green": 1,
+                          "blue": 1
+                        }
+                      },
+                      "alpha": 1
+                    }
+                  }
+                },
+                "text": {
+                  "textElements": [
+                    {
+                      "textRun": {
+                        "content": "Label"
+                      }
+                    }
+                  ]
+                }
+              }
+            },
+            {
+              "objectId": "p1_i33",
+              "size": {
+                "width": {
+                  "magnitude": 3000000,
+                  "unit": "EMU"
+                },
+                "height": {
+                  "magnitude": 3000000,
+                  "unit": "EMU"
+                }
+              },
+              "transform": {
+                "scaleX": 1.2684,
+                "scaleY": 0.3693,
+                "translateX": 6212396,
+                "translateY": 11233446.5,
+                "unit": "EMU"
+              },
+              "shape": {
+                "shapeType": "TEXT_BOX",
+                "shapeProperties": {
+                  "shapeBackgroundFill": {
+                    "propertyState": "NOT_RENDERED",
+                    "solidFill": {
+                      "color": {
+                        "rgbColor": {
+                          "red": 1,
+                          "green": 1,
+                          "blue": 1
+                        }
+                      },
+                      "alpha": 1
+                    }
+                  }
+                },
+                "text": {
+                  "textElements": [
+                    {
+                      "textRun": {
+                        "content": "Label"
+                      }
+                    }
+                  ]
+                }
+              }
+            },
+            {
+              "objectId": "p1_i34",
+              "size": {
+                "width": {
+                  "magnitude": 3000000,
+                  "unit": "EMU"
+                },
+                "height": {
+                  "magnitude": 3000000,
+                  "unit": "EMU"
+                }
+              },
+              "transform": {
+                "scaleX": 1.0287,
+                "scaleY": 0.18288,
+                "translateX": 3600450,
+                "translateY": 3373815,
+                "unit": "EMU"
+              },
+              "shape": {
+                "shapeType": "TEXT_BOX",
+                "shapeProperties": {
+                  "shapeBackgroundFill": {
+                    "propertyState": "NOT_RENDERED",
+                    "solidFill": {
+                      "color": {
+                        "rgbColor": {
+                          "red": 1,
+                          "green": 1,
+                          "blue": 1
+                        }
+                      },
+                      "alpha": 1
+                    }
+                  }
+                },
+                "text": {
+                  "textElements": [
+                    {
+                      "textRun": {
+                        "content": "Label"
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          ]
+        }
+      ]
+    }
+  }
+]

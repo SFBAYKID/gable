@@ -179,6 +179,7 @@ class Needs:
     values: list[str] = field(default_factory=list)
     #: Whether the property photograph is still missing.
     photo: bool = False
+    photo_count: int = 1
     #: Whole sentences from a preflight check that stops the build — a design
     #: with no headshot on file for its agent, say. These used to return on the
     #: spot, so Lina Mariner's listing asked for a headshot and said nothing
@@ -280,6 +281,14 @@ class Needs:
             # nowhere", which is how the unprefixed repeat read.
             lead = f"{PHOTO_HELD} {lead}"
         photo_ask = PHOTO_ASK_BESIDE_A_BLOCKER if lead else PHOTO_ONLY_ASK
+        if self.photo_count > 1:
+            photo_ask = (
+                ("Separately, " if lead else "")
+                + f"this design has {self.photo_count} property photo spaces. "
+                "Send the photos together here and tell me which is the main one. "
+                "I will place the others left to right in upload order."
+            )
+            photo_ask = photo_ask[0].upper() + photo_ask[1:]
         if self.photo and not self.values:
             rest = photo_ask
         elif self.values:

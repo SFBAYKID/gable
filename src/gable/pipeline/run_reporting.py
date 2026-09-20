@@ -9,6 +9,7 @@ from sqlite3 import Connection
 from typing import Any, Final
 
 from gable.db import store
+from gable.photos.batch import stored_photos
 from gable.pipeline.needs import readable as name_for
 from gable.pipeline.orchestrator import QualityVerdict
 from gable.pipeline.vision import Inspection
@@ -114,13 +115,49 @@ def read_back(read_slide_text: Callable[[str], list[str]], file_id: str) -> str 
         return None
 
 
-def photo_note(connection: Connection, run_id: str) -> str:
-    """Describe only the photo processing that actually happened."""
+def photo_note(connection: Connection, run_id: str, output_file_id: str = "") -> str:
+    """Describe only the photo processing that actually happened.
+
+    Args:
+        connection: Open Gable database connection.
+        run_id: The delivered run.
+        output_file_id: The copy being delivered. Passed in rather than read
+            off the run, because the run row does not carry it yet: it is
+            written by the same transition that records the delivery, which is
+            after this sentence is composed. Reading it here returned "" on
+            every real build, so a three-photo flyer was delivered saying "I
+            resized and fitted the photo" — caught in the playground
+            2026-09-20, not by the suite.
+
+    Returns:
+        One sentence for the delivery message, or "" when no supplied
+        photograph was processed.
+
+    Raises:
+        sqlite3.Error: On a read failure.
+    """
     row = connection.execute(
-        "SELECT photo_source, ai_enhanced FROM runs WHERE run_id = ?", (run_id,)
+        "SELECT photo_source, ai_enhanced, property_photos FROM runs WHERE run_id = ?",
+        (run_id,),
     ).fetchone()
     if not row or row["photo_source"] not in {"carmen", "slack_upload"}:
         return ""
+    # Both halves are scoped to the file being delivered. A rebuild makes a new
+    # copy, so a count from an earlier pass can never be claimed for this one.
+    output = output_file_id
+    events = {
+        str(event["detail"])
+        for event in connection.execute(
+            "SELECT detail FROM run_events WHERE run_id = ?", (run_id,)
+        ).fetchall()
+    }
+    photos = stored_photos(str(row["property_photos"] or "[]"))
+    placed = f"placed and verified {len(photos)} property photos on {output}"
+    if len(photos) > 1 and output and placed in events:
+        empty = f"left smaller property photo spaces empty on {output}" in events
+        return f"I resized and fitted {len(photos)} property photos and finished the flyer." + (
+            " I left the unused smaller photo spaces empty." if empty else ""
+        )
     if int(row["ai_enhanced"] or 0):
         return "I sharpened, enlarged, and fitted the photo and finished the flyer."
     return "I resized and fitted the photo and finished the flyer."
@@ -402,6 +439,7 @@ def delivery_message(
     left_blank: list[str],
     price_missing_note: str = "",
     noticed: str = "",
+    output_file_id: str = "",
 ) -> str:
     """Assemble the one message that delivers a finished flyer.
 
@@ -409,6 +447,8 @@ def delivery_message(
         connection: An open database connection.
         run_id: The run that built it.
         output_url: The rendered Slides file.
+        output_file_id: That file's Drive id, which the run row does not carry
+            until the delivery transition this message is being built for.
         run_notes: Anything the research step wants to report.
         advisories: Correctable layout work Gable already did.
         left_blank: Plain-words names of fields nobody supplied.
@@ -424,7 +464,7 @@ def delivery_message(
     Raises:
         sqlite3.Error: on a query failure.
     """
-    photo = photo_note(connection, run_id)
+    photo = photo_note(connection, run_id, output_file_id)
     fit = ""
     if used_small_source_fit(connection, run_id):
         # Said once, plainly. The photo is as good as that source allows, and

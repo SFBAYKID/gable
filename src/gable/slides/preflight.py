@@ -101,6 +101,7 @@ class Report:
     #: Values the measurement itself changed, for the caller to fill with
     #: instead of the ones it supplied. Empty unless something was adjusted.
     adjusted: dict[str, str] = field(default_factory=dict)
+    property_photo_count: int = 1
 
     @property
     def blockers(self) -> tuple[Issue, ...]:

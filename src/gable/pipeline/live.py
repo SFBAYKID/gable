@@ -11,7 +11,7 @@ from __future__ import annotations
 import logging
 import urllib.request
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from sqlite3 import Connection
 from typing import Any
 
@@ -20,6 +20,7 @@ from gable.agents.profile_lookup import lookup_official_profile
 from gable.config import Settings
 from gable.db import store
 from gable.listings.enrich import default_research
+from gable.photos.batch import stored_photos
 from gable.photos.fit import (
     assess,
     fit_bounded_portrait_locally,
@@ -33,6 +34,7 @@ from gable.photos.store import content_name, publish_local, verify_public
 from gable.photos.verify import verify as verify_image
 from gable.pipeline import run_reporting
 from gable.pipeline.placement import place_headshot, place_hero_photo, template_clearance
+from gable.pipeline.property_photos import measured_wells, place_property_photos
 from gable.pipeline.questions import Reconciliation
 from gable.pipeline.runner import Runner
 from gable.pipeline.vision import Inspection
@@ -186,6 +188,7 @@ def build_runner(
     # flyer, so even a deterministic crop or contained fit cannot hide a
     # material loss of the supplied property's identity or composition.
     vision_reference = b""
+    vision_references: list[bytes] = []
 
     def say(text: str, thread: str | None) -> str:
         # The last gate before Slack. A message that breaks the house style is
@@ -252,6 +255,33 @@ def build_runner(
     ) -> preflight.Report:
         """Read current Drive content and measure it before creating a copy."""
         presentation = slides.presentations().get(presentationId=file_id).execute()
+        # Measure the design's property wells once, here, where the ask is
+        # composed and where a supplied batch is checked against them. The ask
+        # side and the build side must read the same source (CLAUDE.md 4.3
+        # item 15); `measured_wells` IS that source for both.
+        try:
+            photo_count = len(measured_wells(presentation, template_label)[0])
+        except (ValueError, KeyError, IndexError):
+            # silent: an unmeasurable or unknown layout has one property space
+            # as far as the ask is concerned, and the ordinary preflight below
+            # is what reports a frame it cannot work with.
+            photo_count = 1
+        current = store.run_for_thread(connection, origin_thread_ts) if origin_thread_ts else None
+        photos = stored_photos(current.property_photos) if current else []
+        if len(photos) > photo_count:
+            logger.warning("the supplied photo count does not match a safe measured layout")
+            return preflight.Report(
+                issues=(
+                    preflight.Issue(
+                        "property_photo_layout",
+                        "I kept your photos, but I could not safely match all of them "
+                        "to this design's photo spaces. The source layout needs checking "
+                        "before I can place them.",
+                        blocking=True,
+                        status="needs_template",
+                    ),
+                )
+            )
         photo_size: tuple[int, int] | None = None
         photo_url = values.get("hero_photo", "")
         if photo_url:
@@ -286,7 +316,7 @@ def build_runner(
                         ),
                     )
                 )
-        return preflight.analyze(
+        measured = preflight.analyze(
             presentation,
             template_label,
             category,
@@ -295,6 +325,7 @@ def build_runner(
             slide_px=(settings.slide_width_px, settings.slide_height_px),
             photo_size=photo_size,
         )
+        return replace(measured, property_photo_count=photo_count)
 
     def look_at(
         run_id: str,
@@ -308,6 +339,7 @@ def build_runner(
                 api_key=settings.openai_image_api_key,
                 model=settings.vision_model,
                 reference_image_bytes=vision_reference,
+                additional_reference_images=tuple(vision_references[1:]),
                 expected_placeholders=expected_placeholders,
             )
         estimate = spend.Estimate(
@@ -325,6 +357,7 @@ def build_runner(
                     api_key=settings.openai_image_api_key,
                     model=settings.vision_model,
                     reference_image_bytes=vision_reference,
+                    additional_reference_images=tuple(vision_references[1:]),
                     expected_placeholders=expected_placeholders,
                 ),
                 run_id=run_id,
@@ -356,6 +389,48 @@ def build_runner(
         with sky-and-grass artwork in the photo frame. A photo merely sent to
         the back hides behind it, so the placeholder is removed first.
         """
+        nonlocal vision_reference
+        # Each placement pass establishes the sources for the flyer it makes.
+        # Left to accumulate, a rebuild sent the previous pass's photographs to
+        # the visual judge alongside the new ones -- extra images, extra spend,
+        # and a prompt describing a batch where a single photograph had been
+        # supplied.
+        vision_reference = b""
+        vision_references.clear()
+        run = store.run_by_id(connection, run_id)
+        photos = stored_photos(run.property_photos) if run else []
+        urls = [item["url"] for item in photos] or [url]
+        # Only a supplied batch takes the batch path. One photograph builds
+        # exactly the flyer it built before this existed, sample pictures in
+        # the smaller spaces included: changing that changes every New Listing
+        # Carmen already reviews, which is a product decision and not this one.
+        if len(urls) > 1:
+            try:
+                placed, cleared = place_property_photos(
+                    slides,
+                    file_id,
+                    urls,
+                    template_label,
+                    lambda existing, w, h: refit_to_frame(run_id, existing, w, h),
+                    (settings.slide_width_px, settings.slide_height_px),
+                )
+            except Exception:
+                logger.exception("the property-photo batch could not be placed and verified")
+                return False
+            store.set_status(
+                connection,
+                run_id,
+                "building",
+                f"placed and verified {placed} property photos on {file_id}",
+            )
+            if cleared:
+                store.set_status(
+                    connection,
+                    run_id,
+                    "building",
+                    f"left smaller property photo spaces empty on {file_id}",
+                )
+            return True
         return place_hero_photo(
             slides,
             file_id,
@@ -394,8 +469,12 @@ def build_runner(
                 ai_enhanced=0,
             )
             with urllib.request.urlopen(existing, timeout=30) as response:
-                original = response.read()
-            vision_reference = original
+                original = response.read(25 * 1024 * 1024 + 1)
+            if len(original) > 25 * 1024 * 1024:
+                raise ValueError("property photo exceeds the download limit")
+            if not vision_reference:
+                vision_reference = original
+            vision_references.append(original)
             source_width, source_height = image_dimensions(original)
             decision = assess(source_width, source_height, width_px, height_px)
             if decision.needs_contained_fit:

@@ -42,6 +42,7 @@ from gable.slackapp.brain import Decision, think
 from gable.slackapp.context import listing_context, waiting_summary
 from gable.slackapp.editing import SlideEditor
 from gable.slackapp.outbox import SlackOutboxReconciler, notification_blocks
+from gable.slackapp.photo_selection import select_photos
 from gable.slackapp.photos import PhotoHandoff
 from gable.slackapp.recovery import (
     notify_interrupted_runs,
@@ -301,6 +302,16 @@ def build_components(settings: Settings) -> RuntimeComponents:
         """Use thread-owned clients to apply one conversational edit."""
         action_connection = connect(settings.db_path)
         try:
+            if decision.tool == "select_property_photos":
+                return select_photos(
+                    action_connection,
+                    photo_handoff,
+                    app.client,
+                    thread_ts,
+                    settings.slack_channel_id,
+                    decision.arguments,
+                    progress,
+                )
             action_credentials = service_account.Credentials.from_service_account_file(  # type: ignore[no-untyped-call]
                 str(settings.google_service_account_file), scopes=list(GOOGLE_SCOPES)
             )

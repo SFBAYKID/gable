@@ -165,7 +165,9 @@ def test_a_photo_pushed_beyond_the_frame_it_replaced_is_still_reported() -> None
     assert "the property photo" in found[0]
 
 
-def _under_contract_face(well_bottom: float, *, delete_well: bool = True) -> tuple[dict, dict]:
+def _under_contract_face(
+    well_bottom: float, *, delete_well: bool = True
+) -> tuple[dict[str, Any], dict[str, Any]]:
     """The Under Contract geometry of 2026-09-01, in points.
 
     The headshot well sat under the title band and ran past the page bottom by

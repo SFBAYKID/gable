@@ -10,6 +10,7 @@ is never cropped twice. No new run or retry is opened.
 
 from __future__ import annotations
 
+import json
 import logging
 import sqlite3
 import threading
@@ -27,6 +28,8 @@ from gable.pipeline.runner import RunResult
 from gable.sheets import repository as repo
 from gable.slackapp.answers import carries_a_value
 from gable.slackapp.intents import asks_to_run_again
+from gable.slackapp.photo_batch import MAX_PHOTOS, batch_id, main_index
+from gable.slackapp.shared_photos import shared_file_event as shared_file_event
 from gable.slackapp.status import Working
 from gable.slackapp.uploads import MAX_UPLOAD_BYTES, PhotoHandoffError, download_private_image
 from gable.voice import safe
@@ -60,16 +63,19 @@ NO_FLYER_TO_CHANGE: Final[str] = (
 #: declining sentence never reaches the caller to be recognised.
 DECLINED_ANSWER_THE_WORDS: Final[str] = "gable:answer-the-words-instead"
 
-#: Several images arrived AND the words carry a value. Both need a response:
-#: the value is answered by the caller, and this says out loud that the images
-#: were not kept. Returning the plain sentinel here discarded them in silence.
+#: More images arrived than any design holds AND the words carry a value. Both
+#: need a response: the value is answered by the caller, and this says out loud
+#: that the images were not kept. Returning the plain sentinel here discarded
+#: them in silence, which is how "Here are 3 for the template." lost three
+#: uploads on 2026-08-28 and was then asked which of them to use.
 TOO_MANY_ANSWER_THE_WORDS: Final[str] = "gable:too-many-images-answer-the-words"
 
-#: What to say when more than one image arrives. Gable places exactly one
-#: property photo, so a batch is a choice it is not allowed to make.
+#: What to say when more images arrive than the largest measured design holds.
+#: Three is the ceiling: one main well plus the row of two beneath it.
 TOO_MANY_IMAGES: Final[str] = (
-    "I can only use one property photo, and that message had more than one, so "
-    "I did not keep any of them. Send just the one you want as the large photo."
+    "These designs hold at most three property photos, and that message had "
+    "more, so I did not keep any of them. Send up to three together and tell "
+    "me which one should be the main photo."
 )
 _PHOTO_LOCK_STRIPES: Final[int] = 32
 _PHOTO_LOCKS: Final[tuple[threading.Lock, ...]] = tuple(
@@ -143,121 +149,6 @@ def _submission(stored: store.StoredSubmission) -> repo.Submission:
         content_hash=stored.content_hash,
         source_tab=stored.source_tab,
     )
-
-
-def shared_file_event(event: dict[str, Any], client: Any) -> dict[str, Any] | None:  # noqa: ANN401
-    """Turn a ``file_shared`` notice into the message-shaped event the handoff reads.
-
-    Slack's current upload flow can post the message first and attach the file a
-    moment later. The ``message`` event then arrives with no ``files`` array at
-    all, and the upload is announced only by ``file_shared`` — which Gable did
-    not subscribe to until 2026-08-19. That is why Caleb Olawuyi's photo never
-    reached it while Carmen's next one did: a race, not a broken path.
-
-    The result is deliberately shaped like the message event, so exactly one
-    code path fits and places a photograph however Slack chose to announce it.
-
-    Args:
-        event: Slack's ``file_shared`` event.
-        client: Slack Web API client.
-
-    Returns:
-        A message-shaped event carrying the file, its channel and its thread, or
-        ``None`` when the file cannot be placed in exactly one thread. ``None``
-        is the safe answer: the ordinary message path may still carry it, and
-        guessing a thread would put somebody's photo on another listing.
-
-    Raises:
-        Nothing. A lookup failure is logged and becomes ``None``.
-    """
-    file_id = str(event.get("file_id") or (event.get("file") or {}).get("id") or "").strip()
-    if not file_id:
-        return None
-    try:
-        # https://docs.slack.dev/reference/methods/files.info/
-        answer = client.files_info(file=file_id)
-    except Exception:
-        logger.exception("could not read the details of shared file %s", file_id)
-        return None
-    info = answer.get("file") if isinstance(answer, dict) else None
-    if not isinstance(info, dict):
-        return None
-    if not str(info.get("mimetype") or "").startswith("image/"):
-        return None
-
-    shares = info.get("shares")
-    placements: list[tuple[str, dict[str, Any]]] = []
-    if isinstance(shares, dict):
-        for group in shares.values():
-            if not isinstance(group, dict):
-                continue
-            for channel_id, entries in group.items():
-                if not isinstance(entries, list):
-                    continue
-                placements.extend(
-                    (str(channel_id), entry) for entry in entries if isinstance(entry, dict)
-                )
-    # One share is the ordinary case. Several means the same file sits in more
-    # than one place, and choosing between them is the guess this refuses.
-    if len(placements) != 1:
-        return None
-    channel_id, placement = placements[0]
-    thread_ts = str(placement.get("thread_ts") or placement.get("ts") or "")
-    if not thread_ts:
-        return None
-    message_ts = str(placement.get("ts") or "")
-    return {
-        "channel": channel_id,
-        "thread_ts": thread_ts,
-        "ts": message_ts,
-        "user": str(info.get("user") or event.get("user_id") or ""),
-        "parent_user_id": str(placement.get("parent_user_id") or ""),
-        "text": _shared_caption(client, channel_id, thread_ts, message_ts),
-        "files": [{"id": file_id, "mimetype": str(info.get("mimetype") or "")}],
-    }
-
-
-def _shared_caption(client: Any, channel_id: str, thread_ts: str, message_ts: str) -> str:  # noqa: ANN401
-    """Recover the words sent with a file, which `file_shared` does not carry.
-
-    A `file_shared` notice names the file, not the message. Shaping it as an
-    empty-text event threw the caption away on this route, and the caption is
-    load-bearing in two places: values stated beside a photo are recorded from
-    it, and a delivered flyer only accepts a replacement image when the words
-    ask for one. So "here is a better angle, run it again" worked when Slack
-    announced the upload as a message and silently did not when Slack announced
-    it as a file share -- the same upload, two different outcomes.
-
-    Args:
-        client: Slack Web API client.
-        channel_id: The channel the file was shared in.
-        thread_ts: The thread root.
-        message_ts: The message that carried the file.
-
-    Returns:
-        The message text, or "" when it cannot be read. Empty is safe: it is
-        exactly what this route supplied before, so nothing regresses.
-
-    Raises:
-        Nothing. A lookup failure is logged and becomes "".
-    """
-    if not message_ts:
-        return ""
-    try:
-        # https://docs.slack.dev/reference/methods/conversations.replies/
-        answer = client.conversations_replies(
-            channel=channel_id, ts=thread_ts, latest=message_ts, inclusive=True, limit=20
-        )
-    except Exception:
-        logger.exception("could not read the words sent with a shared file")
-        return ""
-    messages = answer.get("messages") if isinstance(answer, dict) else None
-    if not isinstance(messages, list):
-        return ""
-    for item in messages:
-        if isinstance(item, dict) and str(item.get("ts") or "") == message_ts:
-            return str(item.get("text") or "")
-    return ""
 
 
 def process_file_share(
@@ -392,24 +283,32 @@ class PhotoHandoff:
                 "flyer it belongs to."
             )
         files = event.get("files") or []
-        if len(files) != 1:
-            # A message can carry several images AND the value Gable asked for —
-            # "1011 Winged Foot Dr..." with a front and a back photo attached.
-            # The words are still answered, but the images are NOT kept and that
-            # has to be said. It used to be silent, on the reasoning that "the
-            # run will ask for its photo again if it still needs one". It does,
-            # and on 2026-08-28 that reply read as a malfunction: Carmen sent
-            # three photos with "Here are 3 for the template.", the bare 3 made
-            # this branch fire, all three were dropped without a word, and Gable
-            # then asked which of the three to use as the large photo -- about
-            # files it no longer had. She answered "The road should be the large
-            # photo" and there was nothing for that answer to select.
+        if not files:
+            return "I did not find a photo on that message, so I left the flyer unchanged."
+        if len(files) > MAX_PHOTOS:
+            # The words still get answered. Dropping the images in silence is
+            # the 2026-08-28 failure; the ceiling moved from one to three but
+            # the reason the sentence exists did not.
             if carries_a_value(str(event.get("text") or "")):
                 return TOO_MANY_ANSWER_THE_WORDS
             return TOO_MANY_IMAGES
-        file_id = str(files[0].get("id") or "")
-        if not file_id:
-            return "Slack did not identify that upload, so I left the flyer unchanged."
+        file_ids = [str(item.get("id") or "") for item in files]
+        if any(not item for item in file_ids) or len(set(file_ids)) != len(file_ids):
+            return "Slack did not identify each photo uniquely. Please send the photos again."
+        selected = event.get("property_main_index")
+        if not isinstance(selected, int) or isinstance(selected, bool):
+            selected = main_index(str(event.get("text") or ""), len(files))
+        if selected is not None and not 0 <= selected < len(files):
+            return "Which uploaded photo should be the main one: first, second or third?"
+        # Placement order: the chosen main photograph, then the rest in upload
+        # order for the smaller spaces left to right. Built here so the ingress
+        # record names the picture that becomes the main one rather than
+        # whichever attachment Slack happened to list first. With no choice yet
+        # this is plain upload order and the staging branch returns before it
+        # is used.
+        main = 0 if selected is None else selected
+        ordered_ids = [file_ids[main], *(item for i, item in enumerate(file_ids) if i != main)]
+        file_id = ordered_ids[0]
 
         connection = connect(self.db_path)
         photo_lock = _photo_lock(thread_ts)
@@ -426,7 +325,7 @@ class PhotoHandoff:
             # photo rebuild the flyer twice. Re-sending the same image to the
             # same run therefore reads as already handled, which is correct:
             # that photo is already on the flyer.
-            event_id = file_id
+            event_id = batch_id(file_ids, selected)
             if not event_id:
                 return (
                     "Slack did not identify that photo message, so I left the listing "
@@ -565,6 +464,44 @@ class PhotoHandoff:
                         # This exact upload was already accepted here or before a
                         # restart. Whatever that pass reported still stands.
                         return ""
+                    if selected is None:
+                        # Several photographs and no stated main one. Keep the
+                        # ids, ask, and leave the run exactly where it is: the
+                        # photo question is NOT retired and the run is NOT
+                        # moved, so if the answer never comes the ordinary
+                        # re-ask still owns this listing. Staging after the
+                        # question was satisfied parked the run where only the
+                        # selection tool could release it -- the shape of the
+                        # 4.3 item 15 failure, reached by a different route.
+                        state = store.run_by_id(connection, run.run_id)
+                        caption = str(event.get("text") or "")
+                        stored_request = store.load_submission(connection, run.response_row_id)
+                        if stored_request is not None and caption and carries_a_value(caption):
+                            self.record_caption(
+                                connection,
+                                stored_request.intake.address,
+                                caption,
+                                run.response_row_id,
+                            )
+                        store.set_status(
+                            connection,
+                            run_id,
+                            state.status if state is not None else run.status,
+                            "kept uploaded photo ids pending a main-photo choice",
+                            pending_photo_files=json.dumps(file_ids),
+                        )
+                        return finish(
+                            f"I kept your {len(file_ids)} photos. Which should be the main "
+                            "one: "
+                            + (
+                                "first or second?"
+                                if len(file_ids) == 2
+                                else "first, second or third?"
+                            )
+                            + " I will place the rest left to right in the order you sent "
+                            "them.",
+                            "waiting for an explicit main-photo choice",
+                        )
                     store.satisfy_pending_photo_question(connection, run.run_id, thread_ts)
                     # The state this upload was accepted in, read inside the
                     # guard and after the question it answers is satisfied,
@@ -635,33 +572,35 @@ class PhotoHandoff:
                             stored = reloaded
 
             try:
-                progress("is reading the photo...")
-                response = slack_client.files_info(file=file_id)
-                file_info = response.get("file", {})
-                mime_type = str(file_info.get("mimetype") or "")
-                if mime_type and not mime_type.startswith("image/"):
-                    return finish(
-                        "That upload is not an image. Please send a photo for the hero.",
-                        "the uploaded file was not an image",
+                prepared_photos: list[dict[str, str]] = []
+                for upload_id in ordered_ids:
+                    progress("is reading the photo...")
+                    response = slack_client.files_info(file=upload_id)
+                    file_info = response.get("file", {})
+                    mime_type = str(file_info.get("mimetype") or "")
+                    if mime_type and not mime_type.startswith("image/"):
+                        return finish(
+                            "That upload is not an image. Please send property photos.",
+                            "an uploaded file was not an image",
+                        )
+                    private_url = str(
+                        file_info.get("url_private_download") or file_info.get("url_private") or ""
                     )
-                private_url = str(
-                    file_info.get("url_private_download") or file_info.get("url_private") or ""
-                )
-                image_bytes = self.download(private_url, self.bot_token, MAX_UPLOAD_BYTES)
-                progress("is preparing the photo...")
-                prepared = normalise_for_fitting(
-                    image_bytes,
-                    max_edge_px=self.max_edge_px,
-                    quality=self.jpeg_quality,
-                )
-                public_url = self.publish(self.public_root, self.public_base, prepared)
-                usable, _detail = self.verify(public_url)
-                if not usable:
-                    return finish(
-                        "I prepared the photo, but the flyer service could not fetch it. "
-                        "I left the run paused.",
-                        "the published photo could not be verified",
+                    image_bytes = self.download(private_url, self.bot_token, MAX_UPLOAD_BYTES)
+                    progress("is preparing the photo...")
+                    prepared = normalise_for_fitting(
+                        image_bytes, max_edge_px=self.max_edge_px, quality=self.jpeg_quality
                     )
+                    public_url = self.publish(self.public_root, self.public_base, prepared)
+                    usable, _detail = self.verify(public_url)
+                    if not usable:
+                        return finish(
+                            "I prepared the photo, but the flyer service could not fetch it. "
+                            "I left the run paused.",
+                            "a published photo could not be verified",
+                        )
+                    prepared_photos.append({"id": upload_id, "url": public_url})
+                public_url = prepared_photos[0]["url"]
             except PublishError:
                 logger.exception("a prepared Slack photo could not be published")
                 return finish(
@@ -691,6 +630,8 @@ class PhotoHandoff:
                     "photo_url": public_url,
                     "photo_source": "slack_upload",
                     "photo_event_id": event_id,
+                    "property_photos": json.dumps(prepared_photos),
+                    "pending_photo_files": "[]",
                     "ai_enhanced": 0,
                     # Answered. Cleared with the provenance in the same claim,
                     # never in a second write that a crash could skip and leave

@@ -98,19 +98,15 @@ WHAT YOU KNOW
 WHAT YOU CANNOT DO — never offer any of these
 - You have no MLS access. You cannot pull MLS photos, MLS numbers, or listing
   history. The only photo you get is the one someone sends you.
-- You cannot choose a photo for someone, or "pick the best" one. You are not
-  shown a set to choose from. Ask for the image.
-- You place exactly TWO images: the one large property photo, and the agent's
-  headshot from the Head Shots folder. Designs that draw a row of smaller
-  photos under the hero keep the design's own pictures there — you cannot fill
-  those spots, and no request can make you able to. "The template has 3 photos,
-  so please use all 3" is answered by saying you can only place the large one.
-  On 2026-08-28 the answer given instead was "I'll use the road as the large
-  photo and the other two in the smaller photo spots", Carmen said "Perfect!",
-  and nothing of the kind was ever possible.
-- More than one image in a message means NONE of them were kept. Never ask
-  which of several to use: you do not have them, and the person's answer would
-  select nothing. Ask for the single image to be sent on its own.
+- You can fill up to three measured property-photo spots: the main photo and
+  the smaller spaces from left to right. The agent headshot is separate.
+- Multiple uploads are retained in their upload order. If the person has not
+  explicitly named the main picture, ask which numbered upload should be main.
+  Use select_property_photos with that one-based main_index when they answer,
+  including "use the first" or "make the second the main photo". The remaining
+  photos go left to right in upload order. Never guess from visual descriptions
+  such as "the road" because you cannot see these uploads. Ask for its number.
+- Never claim any photo was placed until the placement tool confirms it.
 - You do not redesign a source template to taste. You can apply an explicit,
   unambiguous correction to a flyer already built in this thread. Carmen edits
   source templates; after she does, you can read the current file and check or
@@ -176,6 +172,21 @@ HOW YOU BEHAVE
 #: The tools the model may choose. Each maps to a real function; the schema is
 #: what stops it inventing arguments.
 TOOLS: Final[list[dict[str, Any]]] = [
+    {
+        "type": "function",
+        "function": {
+            "name": "select_property_photos",
+            "description": (
+                "Use retained uploads after the person explicitly picks the main photo "
+                "by upload number. Remaining images go left to right in upload order."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {"main_index": {"type": "integer", "minimum": 1, "maximum": 3}},
+                "required": ["main_index"],
+            },
+        },
+    },
     {
         "type": "function",
         "function": {

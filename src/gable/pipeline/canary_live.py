@@ -24,6 +24,7 @@ from gable.photos.store import content_name, publish_local
 from gable.pipeline import canary
 from gable.pipeline.live import slides_seams
 from gable.pipeline.placement import place_headshot, place_hero_photo
+from gable.pipeline.property_photos import measured_wells, place_property_photos
 from gable.slides.library import TemplateFile
 
 logger = logging.getLogger("gable.canary")
@@ -132,6 +133,27 @@ def dry_builder(
         if not bool(moved.get("trashed")):
             raise RuntimeError("Drive did not confirm the test copy was trashed")
 
+    def place_sample(_run: str, fid: str, url: str, label: str) -> bool:
+        """Exercise every measured photo space this design actually carries.
+
+        A design with a row of smaller wells is built with all of them filled,
+        so the canary fails on the same layout change a listing would fail on.
+        A design with one well keeps the ordinary hero path, which is the one a
+        single supplied photograph still takes.
+        """
+        try:
+            wells = len(measured_wells(base.read_presentation(fid), label)[0])
+        except (ValueError, KeyError, IndexError):
+            # silent: an unmeasurable layout is exactly what the hero path
+            # below reports on, with the sentence the canary exists to print.
+            wells = 1
+        if wells > 1:
+            placed, _cleared = place_property_photos(
+                slides, fid, [url] * wells, label, refit_hero, slide_px
+            )
+            return placed == wells
+        return place_hero_photo(slides, fid, url, label, refit=refit_hero, slide_px=slide_px)
+
     def build(item: TemplateFile) -> str:
         try:
             hero_url, face_url = sample_images(settings)
@@ -145,9 +167,7 @@ def dry_builder(
             copy_template=base.copy_template,
             fill=base.fill,
             apply=base.apply,
-            place_photo=lambda _run, fid, url, label: place_hero_photo(
-                slides, fid, url, label, refit=refit_hero, slide_px=slide_px
-            ),
+            place_photo=place_sample,
             place_headshot=lambda fid, url, values, label: place_headshot(
                 slides, fid, url, values, refit=refit_face, slide_px=slide_px, template_label=label
             ),

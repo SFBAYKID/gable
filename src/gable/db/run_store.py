@@ -56,6 +56,8 @@ _RUN_UPDATE_FIELDS: Final[frozenset[str]] = frozenset(
         "photo_url",
         "photo_source",
         "photo_event_id",
+        "property_photos",
+        "pending_photo_files",
         "ai_generated",
         "ai_enhanced",
         "slack_thread_ts",
@@ -113,6 +115,8 @@ class RunRow:
     photo_url: str = ""
     photo_source: str = ""
     photo_event_id: str = ""
+    property_photos: str = "[]"
+    pending_photo_files: str = "[]"
     ai_enhanced: bool = False
     approved_warning_codes: str = ""
     pending_warning_code: str = ""
@@ -436,7 +440,7 @@ _RUN_COLUMNS: Final[str] = (
     "run_id, response_row_id, status, template_file_id, template_label, "
     "output_file_id, output_url, slack_thread_ts, failure_reason, photo_url, "
     "photo_source, photo_event_id, ai_enhanced, approved_warning_codes, "
-    "pending_warning_code, awaiting_photo"
+    "pending_warning_code, awaiting_photo, property_photos, pending_photo_files"
 )
 
 
@@ -495,6 +499,8 @@ def _to_run(row: sqlite3.Row) -> RunRow:
         photo_url=str(row["photo_url"] or ""),
         photo_source=str(row["photo_source"] or ""),
         photo_event_id=str(row["photo_event_id"] or ""),
+        property_photos=str(row["property_photos"] or "[]"),
+        pending_photo_files=str(row["pending_photo_files"] or "[]"),
         ai_enhanced=bool(row["ai_enhanced"]),
         approved_warning_codes=str(row["approved_warning_codes"] or ""),
         pending_warning_code=str(row["pending_warning_code"] or ""),

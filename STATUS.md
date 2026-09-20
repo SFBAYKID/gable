@@ -1,8 +1,62 @@
 # Gable — status, and what's needed from Chase
 
-Last updated 2026-09-01 by the building agent.
+Last updated 2026-09-20 by the building agent.
 
-## Standing decision — change nothing and watch, 2026-09-01 to 2026-09-08
+## 2026-09-20 — three property photos on the designs that draw three
+
+**What Carmen asked for, and what actually happened.** She uploaded three
+photos to a New Listing with Open House thread and said "Make the first photo
+the main photo on the graphic." Gable refused them: the handler had a hard
+one-image rule, and `brain.py` was instructed to answer such a request by
+saying it could only place the large one. The same request on 2026-08-28 got a
+worse answer — "I'll use the road as the large photo and the other two in the
+smaller photo spots", which was never possible — and Carmen said "Perfect!".
+
+**What is built now.** The row of smaller wells is measured live on every
+build; the ask names how many spaces the design has; a batch of two or three
+replaces every measured well at its exact size and transform in one atomic
+batch, with a geometry readback; and the placed batch is stored so a rebuild
+reuses it. Three designs have a certified row — New Listing, New Listing with
+Open House, Open House — measured against all six live designs. Gable never
+reads the main photograph out of the pictures; a number settles it, and
+anything else retains the uploads and asks for the number without letting go
+of the listing.
+
+**Two things for Chase, neither of them blocking.**
+
+1. **A single photograph still leaves the design's own sample pictures in the
+   smaller wells.** That is today's behaviour on every New Listing and Open
+   House flyer and this change does not touch it, because changing it changes
+   every flyer Carmen already reviews and that is a product call. A supplied
+   batch does empty a well it has no photograph for, on the reasoning that a
+   stranger's living room beside two real ones reads as finished and is wrong.
+   If the same should apply when only one photo arrives, say so and it is a
+   small change.
+2. **Rounded photo corners are not preserved, and cannot be through this API.**
+   The wells are `CUSTOM` shapes; `presentations.get` returns them with an
+   empty `shapeBackgroundFill` and no path, and `createImage` has no mask or
+   radius. The main photograph has therefore rendered square on every flyer
+   built to date, including the ones you confirmed. Filling the row makes all
+   three square and consistent instead of one square beside two rounded
+   samples. Baking corners into a PNG alpha channel would work but needs a
+   radius nothing reports.
+
+**The photo work has not been through the visual judge.** The shared spend
+ceiling is exhausted, so every rehearsal today delivered with "I could not
+complete the visual inspection" — the designed behaviour, and honest, but it
+means no model has looked at a three-photo flyer. I read the renders myself and
+they are right; that is not the same check.
+
+**Cancellation is still not built.** "Cancel this" still gets an acknowledgment
+and no action; it was looked at during this work and deliberately left alone,
+since it is a separate tool and a separate decision. It stays on the list below.
+
+
+## Standing decision — change nothing and watch, 2026-09-01 to 2026-09-08 (ended)
+
+This window has passed. It is kept because the list of what to run daily and
+what counts as a flagged thread is still how a live change is judged.
+
 
 Chase's call at the end of 2026-09-01: **no code changes for a week.** The
 seven mechanisms below are deployed; the week is the measurement of whether
@@ -33,9 +87,12 @@ fallback (emptying `GABLE_DEFAULT_AGENT_CREDENTIAL` reverts it).
 
 **Known stale or thin, noted rather than fixed during the freeze:**
 
-- `AUDIT_2026-08-12.md`, `AUDIT_2026-08-13.md`, `ASK_CARMEN.md` and
-  `CONVERSATION.md` are point-in-time documents from August and describe
-  behaviour that has since changed; they are history, not instructions.
+- `AUDIT_2026-08-12.md`, `AUDIT_2026-08-13.md` and `ASK_CARMEN.md` are
+  point-in-time documents from August and describe behaviour that has since
+  changed; they are history, not instructions. `CONVERSATION.md` was on this
+  list until 2026-09-20 and is current again: §4A.1a now describes the
+  main-photo question, and §4A.4 says the reported photo count comes from what
+  placement verified.
 - `TEMPLATE_ISSUES.md`, `TEMPLATE_WIDTHS.md` and `TEMPLATE_CERTIFICATION.md`
   predate the canary build and the 2026-08-26 blocker kinds; the measurements
   in them are the ones the code carries, but their prose about what refuses a
@@ -165,3 +222,4 @@ waiting for its property photo in its own thread.
   ```
 
 Older entries: `STATUS_ARCHIVE_2026-08-27.md`, then the archives before it.
+

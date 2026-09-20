@@ -39,8 +39,9 @@ An agent — say **Lolo Simmons** — submits the form.
 4. **Pause if needed.** Structural defects and unreadable minimum type stop.
    Ordinary text overflow and photo cropping are fitted automatically and
    reported with the one outcome after render inspection.
-5. **Receive the hero image.** The user drops one image into the owned thread;
-   its full composition is preserved until the exact frame is known.
+5. **Receive the property photographs.** The user drops one to three images
+   into the owned thread; their full composition is preserved until the exact
+   frames are known. The ask names how many spaces the design measured.
 6. **Fit once.** Pillow crops and resizes to the measured frame. Beyond 2x it
    contains the source over a blurred, darkened same-photo fill.
 7. **Render and prove.** A copy is filled, read back, rendered, and compared
@@ -68,22 +69,18 @@ Carmen to the finished Slides file, which she edits in place.
 
 ### 2.1 Why Google Slides, and not Canva
 
-Canva was the original target and it is gone. Three paths were considered and
-each failed on something structural: Connect API autofill needs a Canva
-**Enterprise** organization and the account is on Teams; **Spike A proved Bulk
-Create cannot carry the photo**, because an uploaded xlsx/CSV types every column
-as text and only the manual data table can hold an image column; and a private
-data-connector app is gated on marketplace review and a second language.
-
-**The full reasoning, with the evidence, is CLAUDE.md §4 and
-`spikes/SPIKE_A_RESULT.md`** — read both before re-opening the question. It is
-kept there rather than here because it is the reason a week of the wrong work
-was not repeated.
+Canva was the original target and it is gone. Three paths failed on something
+structural: Connect API autofill needs a Canva **Enterprise** organization and
+the account is on Teams; **Spike A proved Bulk Create cannot carry the photo**,
+because an uploaded xlsx/CSV types every column as text; and a private
+data-connector app is gated on marketplace review and a second language. The
+full reasoning and evidence is CLAUDE.md §4 and `spikes/SPIKE_A_RESULT.md` —
+read both before re-opening the question.
 
 **Google Slides does what all three were for, on infrastructure already required.**
-Gable measures one safe photo-frame object, deletes it, and creates an image at
-the same transform from a public URL. The cost is that Carmen edits in Slides
-rather than Canva; against building the post by hand, that is the smaller change.
+Gable measures each safe photo-frame object, deletes it, and creates an image at
+the same transform from a public URL. Carmen edits in Slides rather than Canva;
+against building the post by hand, that is the smaller change.
 
 ### 2.2 Why Socket Mode instead of HTTP events?
 
@@ -283,7 +280,13 @@ A run carries its `run_id`, the `response_row_id` it belongs to, its `status`
 `delivered`/`skipped`/`failed`), the chosen template, the output file and URL,
 the `photo_url` with its `photo_source`, the `ai_generated` and `ai_enhanced`
 flags — **`ai_generated` must be true for any synthetic image** — `awaiting_photo`,
-a failure reason, the Slack thread it is speaking in, and UTC timestamps.
+`property_photos` (the placed batch, main photograph first), `pending_photo_files`
+(uploads held while Gable waits to be told which is the main one), a failure
+reason, the Slack thread it is speaking in, and UTC timestamps. Both photo
+columns are written only by Gable, so malformed content is a defect rather than
+input: `photos/batch.py` reads them back as nothing and lets the run fall
+through to the single photograph it already has, because losing the smaller
+pictures is cheaper than losing the build.
 
 **`status` is not the whole of what a run is waiting for.** One batched message
 routinely asks for two things at once — a design a person must widen, and the
@@ -385,32 +388,59 @@ There is no fixed description-length setting. The current source text box and
 the actual replacement are measured before build; a visible rendered result is
 checked again afterwards.
 
-### 4.4 Ask for the hero image (`slackapp/photos.py`)
+### 4.4 Ask for the property photographs (`slackapp/photos.py`)
 
-This is the only connected hero source. Gable does not choose among form, Drive,
-brokerage or web candidates. It asks for exactly one image in the listing's
-owned Slack thread and keeps that file as the source of truth.
+This is the only connected property-photo source. Gable does not choose among
+form, Drive, brokerage or web candidates: form-photo selection, Drive selection,
+brokerage and web lookup, MLS access and generation are all unbuilt. It asks in
+the listing's owned Slack thread and keeps those files as the source of truth.
+Both photo-policy names use the same provider-free source-only fitting path.
+
+**How many it asks for is measured, not assumed.**
+`pipeline/property_photos.measured_wells` reads the main well and the row of
+smaller wells beneath it on every build, and it is the single function the ask
+and the build both read — the two sides disagreeing is the 4.3 item 15 failure.
+Only New Listing, New Listing with Open House and Open House have a certified
+row; one whose wells stop being an unambiguous, non-overlapping, equal-height
+landscape pair raises rather than picking two, and changing that band means
+measuring all six live designs again.
+
+**Gable cannot see the uploads, so the person names the main one by number.**
+"Make the first one the main photo" settles it. A caption describing a picture —
+"the road should be the large photo" — selects nothing, so the uploads are kept
+in `runs.pending_photo_files` in upload order and `select_property_photos`
+resumes them once a number arrives. Retaining does **not** retire the run's
+photo question or move the run, so an unanswered choice leaves the ordinary
+re-ask in charge. Placement order is the chosen photograph, then the rest in
+upload order left to right.
+
+**One photograph keeps the long-standing single-well path.** Two or three go
+through `place_property_photos`: every measured well deleted and replaced at its
+exact size and transform in one atomic batch, a well with no photograph emptied,
+depth restored one element at a time, and the geometry read back before any
+count is reported. `runs.property_photos` holds the batch, so a rebuild reuses
+the same photographs.
 
 **Only designs that have somewhere to put one are asked.** The manifest is the
 authority: a design whose fields include `hero_photo` gets the ask, one without
 never does. `designs.NO_HERO_DESIGNS` holds the measurement and `find_hero_frame`
 returns None for those, so the geometric search cannot invent a well. Client
-Review Post is the only one today — a testimonial has no property, and its single
-image well is the agent's portrait. The ask was unconditional until 2026-08-27
-while the build already guarded its hero work; see `DECISIONS.md`.
+Review Post is the only one today — a testimonial has no property, and its one
+image well is the agent's portrait (`DECISIONS.md`, 2026-08-27).
 
 Gable asks in the thread and waits:
 
 > **New Sold request from Lolo Simmons — 123 Main St**
 > Can you send me the image?
 
-The exact question is persisted before it is posted. Status becomes `needs_photo` only after Slack confirms its timestamp; until then the run stays in notification-pending
-`needs_review`. A dedicated retry loop uses a fresh SQLite connection and remains active
-when Sheet polling is off. An owned-thread upload received during the acknowledgement gap
-atomically satisfies the outbox and claims the run, so no later retry posts a stale request.
-A photo a human supplies is **final** — never
-second-guessed by a confidence score, never overwritten, never "improved" into a
-different subject.
+The exact question is persisted before it is posted. Status becomes `needs_photo`
+only after Slack confirms its timestamp; until then the run stays in
+notification-pending `needs_review`. A dedicated retry loop uses a fresh SQLite
+connection and remains active when Sheet polling is off. An owned-thread upload
+received during the acknowledgement gap atomically satisfies the outbox and
+claims the run, so no later retry posts a stale request. A photo a human
+supplies is **final** — never second-guessed by a confidence score, never
+overwritten, never "improved" into a different subject.
 
 The private Slack URL is host-checked before the bot credential is attached and
 downloads are capped at 25 MB (`slackapp/uploads.py`, which is only that
@@ -420,83 +450,11 @@ submission before the run resumes, so a corrected address in the caption is the
 one the flyer is built from. The upload is oriented and stripped of metadata but
 not cropped until preflight has measured the actual template frame.
 
-### 4.5 Store photo (`photos/store.py`)
+### 4.5 Store and fit the photo (`photos/store.py`, `photos/fit.py`)
 
-Slides needs a publicly fetchable image URL. Verified against Google's API
-reference on 2026-08-10: max 2 kB of URL, 50 MB, 25 megapixels, and PNG, JPEG or
-GIF. Fixed provider limits stay in the image boundary instead of operator
-settings.
-
-Two consequences worth stating plainly, because both have bitten this design:
-
-- **A Drive link will not work — and not for the reason we assumed.** The old
-  text here said Drive fails because it requires auth. That is only half true,
-  and the real answer was established by experiment on 2026-08-10:
-
-  | URL form | Anonymous `GET` | Historical Slides replacement experiment |
-  |---|---|---|
-  | `picsum.photos/….jpg` (control) | 200, valid JPEG | **accepted**, `occurrencesChanged: 1` |
-  | `drive.google.com/uc?export=view&id=` | **200, `image/png`, valid bytes** | rejected — *"problem retrieving the image"* |
-  | `drive.google.com/uc?export=download&id=` | **200, `image/png`, valid bytes** | rejected — same |
-  | `drive.google.com/thumbnail?id=…&sz=w1600` | 404 | rejected — *"image was not found"* |
-
-  The service account **can** publish a Drive file (`role: reader, type: anyone`)
-  and the result **is** genuinely fetchable by an anonymous client. Slides still
-  refuses it. So this is not a permissions problem that more sharing would fix —
-  Slides declines to fetch from Drive, full stop. A separate public host is
-  mandatory, not merely tidier. The control in the same batch rules out a broken
-  test harness.
-
-- **The URL only has to survive one moment.** Slides fetches the image once at
-  insertion and stores a copy inside the presentation, so a post does not break
-  later when the source URL expires. That makes short-lived hosting fine, and it
-  means the host needs no durability guarantees at all.
-
-Options, in preference order:
-
-1. **The droplet, over plain `http://`** — in use, and the reason there is no
-   critical path here any more. Slides was assumed to require https; it does
-   not, verified live. nginx serves `/var/www/gable-photos`. Production writes
-   there locally under the systemd unit's narrow `ReadWritePaths`; development
-   may still use the SSH publisher. It costs nothing beyond a droplet already
-   paid for. A photo only has to survive one fetch, so the host needs no
-   durability.
-2. An object store if photo hosting ever outgrows one box; none is connected.
-3. Google Drive public links — **do not, and now we know why.** See the table.
-
-Normalise before upload: convert to JPEG, apply EXIF orientation, strip metadata,
-and reduce only an unnecessarily large edge. Do not crop to the slide canvas;
-the exact hero frame is not known yet. Slack download size is hard-capped at 25
-MB before Pillow opens it. The derivative is content-addressed and atomically
-published.
-
-### 4.5b Fit the photo to the frame (`photos/fit.py`)
-
-**This is the hardest problem in the product.** Everything else is plumbing;
-this is the part that decides whether the output looks professional or obviously
-machine-made.
-
-A photo an agent shot on their phone is the wrong aspect ratio, often the wrong
-exposure, and never composed for a 1080 × 1350 frame with a text panel across the
-bottom third. Scaling it naively produces a stretched house, or a roofline
-guillotined at the top — errors that are glaring to a client and invisible to a
-script checking that the file is a valid JPEG.
-
-The common path is deterministic. Pillow center-crops once to the **measured
-hero frame** and resamples to that frame's pixel dimensions. Up to a 2x
-enlargement stays local. Crop loss above 30 percent becomes a note in the one
-post-build outcome; it never creates an approval question. The rendered vision
-gate still blocks delivery if the automatic crop removes important content.
-
-When full-frame cover would exceed 2x, Pillow makes a blurred, darkened cover
-from the source and centers a complete foreground copy at no more than 2x. The
-result is the exact frame size, preserves every source edge, invents no property
-detail, makes no provider call, and records `ai_enhanced=0`. The original Slack
-upload is never overwritten; rendered vision remains the delivery gate.
-
-Synthetic property-photo generation is not connected. The database retains the
-disclosure flag required by the runtime contract, but the running system has no
-generator or approval flow and never claims otherwise.
+Moved to [`PHOTOS.md`](PHOTOS.md) on 2026-09-20, at the 800-line ceiling. The
+publishable-URL rules, why a Drive link will not work, the nginx root on the
+droplet, and the frame-aware crop with its bounded enlargement all live there.
 
 ### 4.6 Look up template (`slides/selection.py`)
 
@@ -582,10 +540,16 @@ passes — literal to a private-use sentinel, then sentinel to the value — in 
 atomic batch. No pass ever searches for a word, so nothing already written can
 be matched again, whatever it contains.
 
-`placement.py` holds the photo side: proving the source template is still the
-audited one, deleting the sample photograph and any second layer carrying part
-of it, creating the replacement at the frame's exact size and transform, and
-restoring the depth the original sat at.
+`placement.py` holds the single-photograph side: proving the source template is
+still the audited one, deleting the sample photograph and any second layer
+carrying part of it, creating the replacement at the frame's exact size and
+transform, and restoring the depth the original sat at. `property_photos.py`
+does the same for a supplied batch across every measured well.
+
+Depth is restored one element per request there, and that is load-bearing: a
+multi-element Z-order operation keeps the elements' order from *before* the
+operation, not the order they are listed in, and Slides appends every created
+image at the front. See `DECISIONS.md`, 2026-09-20.
 
 The live sequence is: copy inside the shared drive, replace text, read every
 supplied value back verbatim, reject foreign sample contact details, replace the
@@ -598,13 +562,15 @@ without credentials.
 ### 4.7b Inspect the render before delivering
 
 Gable **looks at Google's actual output.** `pages.getThumbnail` returns a PNG;
-`gpt-5.6-sol` receives both the preserved human photo and the render at original
-image detail through one Responses API call and must return a strict schema. It
-checks what source rectangles cannot:
+`gpt-5.6-sol` receives every preserved human photograph and then the render, all
+at original image detail, through one Responses API call and must return a
+strict schema. When more than one photograph was supplied the prompt says so and
+names the order: main first, then left to right, with the flyer last. It checks
+what source rectangles cannot:
 
-- Does the photo actually sit correctly in the frame, or is it stretched,
-  squashed, or cropped through the middle of the house?
-- Is it still the same property and composition as the human-supplied photo?
+- Does each photo sit correctly in its frame, or is it stretched, squashed, or
+  cropped through the middle of the house, and is each still the same property
+  and composition as the photograph that was supplied for it?
 - Is any text overflowing its box or colliding with the background art?
 - Is a fillable label or sample value still visible anywhere on the page?
 
@@ -687,13 +653,8 @@ tools rather than a script, and never claiming more than it did all live there.
 
 ## 5. Where photos come from
 
-The only connected hero source is **the ask**, and only for a design that has a
-hero well at all — see §4.4. Gable stops before rendering and requests one image
-in the listing thread; Carmen's or Chase's reply is prepared, published and
-attached to that same paused run. Form-photo selection, Drive
-selection, brokerage and web lookup, MLS access, and generation are not built.
-Both accepted policy names use the same provider-free source-only fitting path;
-neither permits paid enlargement of the supplied real photo.
+Folded into §4.4 on 2026-09-20: the two had become the same section, and this
+file was at the 800-line ceiling for the third time.
 
 ---
 

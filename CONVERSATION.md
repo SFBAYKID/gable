@@ -36,14 +36,38 @@ asking, never by taking the likely reading.
 > **Carmen:** the big one
 > **Gable:** On it. Drop the new one here.
 
-"Update the image" could mean the hero, the headshot, or one of three secondary
-photos. A confirmed property-photo replacement keeps the current flyer intact
-while the new upload re-enters every geometry and visual gate. A headshot change
-waits on the human-owned `Head Shots` folder. Asking costs seconds; guessing can
-produce a wrong post that looks right, the failure `AGENTS.md` §5 forbids.
+"Update the image" could mean the main photograph, the headshot, or one of the
+smaller property photos. A confirmed property-photo replacement keeps the
+current flyer intact while the new upload re-enters every geometry and visual
+gate. A headshot change waits on the human-owned `Head Shots` folder. Asking
+costs seconds; guessing can produce a wrong post that looks right, the failure
+`AGENTS.md` §5 forbids.
 
 The rule generalises: **when Gable does not know, it asks.** It never picks the
 convenient reading of an ambiguous instruction.
+
+### 4A.1a A question Gable cannot answer for itself
+
+Designs with a row of smaller photo wells take up to three photographs, and
+which one is the main one is not something Gable can work out: it never sees
+the uploads, only their file ids. So the question is always about a number.
+
+> **Carmen:** *[three photos]* Here are 3 for the template.
+> **Gable:** I kept your 3 photos. Which should be the main one: first, second
+>   or third? I will place the rest left to right in the order you sent them.
+> **Carmen:** the first
+> **Gable:** *[builds]*
+
+A caption naming the number — "make the first one the main photo" — skips the
+question entirely. A caption describing a picture does not: "the road should be
+the large photo" selects nothing, and answering it as though it had would be the
+guess this whole section exists to refuse. That exact exchange happened on
+2026-08-28, when the three uploads had already been silently discarded and
+Gable asked which of them to use.
+
+Asking here does **not** park the listing on the answer. The uploads are kept
+beside a run that is still waiting for its photograph in the ordinary way, so
+silence costs the batch and never the flyer.
 
 ### 4A.2 Show that it is working
 
@@ -81,9 +105,10 @@ question, and a missing or multiply matched element is never ranked or guessed.
 
 ### 4A.4 Never claim more than it did
 
-From `AGENTS.md` §5, and it outranks everything above. Only a human-supplied
-property photo is accepted. If verification did not run, say so. If something
-failed, name what failed.
+From `AGENTS.md` §5, and it outranks everything above. Only human-supplied
+property photos are accepted. The number reported as placed comes from what the
+placement verified on the delivered file, not from what was uploaded or asked
+for. If verification did not run, say so. If something failed, name what failed.
 
 The failure mode to design against is Gable reporting confident success on a post
 that is subtly wrong, and Carmen — trusting it after fifty good runs — shipping

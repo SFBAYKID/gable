@@ -79,6 +79,11 @@ I resized and fitted the photo and finished the flyer.
 
 Open the flyer is descriptive linked text in Slack, never a pasted URL.
 
+On a design with a row of smaller photos, the same line reports the number
+actually placed and verified on the delivered file — "I resized and fitted 3
+property photos and finished the flyer." — and adds "I left the unused smaller
+photo spaces empty." when fewer arrived than the design measured.
+
 ### 2.2 Photo needs attention
 
 ```
@@ -88,8 +93,45 @@ Can you send me the image?
 ```
 
 Automatic photo discovery is not connected. Gable never claims it searched
-Drive, a brokerage site, the web, or an MLS. The one connected hero source is a
-photo Carmen or Chase supplies in the owned listing thread.
+Drive, a brokerage site, the web, or an MLS. The only connected property-photo
+source is what Carmen or Chase supplies in the owned listing thread.
+
+### 2.2b A design with a row of smaller photos
+
+Three designs — New Listing, New Listing with Open House, and Open House — draw
+a main photograph with two smaller ones beneath it. Their wells are measured
+live on every build, never assumed, and the ask names what the design actually
+holds:
+
+```
+New Listing request from Jane Doe — 456 Oak Ave, Any City, ST 12345
+
+This design has 3 property photo spaces. Send the photos together here and
+tell me which is the main one. I will place the others left to right in
+upload order.
+```
+
+Gable cannot see the uploads, so it never picks the main photograph from what
+is in the pictures. "The road should be the large photo" selects nothing. When
+the words name a number — "make the first one the main photo" — that is the
+choice. When they do not, the uploads are kept, numbered by the order they were
+sent, and Gable asks for the number:
+
+```
+I kept your 3 photos. Which should be the main one: first, second or third?
+I will place the rest left to right in the order you sent them.
+```
+
+That question leaves the run exactly where it was. If the answer never comes,
+the listing is still waiting for its photograph and the ordinary re-ask still
+owns it; the uploads are not the thing holding it open.
+
+One photograph on one of these designs builds the flyer it has always built:
+the main well is replaced and the design's own smaller pictures stay. Sending
+two or three replaces the row, and a measured space with no photograph for it
+is emptied rather than left showing a stranger's living room — Gable says so
+when that happens. More than three is over every measured design's ceiling, and
+is refused out loud rather than dropped in silence.
 
 ### 2.2a A supplied photo is small
 
@@ -267,8 +309,10 @@ Gable's to answer, and a reply naming nobody is ordinary thread conversation.
 A shared photo is taken either way: the photo is what the thread is for,
 whoever the caption was addressed to. It is also taken however Slack announces
 it — attached to the message, or in the separate `file_shared` notice Slack
-sends when it attaches the file a moment after the message. One upload is
-placed once, because both routes identify a photo by its file id.
+sends when it attaches the file a moment after the message. Several photos sent
+together are one upload, not several: the `file_shared` route reads back the
+whole message so the batch arrives intact and in order. An upload is placed
+once, because both routes identify it by the same set of file ids.
 
 Inside a thread started by Monarch Website Watcher, another app, or a person who
 did not address Gable in the root, Gable stays silent unless the new message

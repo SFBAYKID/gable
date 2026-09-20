@@ -381,6 +381,7 @@ class Runner:
         # what gets filled. Measuring one string and writing another would put
         # the overflow back on the flyer.
         values.update(measured.adjusted)
+        outstanding.photo_count = measured.property_photo_count
         # A blocker used to return here with its own sentence and nothing else,
         # so Lina Mariner's New Listing asked for a headshot and never mentioned
         # the property photo it was equally certain to need. Carmen would have
@@ -660,6 +661,7 @@ class Runner:
             left_blank=run_reporting.unfilled(resolution.fields, values),
             price_missing_note=price_note(intake, "price" in resolution.fields),
             noticed=safe(paragraphs(*noticed_parts)),
+            output_file_id=output_id,
         )
         return self._outcome(
             run_id,

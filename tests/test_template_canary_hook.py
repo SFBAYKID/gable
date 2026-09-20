@@ -75,6 +75,11 @@ def test_a_structurally_refused_design_is_not_built(tmp_path: Path) -> None:
     files = [TemplateFile("bad", "Sold", "rev-1")]
     said: list[str] = []
     built: list[str] = []
+
+    def refuse_build(item: TemplateFile) -> str:
+        built.append(item.file_id)
+        return "never"
+
     triage = TemplateTriage(
         connection,
         lambda: files,
@@ -84,7 +89,7 @@ def test_a_structurally_refused_design_is_not_built(tmp_path: Path) -> None:
             "slides": [{"objectId": "page-1", "pageElements": []}],
         },
         _say_into(said),
-        dry_build=lambda item: built.append(item.file_id) or "never",
+        dry_build=refuse_build,
     )
     triage.scan_new()
     files[0] = TemplateFile("bad", "Sold", "rev-2")

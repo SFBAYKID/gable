@@ -27,7 +27,7 @@ from typing import Final
 
 #: Bumped whenever a migration is added. `apply_migrations` uses it to decide
 #: what still needs running.
-SCHEMA_VERSION: Final[int] = 15
+SCHEMA_VERSION: Final[int] = 16
 
 #: Each migration is (version, sql). They run in order and only once. Never edit
 #: one that has shipped — add another, the same rule as the decision log.
@@ -468,6 +468,13 @@ MIGRATIONS: Final[tuple[tuple[int, str], ...]] = (
         ALTER TABLE template_audits
             ADD COLUMN blocker_kind TEXT NOT NULL DEFAULT '';
         """,
+    ),
+    (
+        16,
+        """
+        ALTER TABLE runs ADD COLUMN property_photos TEXT NOT NULL DEFAULT '[]';
+        ALTER TABLE runs ADD COLUMN pending_photo_files TEXT NOT NULL DEFAULT '[]';
+    """,
     ),
 )
 

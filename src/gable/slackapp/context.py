@@ -19,6 +19,7 @@ from sqlite3 import Connection
 from typing import Any, Final
 
 from gable.db import store
+from gable.photos.batch import pending_uploads
 from gable.slackapp.brain import Decision
 from gable.slackapp.intents import OWED_A_PHOTO_LINE
 from gable.voice import safe
@@ -217,6 +218,13 @@ def listing_context(connection: Connection, thread_ts: str) -> str:
     run = store.run_for_thread(connection, thread_ts)
     if run is not None:
         facts = [f"Run status: {run.status}."]
+        pending_photos = pending_uploads(run.pending_photo_files)
+        if pending_photos:
+            facts.append(
+                f"There are {len(pending_photos)} retained photo uploads, numbered in the "
+                "order they were sent, waiting for an explicit main-photo number. Call "
+                "select_property_photos with that number once it is given."
+            )
         stored = store.load_submission(connection, run.response_row_id)
         if stored is not None:
             intake = stored.intake

@@ -17,7 +17,6 @@ from gable.db.schema import connect
 from gable.photos.store import PublishError
 from gable.pipeline.runner import RunResult
 from gable.sheets import repository as repo
-from gable.slackapp import photos
 from gable.slackapp.brain import Decision
 from gable.slackapp.editing import SlideEditor
 from gable.slackapp.recovery import notify_pending_run_questions
@@ -471,11 +470,11 @@ def test_multiple_images_are_not_silently_reduced_to_the_first(tmp_path: Path) -
 
     said = _handoff(path, []).handle(_event(files=files), FakeSlackClient())
 
-    assert "only use one property photo" in said
-    assert "did not keep any of them" in said
+    assert "I kept your 2 photos" in said
+    assert "first or second" in said
 
 
-def test_several_images_beside_a_value_still_say_the_images_were_dropped(
+def test_several_images_are_retained_until_the_main_photo_is_named(
     tmp_path: Path,
 ) -> None:
     """Carmen's "Here are 3 for the template." threw away three uploads silently.
@@ -485,8 +484,9 @@ def test_several_images_beside_a_value_still_say_the_images_were_dropped(
     as the large photo — about files it no longer had — and her answer, "The
     road should be the large photo", could not select anything.
 
-    The words are still the caller's to answer; the sentinel only changes so
-    that the dropped images are spoken about too.
+    Three photographs are now a batch Gable can place, so nothing is dropped:
+    the uploads are kept and the one question it cannot answer for her -- which
+    of them is the main photograph -- is the only thing asked.
     """
     path = tmp_path / "gable.db"
     _paused_database(path)
@@ -496,7 +496,8 @@ def test_several_images_beside_a_value_still_say_the_images_were_dropped(
         _event(files=files, text="Here are 3 for the template."), FakeSlackClient()
     )
 
-    assert said == photos.TOO_MANY_ANSWER_THE_WORDS
+    assert "I kept your 3 photos" in said
+    assert "first, second or third" in said
 
 
 def test_a_non_image_upload_leaves_the_run_paused(tmp_path: Path) -> None:
