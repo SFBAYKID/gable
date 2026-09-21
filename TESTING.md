@@ -132,6 +132,35 @@ the channel override, and read the thread. The resume-tool defect on
 would have shown it first. This is part of the definition of done in
 CLAUDE.md §10, not a courtesy.
 
+**Rehearsing unpushed code needs `PYTHONPATH`, and forgetting it looks like a
+passing test rather than a failing one.** Copy the tree to a staging directory
+and point `PYTHONPATH` at its `src`, because `gable` is installed into the
+droplet's venv as an editable pointer to `/opt/gable/src` and otherwise wins —
+`tools/run_row.py` has no `sys.path` shim of its own, unlike
+`tools/seed_test_rows.py`. Without it the rehearsal exercises the DEPLOYED
+code and reports the behaviour you were trying to change. That happened on
+2026-09-21 and was only caught because the run reproduced the bug verbatim;
+had the change been one that merely *improved* a message, the stale wording
+would have read as the fix not working, or worse, a matching wording would
+have read as success.
+
+```bash
+tar czf - src tools | ssh -i ~/.ssh/gable_droplet root@143.110.146.87 \
+  'rm -rf /opt/gable-staging && mkdir -p /opt/gable-staging \
+     && tar xzf - -C /opt/gable-staging && chown -R gable:gable /opt/gable-staging \
+     && ln -sfn /opt/gable/.env /opt/gable-staging/.env'
+
+ssh -i ~/.ssh/gable_droplet root@143.110.146.87 \
+  'cd /opt/gable-staging && sudo -u gable env PYTHONPATH=/opt/gable-staging/src \
+     GABLE_SLACK_CHANNEL_ID=C0B02721MNK \
+     /opt/gable/.venv/bin/python -m tools.run_row "Testing_1" <row>'
+```
+
+The `.env` symlink is what lets `load_dotenv` find the real configuration from
+the staging directory; it copies no secret. Remove the symlink and the staging
+directory afterwards, and confirm `/opt/gable/.env` still names the production
+channel. Print `gable.__file__` if you are unsure which tree ran.
+
 ## 0e. Rehearse a multi-photo upload
 
 A batch of property photos cannot be driven from Slack for the reason in the
