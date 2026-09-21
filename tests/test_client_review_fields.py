@@ -246,12 +246,16 @@ def test_a_name_line_at_the_top_still_wins() -> None:
     assert values["review_quote"].startswith("In a simple word")
 
 
-def test_an_unsigned_review_is_still_a_question() -> None:
+def test_an_unsigned_review_keeps_its_quote_and_asks_for_the_name() -> None:
     """The last sentence of a review must never be mistaken for a signature.
 
     Rows 49 and 50 are Google exports headed "7/2/2026 • lucyglou". Their last
     line is the review itself, and a username is not a name to print under a
-    stranger's words, so both still ask. That is the correct outcome.
+    stranger's words, so the reviewer is still a question. The QUOTE is not:
+    reading both halves or neither threw away 415 usable characters and made
+    Gable ask for the one thing it was holding. Ian DePinto's 2026-09-21 thread
+    is this row. Carmen answered the question twice and put the value in the
+    sheet, and every copy came back through here and was discarded.
     """
     values = review_values(
         "Client Review Post",
@@ -260,9 +264,21 @@ def test_an_unsigned_review_is_still_a_question() -> None:
         "the deal was very pleasant. Highly recommend Ian as your agent!",
     )
 
-    assert values == {}
+    assert values["review_quote"].startswith("We recently bought a house with Ian")
+    # Still nobody to print under it, so preflight asks -- for the name.
+    assert "client_name" not in values
 
 
 def test_a_trailing_name_without_a_real_quote_is_not_a_review() -> None:
     """A signature under a fragment is not something to set in a quote panel."""
     assert review_values("Client Review Post", "Loved it!\nSharon") == {}
+
+
+def test_a_readable_name_over_a_fragment_keeps_the_name() -> None:
+    """Each half is judged on its own, in both directions."""
+    values = review_values("Client Review Post", "Rob Morgan\n\nGreat!")
+
+    assert values["client_name"] == "Rob Morgan"
+    # Six characters is not something to set in a quote panel, so it is asked
+    # for -- and the name Gable already has is not asked for a second time.
+    assert "review_quote" not in values

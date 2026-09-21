@@ -228,6 +228,51 @@ def _fits_every_box(
     )
 
 
+def _missing_value_issue(template_label: str, missing: list[str]) -> Issue:
+    """Name EVERY section this run has no value for, in one blocker.
+
+    This reported only the first missing field until 2026-09-21, which hides
+    the second until the first is answered -- the exact failure the runner's
+    own blocker batching was built to stop ("reporting only the first hides the
+    second until the first is fixed"). Client Review Post resolves
+    `review_quote` before `client_name`, so a submission missing both could
+    only ever be asked about the quote, and answering it bought a second round
+    trip for the name.
+
+    Args:
+        template_label: The design's name, as Carmen calls it.
+        missing: Every non-optional field with no value, in the design's own
+            resolution order. Never empty; the caller checks.
+
+    Returns:
+        One blocking `Issue`, coded on the first missing field so the
+        `missing_value_` release in `blocking_after_release` still covers it.
+
+    Raises:
+        Nothing.
+    """
+    readable = [name.replace("_", " ") for name in missing]
+    if len(readable) == 1:
+        sections = f"a {readable[0]} section"
+        rest = (
+            "but I do not have a value for it. What should it say? You can also remove "
+            "that section from the template and tell me to check it again."
+        )
+    else:
+        listed = f"{', '.join(readable[:-1])} and {readable[-1]}"
+        sections = f"{listed} sections"
+        rest = (
+            "but I do not have values for them. What should they say? You can also remove "
+            "those sections from the template and tell me to check it again."
+        )
+    return Issue(
+        f"missing_value_{missing[0]}",
+        f"I checked the {template_label} design before building. It has {sections}, {rest}",
+        blocking=True,
+        status="needs_info",
+    )
+
+
 def _box_left_blank(resolution: fields.Resolution, values: dict[str, str]) -> str:
     """The field whose design box this run would empty rather than fill.
 
@@ -522,27 +567,13 @@ def analyze(
     # ask for a wider box in the same breath as asking which value to use.
     explained: set[str] = set()
     if values:
-        missing = next(
-            (
-                name
-                for name in resolution.fields
-                if name not in OPTIONAL_FIELDS and not values.get(name, "").strip()
-            ),
-            "",
-        )
+        missing = [
+            name
+            for name in resolution.fields
+            if name not in OPTIONAL_FIELDS and not values.get(name, "").strip()
+        ]
         if missing:
-            readable = missing.replace("_", " ")
-            issues.append(
-                Issue(
-                    f"missing_value_{missing}",
-                    f"I checked the {template_label} design before building. It has a "
-                    f"{readable} section, but I do not have a value for it. What should "
-                    "it say? You can also remove that section from the template and tell "
-                    "me to check it again.",
-                    blocking=True,
-                    status="needs_info",
-                )
-            )
+            issues.append(_missing_value_issue(template_label, missing))
 
         blanked = _box_left_blank(resolution, values)
         if blanked and not missing:

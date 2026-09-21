@@ -135,6 +135,16 @@ PHOTO_ONLY_ASK: Final[str] = "Can you send me the image?"
 #: photograph, which is how a face ends up where the house goes.
 PHOTO_ASK_BESIDE_A_BLOCKER: Final[str] = "Separately, can you send me the property photo here?"
 
+#: The invariant middle of the ask a design with a ROW of wells gets, which
+#: names how many spaces it has and so cannot be a fixed string. Named anyway,
+#: because `run_speech.record_the_ask` has to recognise the sentence it just
+#: recorded and enumerating phrasings is how that check came to cry wolf: the
+#: 2026-09-20 row ask was a third wording, the guard knew two, and every New
+#: Listing and Open House run that asked for photographs logged "recorded a
+#: photo ask that its message does not carry" while carrying one. Both sides
+#: now read this.
+PHOTO_ROW_ASK_MARK: Final[str] = "property photo spaces. Send the photos together here"
+
 #: Said before a blocker that is about to repeat itself, once the photo it
 #: asked for alongside has arrived. Without it Carmen sends the photo and gets
 #: back the identical paragraph, which reads as though the upload was lost.
@@ -284,8 +294,8 @@ class Needs:
         if self.photo_count > 1:
             photo_ask = (
                 ("Separately, " if lead else "")
-                + f"this design has {self.photo_count} property photo spaces. "
-                "Send the photos together here and tell me which is the main one. "
+                + f"this design has {self.photo_count} {PHOTO_ROW_ASK_MARK} "
+                "and tell me which is the main one. "
                 "I will place the others left to right in upload order."
             )
             photo_ask = photo_ask[0].upper() + photo_ask[1:]

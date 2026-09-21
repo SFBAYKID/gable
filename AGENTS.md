@@ -213,12 +213,24 @@ credential in capitals. Chase confirmed on
 2026-08-19 that all 38 agents on the roster hold it, so this states a fact about
 the brokerage rather than guessing about a person, and the run event records
 which of the two answered. The profile always wins when it states a title.
-When the website does not answer at all — a timeout, not a profile that names
-nobody — and the roster row already proves the name, email and direct phone,
-the flyer still goes out with that brokerage credential and the delivery
-message says the site was not reached. Silence is not evidence about the
-agent, and stopping there sent Carmen to correct a request and a roster row
-that were both right on 2026-09-01.
+
+When no profile comes back at all and the roster row already proves the name,
+email and direct phone, the flyer still goes out with that brokerage credential
+and the delivery message says why. That covers both a website that does not
+answer — a timeout, right on 2026-09-01, when stopping sent Carmen to correct a
+request and a roster row that were both right — and a website that answers and
+has no page matching this agent, which stranded Melanie Kim on 2026-09-21 after
+she changed her name and Carmen had updated everything Gable told her to. A
+brokerage site is edited by people on their own schedule, so it lags the
+roster, and neither its silence nor its absence is evidence about whether an
+agent holds a credential every agent on that roster holds. The delivery message
+says which of the two it was, because a site that did not answer is transient
+and a site with no page for this agent is a gap somebody may want to close.
+
+Roster membership is what carries this, so the refusals that remain are the
+ones about membership: an agent with no filed row, and a filed row that does
+not itself prove the direct phone, both still stop. So does an empty
+`GABLE_DEFAULT_AGENT_CREDENTIAL`.
 
 Gable therefore never asks anyone for a credential. It must never ask for one to
 be added to the request or to Agents Contact Information: neither place can
@@ -366,6 +378,26 @@ question, says Gable will not ask again, and names Chase — and a third
 identical ask is not posted at all; the run stays paused with the question
 recorded. Lina Mariner's thread heard one address question three times on
 2026-09-01, and that repeat is what reads as "not listening".
+
+Withholding that third copy is a decision, and a later "rerun" on the same
+thread is answered as one: Gable says it re-read the form row and the contact
+record, that the thing it asked for is still not there, that the listing is
+still paused, and that Chase already has it. It does not repeat the question.
+Ian DePinto's thread got "the run did not produce an outcome I could report"
+twice instead on 2026-09-21 — once after Carmen answered in the thread, once
+after she put the value in the sheet — and that sentence names nothing, so she
+could not tell a re-read that failed from a crash.
+
+**A design that displays several things Gable has no value for names them all
+in one ask**, for the same reason the batch exists: reporting only the first
+hides the second until the first is answered. Client Review Post is the case
+that proved it — it draws the quote before the client's name, so a submission
+missing both could only ever be asked about the quote, and the reviewer was
+never reached. **Each half of a review is also read and kept on its own**: an
+unreadable reviewer name no longer discards a perfectly readable quote, and a
+quote somebody states in the thread is recorded whether or not a name is known
+yet. A nameless quote still never reaches a flyer — the missing name is what
+Gable asks about, which is a question Carmen can answer.
 
 When one of those stops does happen: name the listing, name the field, say why
 it matters — as a sentence.

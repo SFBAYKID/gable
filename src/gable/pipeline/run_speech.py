@@ -147,6 +147,13 @@ def deliver_question(
             failure_reason=asked,
         )
         result.status = status
+        # Silence here is a DECISION, and the caller has to be able to tell it
+        # from a run that stopped for a reason nobody recorded. Ian DePinto's
+        # 2026-09-21 thread ended on two identical "the run did not produce an
+        # outcome I could report" replies, which is what that conflation sounds
+        # like to whoever is waiting: Carmen had answered, then put the value in
+        # the sheet, and both times got a sentence that named nothing.
+        result.already_escalated = True
         return result
     if guarded != asked:
         logger.error("run %s was about to ask the same question again; escalating", run_id)
@@ -255,7 +262,17 @@ def record_the_ask(connection: Connection, run_id: str, outstanding: needs.Needs
     # do outside Slack -- and the photo request rides in the same message.
     # Without this the upload answering it is refused; see `set_awaiting_photo`.
     store.set_awaiting_photo(connection, run_id, outstanding.photo)
-    named = needs.PHOTO_ONLY_ASK in asked or needs.PHOTO_ASK_BESIDE_A_BLOCKER in asked
+    # Every phrasing `Needs.message` can write, read from `needs` rather than
+    # copied here. A guard that enumerates its own list of the other side's
+    # sentences goes stale the first time a sentence is added, and this one did.
+    named = any(
+        phrasing in asked
+        for phrasing in (
+            needs.PHOTO_ONLY_ASK,
+            needs.PHOTO_ASK_BESIDE_A_BLOCKER,
+            needs.PHOTO_ROW_ASK_MARK,
+        )
+    )
     if outstanding.photo and not named:
         logger.error("run %s recorded a photo ask that its message does not carry", run_id)
     return asked

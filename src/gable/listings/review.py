@@ -81,7 +81,12 @@ class Review:
 
     @property
     def is_usable(self) -> bool:
-        """True when both halves are present. Either alone is a question."""
+        """True when both halves are present, so the design can be filled.
+
+        Reports completeness; it does not gate anything. `review_values`
+        deliberately keeps whichever half it could read, so that the half
+        nobody has is the half Gable asks about -- see the note there.
+        """
         return bool(self.client_name and len(self.quote) >= _MIN_QUOTE_CHARS)
 
 
@@ -93,20 +98,36 @@ def review_values(request_type: str, text: str) -> dict[str, str]:
         text: The prose the agent typed.
 
     Returns:
-        `client_name` and `review_quote`, or an empty mapping when this is not a
-        review or the prose could not be read. Empty leaves the design's sample
-        testimonial visible, which becomes a question rather than a flyer
-        quoting the wrong person.
+        Whichever of `client_name` and `review_quote` could actually be read,
+        and nothing for the half that could not. A field left out keeps the
+        design's own sample visible, which preflight turns into a question
+        rather than a flyer quoting the wrong person.
 
     Raises:
         Nothing.
+
+    Note:
+        Returning BOTH halves or neither is what deadlocked Ian DePinto's
+        2026-09-21 thread. His review is a Google export headed "7/2/2026 -
+        lucyglou": 415 readable characters of testimonial under a username that
+        is not a name to print. The name was unreadable, so the quote was
+        discarded too, and `review_quote` is the FIRST field the Client Review
+        Post design resolves -- so Gable asked for the quote it was holding,
+        Carmen pasted it back twice and put it in the sheet, and every reply
+        was thrown away by this function on the way in. Each half is now kept
+        on its own merits, so the question Gable asks is the one nobody has
+        answered.
     """
     if "review" not in request_type.lower():
         return {}
     found = parse_review(text)
-    if not found.is_usable:
-        return {}
-    return {"client_name": found.client_name, "review_quote": found.quote}
+    values: dict[str, str] = {}
+    if found.client_name:
+        values["client_name"] = found.client_name
+    # A fragment is not something to set in a quote panel, whoever signed it.
+    if len(found.quote) >= _MIN_QUOTE_CHARS:
+        values["review_quote"] = found.quote
+    return values
 
 
 def parse_review(text: str) -> Review:

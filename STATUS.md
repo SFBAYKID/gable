@@ -1,6 +1,89 @@
 # Gable — status, and what's needed from Chase
 
-Last updated 2026-09-20 by the building agent.
+Last updated 2026-09-21 by the building agent.
+
+## 2026-09-21 — two #calvo threads that could not be answered, and why
+
+Chase brought two threads from #calvo. Both are the same shape: Carmen did
+exactly what Gable asked, and Gable asked again. Both are fixed, both are
+reproduced in tests, and one of them reverses a decision row — read that row
+before touching this again.
+
+**Melanie Humeniuk, now Melanie Kim — Open House.** Gable paused on a
+name mismatch. Carmen replied "I just found out she changed her name. It's been
+updated everywhere. Rerun." Gable then paused on "the official Corner House
+Realty website has no exact profile for this agent" and told her to correct the
+request or Agents Contact Information — the two things she had just corrected,
+and the two things that cannot reach that website.
+
+Verified live today through the site's own page search: `search=Melanie Kim`
+returns `[]`, `search=Melanie Humeniuk` returns her profile and her open-houses
+twin, both still under the previous name. The site lags the roster because
+people edit it on their own schedule. The decisive detail is that the identical
+row builds fine on every design that does **not** print a credential, because
+the phone cross-check yields to the workbook when no profile comes back — the
+ask side and the build side were reading one answer two different ways, which
+is the rule 4.3 item 15 already proved once. A complete roster row plus
+`GABLE_DEFAULT_AGENT_CREDENTIAL` is now enough whether the site is silent or
+merely has no page. An agent with no filed row, a row with no direct phone, and
+an empty credential setting all still stop, and all three are tested.
+
+**Ian DePinto — Client Review Post.** Gable asked for the review quote. Carmen
+pasted it. Gable asked again. She pasted it again; Gable said "I picked this
+listing back up, but the run did not produce an outcome I could report." She
+put the value in the spreadsheet and said "Please rerun"; Gable said the same
+sentence again. Four defects stacked:
+
+1. `review_values` read both halves of a review or neither, so his review — a
+   Google export, 415 readable characters signed with the username "lucyglou" —
+   lost its quote because the name was unreadable.
+2. `for_intake` accepted a *stated* review quote only when a client name was
+   already known, so every copy Carmen sent was stored and then discarded.
+3. `review_quote` is the first field that design resolves and preflight asked
+   about only the first missing field, so the reviewer's name was never reached
+   and never asked for. Answering correctly could not move the run in either
+   direction.
+4. When `repeat_guard` withheld the third copy of the question, the caller
+   could not tell that decision from a run that fell over, and answered both
+   with a sentence that names nothing.
+
+Each half of a review is now kept on its own merits, a stated quote is recorded
+like every other stated value, preflight names every missing section in one
+ask, and a rerun on an escalated thread says what it re-read and that Chase
+already has it. A nameless quote still never reaches a flyer: preflight blocks
+on the empty client name instead, which is a question Carmen can answer. Walked
+end to end after the change — the thread that never converged now converges in
+one round trip, and Carmen answering both halves in one reply converges in
+zero.
+
+**Rehearsed in the playground, against both real agents.** Two `Testing_1`
+rows, run from a staging copy on the droplet with the channel override, so the
+listener kept serving production throughout and `/opt/gable/.env` was never
+edited. Melanie Kim's Open House was run once against the *deployed* code first
+— by accident, `tools/run_row` has no `sys.path` shim and needs `PYTHONPATH`,
+which is the trap `TESTING.md` §0e already warns about — and it reproduced the
+production refusal word for word. Against the fix she gets past the contact
+gate, her headshot publishes, and the thread asks for the photographs and the
+price. Ian DePinto's Client Review Post, seeded with his real Google-export
+review, asked for the **client name** — the half nobody has — and built on the
+answer. Read back off the Slides file: the flyer carries his real review text
+and "Sharon", with no sample content left. `tools/audit_threads` reads his
+thread `ok`; hers flags only for having no flyer link, which is correct, since
+she is legitimately waiting on photographs.
+
+The reviewer name in that rehearsal was recorded directly rather than typed
+into Slack, because a scripted post carries a `bot_id` and `routing.py` drops
+it. So the *ask* was rehearsed live and the *reply* was not.
+
+**Found while rehearsing:** every run that asks for a row of property
+photographs was logging `recorded a photo ask that its message does not carry`
+while carrying one. The guard listed two phrasings and the 2026-09-20 row ask
+is a third. Fixed in the same commit; see the decision row.
+
+**Both #calvo threads are still open.** Nothing was posted there from here.
+Once this is deployed, each needs a "rerun" in its own thread to pick up the
+fix — Melanie's should then ask for photographs, and Ian's for the reviewer's
+name.
 
 ## 2026-09-20 — three property photos on the designs that draw three
 
@@ -216,6 +299,22 @@ waiting for its property photo in its own thread.
 
 ## What I need from Chase
 
+- **2026-09-21: deploy, then a "rerun" in each of the two #calvo threads.**
+  Pushed and rehearsed; not deployed, because that restarts the listener
+  Carmen is using. After deploying, both threads need a reply in their own
+  thread to pick the fix up. I did not post to #calvo.
+- **2026-09-21: one reversal to confirm, not blocking.** A website that answers
+  and has no page for an agent now yields the brokerage credential when the
+  roster row is complete — the same relief a silent website already got. It
+  reverses one sentence in the 2026-09-01 decision row, and the new row says
+  so. Emptying `GABLE_DEFAULT_AGENT_CREDENTIAL` still restores the old stop
+  exactly. If you would rather a missing page keep stopping the run, that is a
+  one-line revert and Melanie Kim's Open House stays unbuildable until somebody
+  edits her profile on the brokerage site.
+- **2026-09-21: Melanie Kim's website profile still says Humeniuk.** Nothing in
+  Gable depends on it any more, but her public page and her open-houses page
+  both carry the previous name, and somebody at the brokerage may want to fix
+  that regardless.
 - **One judgment call to confirm.** A silent website now yields the brokerage
   credential when the roster row is complete. Emptying
   `GABLE_DEFAULT_AGENT_CREDENTIAL` restores the old stop, as the 2026-08-19

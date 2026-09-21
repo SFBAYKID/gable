@@ -29,6 +29,12 @@ class RunResult:
     said: list[str] = field(default_factory=list)
     output_url: str = ""
     questions: list[str] = field(default_factory=list)
+    #: The run stopped on a question it has already asked AND escalated, so
+    #: `run_speech.repeat_guard` deliberately said nothing. Without this the
+    #: caller cannot tell that silence from a run that fell over quietly, and
+    #: answers both with the same content-free sentence. See
+    #: `slackapp.resume.resume_with_current_sources`.
+    already_escalated: bool = False
 
     @property
     def needs_a_human(self) -> bool:

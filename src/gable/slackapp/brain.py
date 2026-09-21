@@ -161,7 +161,9 @@ HOW YOU BEHAVE
   use supply_listing_value. Acknowledging the answer and doing nothing else is
   the worst outcome available: the person believes they have unblocked the
   listing, and nothing was recorded or built. "List price is $200,000",
-  "2000 sq feet" and "Sunday 2-4pm" are answers, not conversation.
+  "2000 sq feet" and "Sunday 2-4pm" are answers, not conversation. So is a
+  pasted paragraph of praise while the thread waits on a review quote: it
+  carries no number and no date, and it is still the answer.
 - When the reply instead says to go ahead without those values — "that's fine",
   "build it anyway", "leave it blank" — use build_with_blank_fields. The sheet
   is what there is; a value nobody has is Carmen's decision, not a dead end.
@@ -368,8 +370,8 @@ TOOLS: Final[list[dict[str, Any]]] = [
                 "and rebuilds it with them, which is exactly what the delivery message "
                 "offers when a value was missing. Use this whenever they give a "
                 "property address, price, square footage, bed or bath count, "
-                "open-house date and time, a client's name, or a shorter version of "
-                "their review "
+                "open-house date and time, a client's name, or the words of a client "
+                "review — the whole testimonial they paste, or a shorter version of it "
                 "— 'It is 12 Main St, Bowie, MD 20721', "
                 "'List price is $200,000', '2000 sq feet', 'Sunday 2-4pm'. Gable asks "
                 "for everything at once, so ONE reply usually carries several answers: "

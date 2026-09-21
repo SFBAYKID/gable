@@ -175,11 +175,10 @@ def for_intake(
         "listing_note": _listing_note(intake),
         **review_values(intake.request_type, intake.post_details or intake.extra_notes),
     }
-    # A pull-quote a person sent back after Gable said the review would not be
-    # readable at that length. Every real review on the form runs 400 to 1000
-    # characters against a panel drawn for about 280, so the shorter version
-    # somebody actually chose outranks the pasted one. Only the quote: the
-    # reviewer's name is not theirs to change here.
+    # Everything a person has stated about this property in its own Slack
+    # thread. These override research and, where noted below, the form -- a
+    # value somebody typed in answer to a direct question is the most recent
+    # thing anybody knows, and discarding one means asking for it again.
     stated = store.recall_supplied_facts(connection, intake.address)
     # An open house someone answered in the thread. Every other suppliable
     # value reaches the flyer through `known`, which research fills; this one
@@ -201,9 +200,19 @@ def for_intake(
     named = stated.get("client_name", "").strip()
     if named:
         values["client_name"] = named
-    shorter = stated.get("review_quote", "").strip()
-    if shorter and values.get("client_name", "").strip():
-        values["review_quote"] = shorter
+    # A quote somebody stated in the thread, whether it is a shorter version of
+    # a long pasted one or the only one anybody has. This used to be accepted
+    # only when a client name was ALREADY known, which read as "a quote with
+    # nobody's name under it is not a testimonial" -- true of the flyer, and
+    # fatal here, because `review_quote` is the first field the Client Review
+    # Post design resolves. Gable asked for the quote, Carmen answered it, this
+    # line discarded the answer, and preflight asked the identical question
+    # again; the reviewer's name was never reached, so it was never asked for.
+    # The flyer is still not built without a name: preflight blocks on the
+    # empty `client_name` instead, which is a question Carmen can answer.
+    told_quote = stated.get("review_quote", "").strip()
+    if told_quote:
+        values["review_quote"] = told_quote
     return values
 
 

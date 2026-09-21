@@ -231,3 +231,50 @@ def test_a_run_with_no_flyer_does_not_claim_to_have_left_one_unchanged(
 
     assert "no flyer yet" in said
     assert "left the current flyer unchanged" not in said
+
+
+@pytest.mark.parametrize("photo_count", [1, 2, 3])
+@pytest.mark.parametrize("with_blocker", [False, True])
+@pytest.mark.parametrize("with_values", [False, True])
+def test_every_photo_ask_gable_can_write_is_one_the_guard_recognises(
+    photo_count: int,
+    with_blocker: bool,
+    with_values: bool,
+) -> None:
+    """`record_the_ask` must recognise the sentence it is recording.
+
+    It enumerated two phrasings. The 2026-09-20 row ask is a third, so every
+    New Listing and Open House run that asked for photographs logged "run ...
+    recorded a photo ask that its message does not carry" while carrying one —
+    caught in the playground on 2026-09-21. A guard that cries wolf on the
+    commonest path is worse than no guard, because the real case it exists for
+    is a truncated ask that genuinely lost the request.
+
+    Parameterised over every shape `Needs.message` can produce rather than over
+    the phrasings, so a fourth wording fails here instead of in journald.
+    """
+    outstanding = needs.Needs()
+    outstanding.note_photo("", rejected=False)
+    outstanding.photo_count = photo_count
+    if with_blocker:
+        outstanding.add_blocker(
+            "I checked the Open House design before building. Its address box is "
+            "rotated, so I cannot measure its text capacity exactly. Make that box "
+            "axis-aligned, then tell me to check it again.",
+            "needs_template",
+        )
+    if with_values:
+        outstanding.add_value("price")
+
+    message = outstanding.message()
+    recognised = any(
+        phrasing in message
+        for phrasing in (
+            needs.PHOTO_ONLY_ASK,
+            needs.PHOTO_ASK_BESIDE_A_BLOCKER,
+            needs.PHOTO_ROW_ASK_MARK,
+        )
+    )
+
+    assert outstanding.photo is True
+    assert recognised, message

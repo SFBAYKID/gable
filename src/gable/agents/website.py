@@ -330,12 +330,21 @@ def _unavailable_pause(label: str, row_complete: bool, require_title: bool) -> s
     )
 
 
-def _site_silent_note(label: str, credential: str) -> str:
-    """The delivery sentence for a credential the site could not be asked about.
+def _credential_note(label: str, credential: str, unavailable: bool) -> str:
+    """The delivery sentence for a credential no profile could supply.
+
+    Two different things bring a run here and Carmen can act on one of them, so
+    they are not collapsed into one sentence. A site that did not answer is a
+    transient nothing. A site that answered and has no page for this agent is a
+    real, durable gap somebody may want to close -- Melanie Kim's page still
+    carried her previous name on 2026-09-21 -- and saying which it was is the
+    difference between a note she ignores and one she can act on.
 
     Args:
         label: The agent's name.
         credential: The brokerage-wide credential that was printed.
+        unavailable: True when the site did not answer at all, False when it
+            answered and named nobody.
 
     Returns:
         One sentence for the delivery message.
@@ -343,10 +352,17 @@ def _site_silent_note(label: str, credential: str) -> str:
     Raises:
         Nothing.
     """
+    if unavailable:
+        return (
+            f"The official Corner House Realty website did not answer when I checked "
+            f"{label}'s profile, so the credential on the flyer is the brokerage's "
+            f"{credential} rather than one read from that page."
+        )
     return (
-        f"The official Corner House Realty website did not answer when I checked {label}'s "
-        f"profile, so the credential on the flyer is the brokerage's {credential} rather than "
-        "one read from that page."
+        f"The official Corner House Realty website has no profile I could match to "
+        f"{label}, so the credential on the flyer is the brokerage's {credential} rather "
+        "than one read from that page. Every other contact detail came from Agents "
+        "Contact Information, which is complete for this agent."
     )
 
 
@@ -542,20 +558,24 @@ def validate_contact(
     profile = looked_up.profile
     if profile is None:
         row_complete = name_ready and email_ready and phone_ready and workbook is not None
-        if (
-            looked_up.unavailable
-            and row_complete
-            and workbook is not None
-            and require_title
-            and default_title.strip()
-        ):
-            # The site's silence is not evidence about this agent. Every contact
-            # detail is already proven from the filed row, and the only thing
-            # the profile was wanted for is a credential that Chase settled on
-            # 2026-08-19 as a fact about the whole brokerage. Stopping here
-            # sent Carmen to correct a request and a roster row that were both
-            # right; the flyer goes out with the brokerage credential and says
-            # so, and the provenance records which source answered.
+        if row_complete and workbook is not None and require_title and default_title.strip():
+            # No profile came back, and the only thing it was wanted for is the
+            # credential. The filed row already proves name, email and direct
+            # phone, and Chase settled on 2026-08-19 that every agent on that
+            # roster holds the credential -- so roster membership, not a page on
+            # the website, is what makes the default honest here.
+            #
+            # This covers the site's silence AND the site answering "no such
+            # profile". Only the first did until 2026-09-21, and Melanie Kim's
+            # Open House sat on the second: she changed her name, Carmen updated
+            # the request and Agents Contact Information, and the brokerage site
+            # still lists her under the old one, so the search matched nothing.
+            # The remedy Gable named -- correct the request or Agents Contact
+            # Information -- was already done and could never work, which is the
+            # exact failure `_credential_pause` was written for. The same row on
+            # a design WITHOUT a credential field built fine all along, because
+            # `_phone_cross_check` yields to the workbook when no profile comes
+            # back; the two paths now read that one answer the same way.
             return ContactCheck(
                 name=workbook_name,
                 email=email,
@@ -565,7 +585,7 @@ def validate_contact(
                 email_source=WORKBOOK_SOURCE,
                 phone_source=WORKBOOK_SOURCE,
                 title_source=BROKERAGE_SOURCE,
-                note=_site_silent_note(label, default_title.strip()),
+                note=_credential_note(label, default_title.strip(), looked_up.unavailable),
             )
         if looked_up.unavailable:
             return ContactCheck(problem=_unavailable_pause(label, row_complete, require_title))

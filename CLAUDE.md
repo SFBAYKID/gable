@@ -363,6 +363,23 @@ call on 2026-08-12:
     was withheld. A created image inside a deleted frame now inherits that
     frame's overhang, and a regression is delivered with its measurement.
 
+17. **An agent's roster row can be complete and correct while the official
+    website has no page matching her at all.** Melanie Humeniuk changed her
+    name to Melanie Kim; Carmen updated the request and Agents Contact
+    Information and said so in the thread. Read live 2026-09-21 through the
+    site's own page search: `wp-json/wp/v2/pages?search=Melanie Kim` returns
+    `[]`, and `search=Melanie Humeniuk` returns two pages — her profile and her
+    open-houses twin — both still titled with the previous name. A brokerage
+    website is edited by people on their own schedule, so it lags the roster,
+    and "the site has no profile for this agent" is therefore not evidence
+    about the agent. It stopped every design that prints a credential while the
+    same row built fine on every design that does not, because the phone
+    cross-check yields to the workbook when no profile comes back and the
+    credential path did not. Roster membership, not a live page, is what makes
+    `GABLE_DEFAULT_AGENT_CREDENTIAL` honest — see the reversing row in
+    `DECISIONS.md`. The one thing that must never relax: an agent with no filed
+    roster row is still refused.
+
 Each of these cost a real failure to learn. They are in the decision log with
 their evidence.
 

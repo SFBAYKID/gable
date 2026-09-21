@@ -20,7 +20,20 @@ from gable.config import Settings
 from gable.db import store
 from gable.pipeline.live import build_runner
 from gable.pipeline.questions import PostOnce, ReconcilePost
+from gable.pipeline.run_reporting import RunResult
 from gable.sheets import repository as repo
+
+#: What to say when a run is picked up again and stops on the same question it
+#: has already asked and escalated. It reports the two things the person cannot
+#: otherwise see -- that the current sources WERE re-read, and that the answer
+#: is still not there -- and it does not repeat the question, which is the
+#: whole point of the escalation. `run_speech.STUCK_CLOSING` already told this
+#: thread that Chase has it.
+ALREADY_ESCALATED: str = (
+    "I read this listing's form row and contact record again just now, and I still do not "
+    "have the one thing I asked for above, so it is still paused. I have already flagged "
+    "this one for Chase rather than ask a third time."
+)
 
 
 def resume_with_current_sources(
@@ -107,12 +120,38 @@ def resume_with_current_sources(
         # durable outcome. Never contradict it with the generic unchanged-flyer
         # fallback below.
         return ""
-    return (
-        "I picked this listing back up, but the run did not produce an outcome I "
-        "could report. I left the listing paused."
-        if result.needs_a_human
-        else "I could not finish the rebuild, so I left the current flyer unchanged."
-    )
+    return silent_outcome_words(result)
+
+
+def silent_outcome_words(result: RunResult) -> str:
+    """What to say for a resumed run that finished without saying anything.
+
+    Args:
+        result: What the resumed run did.
+
+    Returns:
+        One sentence for the thread. Never empty: a person who asked for a
+        rerun and is told nothing at all has no way to know it happened.
+
+    Raises:
+        Nothing.
+    """
+    if result.already_escalated:
+        # The run stopped on the question it has already asked twice, so
+        # `run_speech.repeat_guard` deliberately withheld a third copy. Saying
+        # nothing USEFUL here is what made Ian DePinto's 2026-09-21 thread read
+        # as a loop: two replies in a row of "the run did not produce an
+        # outcome I could report", after Carmen had answered in the thread and
+        # then put the value in the sheet. That sentence names nothing, so she
+        # could not tell that her row HAD been re-read and still could not be
+        # used -- which is the only thing she needed to know.
+        return ALREADY_ESCALATED
+    if result.needs_a_human:
+        return (
+            "I picked this listing back up, but the run did not produce an outcome I "
+            "could report. I left the listing paused."
+        )
+    return "I could not finish the rebuild, so I left the current flyer unchanged."
 
 
 def may_rebuild(

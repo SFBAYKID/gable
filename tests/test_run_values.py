@@ -226,8 +226,19 @@ def test_a_shorter_review_someone_sent_back_outranks_the_pasted_one(tmp_path: Pa
     connection.close()
 
 
-def test_a_shorter_review_is_ignored_when_no_reviewer_could_be_read(tmp_path: Path) -> None:
-    """A quote with nobody's name under it is not a testimonial."""
+def test_a_quote_stated_in_the_thread_is_kept_before_any_reviewer_is_known(
+    tmp_path: Path,
+) -> None:
+    """The answer to Gable's own question is not thrown away for lacking a name.
+
+    This used to require a client name to already be known, so on Ian DePinto's
+    2026-09-21 Client Review Post the answer was discarded and the identical
+    question came straight back. `review_quote` is the FIRST field that design
+    resolves, so the reviewer's name was never reached and never asked for:
+    answering correctly could not move the run. A nameless quote still does not
+    reach a flyer -- preflight blocks on the empty client name instead, which
+    is a question Carmen can actually answer.
+    """
     connection = connect(tmp_path / "gable.db")
     apply_migrations(connection)
     intake = _note_intake("Client Review Post", "great agent")
@@ -237,7 +248,8 @@ def test_a_shorter_review_is_ignored_when_no_reviewer_could_be_read(tmp_path: Pa
 
     values = for_intake(connection, intake, {})
 
-    assert "review_quote" not in values
+    assert values["review_quote"] == "Gina was outstanding. She is the BEST!"
+    assert not values.get("client_name", "")
     connection.close()
 
 

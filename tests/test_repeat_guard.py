@@ -16,6 +16,7 @@ from gable.db import store
 from gable.db.schema import apply_migrations, connect
 from gable.pipeline import run_speech
 from gable.pipeline.run_reporting import RunResult
+from gable.slackapp import resume
 from gable.voice import is_clean
 from tests.runner_support import record, submission
 
@@ -106,3 +107,68 @@ def test_a_thread_hears_the_question_once_the_escalation_once_and_then_nothing(
     assert current is not None
     assert current.status == "needs_info"
     assert current.failure_reason == QUESTION
+
+
+def test_the_silent_third_ask_is_reported_as_a_decision_not_a_blank(
+    db: sqlite3.Connection,
+) -> None:
+    """The caller has to tell withheld silence from a run that fell over.
+
+    Ian DePinto's 2026-09-21 thread ended on two identical "I picked this
+    listing back up, but the run did not produce an outcome I could report"
+    replies -- once after Carmen answered in the thread, once after she put the
+    value in the sheet and asked for a rerun. That sentence is what this
+    conflation sounds like to whoever is waiting.
+    """
+    item = submission(rid="rid-silent")
+    record(db, item)
+    run = store.start_run(db, item.response_row_id)
+
+    def say(_text: str, _thread: str | None) -> str:
+        return "1788.0"
+
+    results = []
+    for attempt in range(3):
+        if attempt:
+            store.set_status(db, run.run_id, "pending", "resumed for the test")
+        results.append(
+            run_speech.deliver_question(
+                db,
+                say,
+                run.run_id,
+                item.intake,
+                QUESTION,
+                [],
+                RunResult(run_id=run.run_id, status="pending"),
+                status="needs_info",
+                thread_ts="1788.0",
+            )
+        )
+
+    assert [item.already_escalated for item in results] == [False, False, True]
+
+
+def test_a_rerun_of_an_escalated_listing_says_what_it_checked() -> None:
+    """Named, so a person can tell a re-read that failed from a crash."""
+    escalated = resume.silent_outcome_words(
+        RunResult(run_id="r", status="needs_info", already_escalated=True)
+    )
+
+    assert escalated == resume.ALREADY_ESCALATED
+    assert "read this listing's form row" in escalated
+    assert "still paused" in escalated
+    assert "flagged this one for Chase" in escalated
+    # It must not carry the question a third time; that is what was withheld.
+    assert QUESTION not in escalated
+    assert is_clean(escalated)
+
+
+def test_an_ordinary_silent_pause_still_reports_itself_as_one() -> None:
+    """Only the escalated case changes; the others are untouched."""
+    paused = resume.silent_outcome_words(RunResult(run_id="r", status="needs_info"))
+    finished = resume.silent_outcome_words(RunResult(run_id="r", status="failed"))
+
+    assert "left the listing paused" in paused
+    assert "left the current flyer unchanged" in finished
+    assert is_clean(paused)
+    assert is_clean(finished)

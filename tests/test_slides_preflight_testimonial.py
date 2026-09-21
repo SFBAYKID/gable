@@ -97,3 +97,67 @@ def test_a_testimonial_still_stops_when_the_agent_has_no_filed_headshot() -> Non
     )
 
     assert any(issue.code == "missing_headshot" for issue in report.blockers)
+
+
+def test_both_missing_testimonial_sections_are_named_in_one_blocker() -> None:
+    """Asking for the first hides the second until the first is answered.
+
+    Client Review Post resolves `review_quote` before `client_name`, so while
+    preflight reported only the first missing field, a submission missing both
+    could only ever be asked about the quote. Ian DePinto's 2026-09-21 thread
+    never reached a question about the reviewer at all. The runner already
+    batches every blocker into one message; this check now does the same
+    inside itself.
+    """
+    name, phone = _agent_card()
+    presentation = _page(name, phone, _portrait_well())
+    resolution = fields.resolve(["AGENT NAME", "Phone", "Review goes here...", "OLIVIA WILSON"])
+
+    report = preflight.analyze(
+        presentation,
+        "Client Review Post",
+        "Client Review",
+        resolution,
+        {
+            "agent_name": "Ian DePinto",
+            "agent_phone": "443-499-3839",
+            "headshot": "http://x/p.jpg",
+            "review_quote": "",
+            "client_name": "",
+        },
+    )
+
+    issue = next(item for item in report.blockers if item.code.startswith("missing_value_"))
+    assert "review quote" in issue.say
+    assert "client name" in issue.say
+    assert issue.status == "needs_info"
+    # One blocker, not two: the runner joins blockers into a single message and
+    # two copies of "I checked the Client Review Post design before building"
+    # is what a person reads as a malfunction.
+    assert sum(item.code.startswith("missing_value_") for item in report.blockers) == 1
+
+
+def test_a_testimonial_missing_only_its_reviewer_asks_for_the_reviewer() -> None:
+    """With the quote now kept, the question is the half nobody has."""
+    name, phone = _agent_card()
+    presentation = _page(name, phone, _portrait_well())
+    resolution = fields.resolve(["AGENT NAME", "Phone", "Review goes here...", "OLIVIA WILSON"])
+
+    report = preflight.analyze(
+        presentation,
+        "Client Review Post",
+        "Client Review",
+        resolution,
+        {
+            "agent_name": "Ian DePinto",
+            "agent_phone": "443-499-3839",
+            "headshot": "http://x/p.jpg",
+            "review_quote": "We recently bought a house with Ian and it was very pleasant.",
+            "client_name": "",
+        },
+    )
+
+    issue = next(item for item in report.blockers if item.code.startswith("missing_value_"))
+    assert issue.code == "missing_value_client_name"
+    assert "client name" in issue.say
+    assert "review quote" not in issue.say

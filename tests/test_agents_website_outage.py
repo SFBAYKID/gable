@@ -49,6 +49,13 @@ def test_a_silent_site_prints_the_brokerage_credential_when_the_row_is_complete(
     assert "Realtor" in checked.note
 
 
+def _no_such_profile(_name: str, _email: str) -> ProfileLookup:
+    """The site answered, and it has no page matching this agent."""
+    return ProfileLookup(
+        problem="the official Corner House Realty website has no exact profile for this agent"
+    )
+
+
 def test_a_silent_site_names_a_true_remedy_when_it_must_still_stop() -> None:
     """A pause the site's silence still forces names a remedy that can work.
 
@@ -73,15 +80,75 @@ def test_a_silent_site_names_a_true_remedy_when_it_must_still_stop() -> None:
     assert "Correct the request or Agents Contact Information" not in checked.problem
 
 
-def test_a_site_that_answers_no_such_agent_still_stops_a_credential() -> None:
-    """Silence yields to the default; an answer that names nobody does not."""
+def test_a_site_with_no_page_for_a_filed_agent_still_builds_the_credential() -> None:
+    """Melanie Kim, 2026-09-21. She changed her name; the site had not.
+
+    Carmen corrected the request and Agents Contact Information, which is
+    exactly what the old pause told her to do, and then got the same pause
+    again -- the brokerage site still listed the agent under her previous name,
+    so the page search matched nothing. The filed row proves name, email and
+    direct phone, so the only thing the profile was wanted for is a credential
+    every agent on that roster holds.
+    """
     checked = validate_contact(
-        "Brittney Bushee",
-        "brittney@cornerhouserealty.com",
-        Contact("brittney@cornerhouserealty.com", "Brittney", "Bushee", "443.562.8226"),
-        lambda _name, _email: ProfileLookup(
-            problem="the official Corner House Realty website has no exact profile for this agent"
-        ),
+        "Melanie Kim",
+        "melanie@cornerhouserealty.com",
+        Contact("melanie@cornerhouserealty.com", "Melanie", "Kim", "443.562.8226"),
+        _no_such_profile,
+        require_title=True,
+        default_title="Realtor",
+    )
+
+    assert checked.ready is True
+    assert checked.title == "Realtor"
+    assert checked.title_source == BROKERAGE_SOURCE
+    assert checked.name_source == WORKBOOK_SOURCE
+    assert checked.phone_source == WORKBOOK_SOURCE
+    # The note says which of the two cases this was, because one of them is a
+    # durable gap somebody may want to close and the other is a transient
+    # nothing. "did not answer" belongs to the silent site, not to this one.
+    assert "no profile I could match" in checked.note
+    assert "did not answer" not in checked.note
+    assert "Realtor" in checked.note
+
+
+def test_a_site_with_no_page_still_stops_an_agent_the_roster_does_not_carry() -> None:
+    """The relief is roster membership, never the name on the request."""
+    checked = validate_contact(
+        "Melanie Kim",
+        "melanie@cornerhouserealty.com",
+        None,
+        _no_such_profile,
+        require_title=True,
+        default_title="Realtor",
+    )
+
+    assert checked.ready is False
+    assert "no exact profile" in checked.problem
+
+
+def test_a_site_with_no_page_still_stops_a_credential_without_a_default() -> None:
+    """Emptying the variable restores the old refusal, as documented."""
+    checked = validate_contact(
+        "Melanie Kim",
+        "melanie@cornerhouserealty.com",
+        Contact("melanie@cornerhouserealty.com", "Melanie", "Kim", "443.562.8226"),
+        _no_such_profile,
+        require_title=True,
+        default_title="",
+    )
+
+    assert checked.ready is False
+    assert "no exact profile" in checked.problem
+
+
+def test_a_site_with_no_page_still_stops_a_row_missing_a_direct_line() -> None:
+    """Then the profile was wanted for a contact detail, not a credential."""
+    checked = validate_contact(
+        "Melanie Kim",
+        "melanie@cornerhouserealty.com",
+        Contact("melanie@cornerhouserealty.com", "Melanie", "Kim", ""),
+        _no_such_profile,
         require_title=True,
         default_title="Realtor",
     )

@@ -239,10 +239,14 @@ every listing when a web request fails is worse than the defect it hunts.
 When source text requires an agent title or credential the same exact profile
 supplies it, and a profile that states none falls back to the configured
 brokerage credential; Gable never infers REALTOR merely from the person's
-profession. The read is tried once more after a transient failure. A site that
-does not answer at all, on a row the roster already completes, yields the same
-brokerage credential with `brokerage_default` provenance and one sentence in
-the delivery message; a site that answers "no such profile" still pauses.
+profession. The read is tried once more after a transient failure. On a row the
+roster already completes, a lookup that returns no profile at all yields the
+same brokerage credential with `brokerage_default` provenance and one sentence
+in the delivery message naming which case it was — a site that did not answer,
+or a site that answered and has no page matching this agent. Neither is
+evidence about a credential every roster agent holds; a brokerage site lags a
+name change, and Melanie Kim's did. An agent the roster does not carry, and a
+roster row that does not itself prove the direct phone, still pause.
 It does not write the website result into the workbook or SQLite roster, and a
 conflict between submitted, workbook, and official-site values pauses rather
 than selecting the value that looks most plausible.
@@ -666,7 +670,7 @@ file was at the 800-line ceiling for the third time.
 | Google client failure | Record or report the affected operation; do not claim success |
 | Firecrawl down | Leave public facts unresolved and pause rather than invent them |
 | No photo found | Status `needs_photo`, ask Carmen, do not block the batch |
-| Unknown or incomplete agent | Check one exact official-domain profile for workbook blanks; pause on ambiguous or conflicting evidence and never overwrite a source. A site that does not answer is retried once, then yields to a complete roster row and the brokerage credential; it pauses only where the roster leaves a blank |
+| Unknown or incomplete agent | Check one exact official-domain profile for workbook blanks; pause on ambiguous or conflicting evidence and never overwrite a source. A site that does not answer is retried once; a lookup that then returns no profile — silent or answering with no matching page — yields to a complete roster row and the brokerage credential, and pauses only where the roster leaves a blank |
 | Local photo publish fails | Keep that listing paused and report the failed stage |
 | Slack disconnect | Bolt reconnects; log it, never exit |
 | Slides mutation is rejected or incomplete | Stop that listing and translate the failure into plain language |
