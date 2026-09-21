@@ -75,6 +75,15 @@ The reviewer name in that rehearsal was recorded directly rather than typed
 into Slack, because a scripted post carries a `bot_id` and `routing.py` drops
 it. So the *ask* was rehearsed live and the *reply* was not.
 
+**A standing guard, and three more instances it caught.** Chase asked that
+this class of mistake stop happening, so the rule is now a test over
+`store.SUPPLIABLE_FIELDS` rather than a fix per field: record one answer,
+alone, and it must reach the value map. It failed immediately on `beds`,
+`baths` and `square_feet` — all three are named in the batched ask, all three
+were stored by `record_stated`, and nothing read them back. Answering "3 beds,
+2 baths, $600,000" delivered the price and asked again for the beds and baths.
+That was live on the commonest ask there is. Fixed in the same commit.
+
 **Found while rehearsing:** every run that asks for a row of property
 photographs was logging `recorded a photo ask that its message does not carry`
 while carrying one. The guard listed two phrasings and the 2026-09-20 row ask

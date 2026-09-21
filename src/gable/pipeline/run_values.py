@@ -213,6 +213,28 @@ def for_intake(
     told_quote = stated.get("review_quote", "").strip()
     if told_quote:
         values["review_quote"] = told_quote
+    # Beds, baths and square footage a person stated in the thread. These are
+    # the three that reach a flyer ONLY through `known`, which research fills,
+    # and `written`, which reads the agent's own prose -- and neither of those
+    # is the person who just answered the question. They are in
+    # `store.SUPPLIABLE_FIELDS`, the batched ask names them together with the
+    # price ("I also need the price, beds and baths"), and `record_stated`
+    # stored every one of them; nothing read them back, so answering two of the
+    # three did nothing and the same question returned. Found by the guard in
+    # `test_a_stated_answer_reaches_the_flyer`, not by anybody reading a thread.
+    #
+    # A person outranks research here for the same reason they do on price: a
+    # scraped listing can be stale or the wrong property, and somebody typing
+    # the answer to a direct question is the most recent thing anybody knows.
+    for counted in ("beds", "baths"):
+        told = stated.get(counted, "").strip()
+        if told:
+            values[counted] = told
+    # Normalised on the way in like every other measurement, so "2430 sq ft"
+    # typed in a reply renders the way the design writes its own sample.
+    told_size = stated.get("square_feet", "").strip()
+    if told_size:
+        values["square_feet"] = _measure_only(told_size)
     return values
 
 
