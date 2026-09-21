@@ -306,12 +306,34 @@ message in her thread is this session's, not Gable's design.
 **Not a defect, but parked:** a Sold listing from 2026-08-31 evening is still
 waiting for its property photo in its own thread.
 
+## Declined — a background monitor, 2026-09-21
+
+Proposed after finding that **29 of the 59 runs since 2026-09-01 are still
+paused**, some since 2026-09-08, on a question nobody ever answered. Gable asks
+once by design and then waits in silence forever, so a listing Carmen does not
+answer the same day is effectively abandoned and she builds it by hand. Roughly
+14 of the 29 are waiting on a headshot or a design that may already be filed in
+Drive; nothing ever looks again.
+
+Three jobs were proposed: a deterministic recheck sweep that resumes a paused
+run when its source changes, a daily digest to Carmen, and a health alert to
+Chase. **Chase declined all three** — the alert because he can already see a
+flyer was not built, and the rest because the requirement is narrower than the
+proposal: *"We just need her flyers working when she gives you the
+information."* That is the bar. Re-read this section before proposing a
+scheduler again; the numbers above are real, but they were not the ask.
+
+The backlog was left as it is. Re-running those rows is one command each, if
+anybody ever wants them.
+
 ## What I need from Chase
 
-- **2026-09-21: deploy, then a "rerun" in each of the two #calvo threads.**
-  Pushed and rehearsed; not deployed, because that restarts the listener
-  Carmen is using. After deploying, both threads need a reply in their own
-  thread to pick the fix up. I did not post to #calvo.
+- **2026-09-21: nothing outstanding.** Deployed, and Chase reran both #calvo
+  threads himself; the classifier refuses a remote `run_row --resume` from
+  here. Ian's now asks who wrote the review, Melanie's asks for the whole
+  address, the photographs and the price. Both are waiting on Carmen for facts
+  nobody has, which is correct — when she answers in the thread, the flyer
+  builds itself.
 - **2026-09-21: one reversal to confirm, not blocking.** A website that answers
   and has no page for an agent now yields the brokerage credential when the
   roster row is complete — the same relief a silent website already got. It
