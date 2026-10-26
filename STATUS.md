@@ -1,6 +1,27 @@
 # Gable — status, and what's needed from Chase
 
-Last updated 2026-09-21 by the building agent.
+Last updated 2026-10-26 by the building agent.
+
+## 2026-10-26 — six days of submissions unread after a form edit; fixed
+
+Carmen reported that Gable had gone quiet. The service was running; every
+poll since at least 2026-10-20 19:05 UTC logged `the responses tab has no
+header row naming the email, request type and property address`. The form's
+request-type question had gained a leading sentence ("Please submit 1 form for
+each listing/graphic, do not combine."), and that column was matched exactly.
+The rule is now `contains`; see the decision row and CLAUDE.md §4.3 item 18.
+
+Before deploying, `tools/preview_poll.py` ran on the droplet against the
+patched code (read-only): 255 rows read, six pending, all from 2026-10-21 to
+2026-10-26 — rows 250–255, where 253 and 254 are one double-submitted Squire
+Tuck Way listing sharing one identity, so five runs — and one Instagram Story to
+be skipped. Nothing older came back.
+
+**Open, for Chase:** this failure is silent in Slack by construction — the
+poller logs and returns, and nobody reads journald. Recommendation: post one
+message to Chase (not #calvo) when the sheet cannot be read for, say, three
+consecutive business-hours passes, and not again until it recovers. Not built,
+because it adds something Gable says.
 
 ## 2026-09-21 — two #calvo threads that could not be answered, and why
 

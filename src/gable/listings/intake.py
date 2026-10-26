@@ -111,7 +111,12 @@ HEADER_RULES: Final[tuple[tuple[str, str, str], ...]] = (
     ("agent_first_name", "prefix", "first name"),
     ("agent_last_name", "prefix", "second name"),
     ("agent_last_name", "prefix", "last name"),
-    ("request_type", "exact", "select your request type"),
+    # Contains, not exact: by 2026-10-20 the form prefixed this question with
+    # "Please submit 1 form for each listing/graphic, do not combine." and
+    # exact matching refused the whole tab for six days. No other question on
+    # either tab carries the phrase, so the looser match cannot claim a wrong
+    # column — `test_intake_headers` pins that on the verbatim live header.
+    ("request_type", "contains", "select your request type"),
     # Prefix rather than exact only because the form has re-worded questions
     # before. Both live tabs carry it verbatim as "Select social media content
     # type" — confirmed on `Form Responses 1` and `Testing_1` on 2026-08-17.

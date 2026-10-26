@@ -299,3 +299,55 @@ def test_a_name_prefix_cannot_swallow_the_address_or_request_columns() -> None:
     # "Please provide the property address..." must never win `address`; the
     # exact "Property Address" column is the one that carries a usable value.
     assert columns["address"] == 11
+
+
+#: The live `Form Responses 1` header, read through the service account on
+#: 2026-10-26. The request-type question gained a leading instruction, and an
+#: exact match on it refused the whole tab from 2026-10-20 until it was found.
+HEADER_2026_10_26: list[str] = [
+    "Timestamp",
+    "Email Address",
+    "First Name of Agent",
+    "Last Name of Agent",
+    "Service Guidelines Acknowledgment",
+    "Please submit 1 form for each listing/graphic, do not combine. \nSelect your request type",
+    "Please provide the property address for the postcard",
+    "Select postcard category",
+    "Upload photos",
+    "Upload your video assets (For Video Editing Requests Only)",
+    "Optional: Include any details/instruction for your video",
+    "Select social media content type",
+    "Property Address",
+    (
+        "Upload high-resolution property photos (up to 5 images)\n"
+        "Please note: Bright screen grabs are acceptable for Buyer's Agent "
+        "requests, otherwise, please use high-res images from HomeTrack"
+    ),
+    "Include details for post - required for Client Review post",
+    "Open house date/time (if applicable)",
+    "New price (if price improvement)",
+    "Closing price (for sold posts only):",
+    "Additional Notes for Social Media Team",
+    "For Sold or Under Contract posts, were you on the buyer or seller side?",
+    "Column 20",
+    "Notes",
+]
+
+
+def test_a_reworded_request_type_question_still_reads() -> None:
+    """A sentence added in front of the question must not refuse the tab."""
+    columns = columns_from_header(HEADER_2026_10_26)
+
+    assert maps_a_response_row(columns)
+    assert columns["request_type"] == 5
+    assert columns["address"] == 12
+    assert columns["agent_email"] == 1
+    assert columns["content_type"] == 11
+    assert repo.find_header([HEADER_2026_10_26])[0] == 0
+
+
+def test_only_the_request_type_question_contains_its_phrase() -> None:
+    """The loosened rule can match exactly one column on every known header."""
+    for header in (HEADER_2026_10_26, PRODUCTION_HEADER, LIVE_HEADER, TESTING_HEADER):
+        hits = [cell for cell in header if "select your request type" in cell.lower()]
+        assert len(hits) == 1

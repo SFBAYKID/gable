@@ -380,6 +380,19 @@ call on 2026-08-12:
     `DECISIONS.md`. The one thing that must never relax: an agent with no filed
     roster row is still refused.
 
+18. **A reworded form question stops polling outright, by design, and nobody
+    is told.** Read through the service account on 2026-10-26: `Form Responses
+    1` now asks "Please submit 1 form for each listing/graphic, do not combine.
+    \nSelect your request type", and the agent's last name and a "Service
+    Guidelines Acknowledgment" moved beside the first name, with an untitled
+    `Column 20` before `Notes`. The exact request-type rule matched nothing,
+    `find_header` refused the tab every pass from at least 2026-10-20 19:05 UTC,
+    and five real listings sat unread for six days until Carmen noticed the
+    silence. The refusal was correct — guessing columns is worse — but it only
+    reached journald. The rule is now `contains`, pinned against this verbatim
+    header, and `tools/preview_poll.py` run against the patched code showed
+    exactly the six post-outage rows pending and nothing older.
+
 Each of these cost a real failure to learn. They are in the decision log with
 their evidence.
 
