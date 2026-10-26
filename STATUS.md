@@ -13,9 +13,16 @@ The rule is now `contains`; see the decision row and CLAUDE.md §4.3 item 18.
 
 Before deploying, `tools/preview_poll.py` ran on the droplet against the
 patched code (read-only): 255 rows read, six pending, all from 2026-10-21 to
-2026-10-26 — rows 250–255, where 253 and 254 are one double-submitted Squire
-Tuck Way listing sharing one identity, so five runs — and one Instagram Story to
-be skipped. Nothing older came back.
+2026-10-26 — rows 250–255 — and one Instagram Story to be skipped. Nothing
+older came back. Rows 253 and 254 are one Squire Tuck Way listing submitted
+twice in the same second. The preview printed the same id beside both, which I
+misread as the poller's identity; it is not, and Gable opened two identical
+threads for it. Same-second duplicates are not collapsed today (rows 245–249 on
+2026-10-20 are five more) — whether they should be is Chase's call.
+
+Row 255 (Foxhall Drive) said "Reel", which the video set did not know, so it
+was started as a flyer. Chase: skip Reels; `reel` was added and deployed. The
+run already opened stays paused; Carmen can ignore it.
 
 **Open, for Chase:** this failure is silent in Slack by construction — the
 poller logs and returns, and nobody reads journald. Recommendation: post one
