@@ -224,6 +224,9 @@ ANIMATED_CONTENT_TYPES: Final[frozenset[str]] = frozenset(
     {
         "instagram reel",
         "instagram story",
+        # A bare "Reel" arrived on 2026-10-26 (row 255). Chase: "we skip the
+        # reel" — the team posts Reels on Instagram by hand.
+        "reel",
     }
 )
 
@@ -241,9 +244,9 @@ def wants_a_graphic(content_type: str) -> bool:
         False for a Reel or a Story. True for everything else, **including an
         empty or unrecognised value**. The asymmetry is deliberate: an extra
         design Carmen ignores costs her a glance, while a silently skipped one
-        is a request that disappears without anybody being told. Only the two
-        types Carmen named are skipped, and a new form option therefore has to
-        be added here rather than being guessed at.
+        is a request that disappears without anybody being told. Only the types
+        Carmen and Chase named are skipped, and a new form option therefore has
+        to be added here rather than being guessed at.
 
     Raises:
         Nothing.

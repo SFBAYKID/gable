@@ -132,7 +132,7 @@ def test_both_live_wordings_for_a_static_post_build(value: str) -> None:
     assert is_known_content_type(value) is True
 
 
-@pytest.mark.parametrize("value", ["Instagram Reel", "Instagram Story"])
+@pytest.mark.parametrize("value", ["Instagram Reel", "Instagram Story", "Reel"])
 def test_video_and_animation_are_skipped(value: str) -> None:
     """Carmen: "only the static posts are graphics"."""
     assert wants_a_graphic(value) is False
