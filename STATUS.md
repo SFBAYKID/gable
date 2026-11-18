@@ -21,10 +21,13 @@ need to be built. Done on the droplet (143.110.146.87), each step verified:
 - A final copy of the run database (integrity-checked) is kept locally,
   git-ignored, at `var/decommission-2026-11-18/gable-final-2026-11-18.db`.
 
-**For Chase, outside the droplet (needs your logins):** revoke the OpenAI key,
-the Firecrawl key (and cancel any paid Firecrawl plan), uninstall the Gable
-Slack app, and disable the Google service-account key. Gable's flyers stay in
-the shared drive until someone deletes them.
+**Outside the droplet, done the same day** by a browser agent on Chase's
+instruction, each confirmed after a reload: Firecrawl key `gabel` and OpenAI key
+`gable` revoked; the Gable Slack app's tokens revoked (app kept, no longer
+installed); the `gable-agent` service account disabled (key not deleted);
+billing disabled on Google Cloud project `gable-505204`. Nothing shared was
+changed: Firecrawl's $19/month Hobby plan, OpenAI auto-reload and the droplet
+serve other projects. Gable's flyers stay in the shared drive.
 
 **To restart:** re-provision a checkout and `.env` (every secret was deleted),
 reinstall `deploy/gable.service` and the nginx photo site, and seed a fresh
