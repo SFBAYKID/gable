@@ -1,5 +1,11 @@
 # Gable
 
+> **Decommissioned 2026-11-18.** The client's customer ended the engagement and
+> Gable is shut down. The service, its code checkout, database, photos, nginx
+> site and system user were removed from the droplet; the droplet itself stays
+> because it hosts unrelated services. The code here is kept so Gable can be
+> restarted. See `STATUS.md` (2026-11-18) before doing anything operational.
+
 Gable turns one Google Form submission plus the human-supplied property
 photographs into an editable Google Slides flyer. It works in Slack with Carmen and Chase,
 never publishes outside the configured Gable channel, and never calls a flyer

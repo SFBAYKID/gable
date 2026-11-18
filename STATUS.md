@@ -1,6 +1,35 @@
 # Gable — status, and what's needed from Chase
 
-Last updated 2026-10-26 by the building agent.
+Last updated 2026-11-18 by the building agent.
+
+## 2026-11-18 — decommissioned; Gable is off
+
+Chase: the client's customer stopped working with them and no more listings
+need to be built. Done on the droplet (143.110.146.87), each step verified:
+
+- `gable.service` stopped, disabled, and its unit file removed. Nothing polls
+  the Sheet or calls Slack, OpenAI, Firecrawl or Google any more.
+- Deleted `/opt/gable` (code, venv, `.env` with every Gable secret, `var/`
+  databases), `/var/www/gable-photos`, the `gable-photos` nginx site, and the
+  `gable` system user. About 400 MB freed.
+- **Not deleted, on purpose:** the droplet itself. It also runs
+  `connect-splicework` (nginx + certbot), `calvo-keyword-sync` (a TCC
+  workbook→Airtable sync, unrelated to Gable despite the name) and the `tcc-*`,
+  `geo-*` and `frame-house-*` timers. After the removal nginx tested clean and
+  connect.splicework.ai still returned 200. Old Gable lines in the shared
+  journald store were left to rotate out.
+- A final copy of the run database (integrity-checked) is kept locally,
+  git-ignored, at `var/decommission-2026-11-18/gable-final-2026-11-18.db`.
+
+**For Chase, outside the droplet (needs your logins):** revoke the OpenAI key,
+the Firecrawl key (and cancel any paid Firecrawl plan), uninstall the Gable
+Slack app, and disable the Google service-account key. Gable's flyers stay in
+the shared drive until someone deletes them.
+
+**To restart:** re-provision a checkout and `.env` (every secret was deleted),
+reinstall `deploy/gable.service` and the nginx photo site, and seed a fresh
+database with `tools/adopt_backfill.py` so historical rows are not reopened.
+The Calvo rename below is moot while Gable is off.
 
 ## 2026-10-26 — six days of submissions unread after a form edit; fixed
 

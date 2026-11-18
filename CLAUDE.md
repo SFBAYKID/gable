@@ -1,5 +1,11 @@
 # CLAUDE.md — Gable
 
+> **Decommissioned 2026-11-18.** The client's customer ended the engagement and
+> Gable is shut down. The service, its code checkout, database, photos, nginx
+> site and system user were removed from the droplet; the droplet itself stays
+> because it hosts unrelated services. The code here is kept so Gable can be
+> restarted. See `STATUS.md` (2026-11-18) before doing anything operational.
+
 Operating instructions for the coding agent building **Gable**, a Slack-native
 agent that turns real-estate listing form submissions into finished Google Slides
 posts.
